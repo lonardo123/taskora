@@ -1,20 +1,8 @@
 {
-  "name": "telegram-cpa-bot",
-  "version": "1.0.0",
-  "main": "bot.js",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
-    "telegraf": "^4.14.0",
-    "express": "^4.18.2",
-    "pg": "^8.11.3",
-    "dotenv": "^16.0.3",
-    "@vitalets/google-translate-api": "^8.0.0",
-    "cors": "^2.8.5",
-    "bcrypt": "^5.1.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
   },
-  "engines": {
-    "node": "18.x"
-  }
+  "devDependencies": { "wrangler": "^4.87.0" }
 }
