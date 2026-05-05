@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>فيديوهاتي - TasksRewardBot</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f7fa; direction: rtl; text-align: right; }
+    .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }
+    button, input, select { padding: 10px; margin: 5px 0; box-sizing: border-box; }
+    input[type="number"] { text-align: center; }
+    .hidden { display: none; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background: #f0f0f0; }
+    label { font-weight: bold; display: block; margin-top: 10px; }
+    .section { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fafafa; margin-top: 15px; }
+    #messageBox { margin: 15px 0; padding: 10px; border-radius: 5px; display: none; }
+    #messageBox.error { background: #fdecea; color: #d93025; border: 1px solid #f5c2c7; }
+    #messageBox.success { background: #e6f4ea; color: #188038; border: 1px solid #a8dab5; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🎬 فيديوهاتي</h2>
+
+    <div id="messageBox"></div>
+
+    <button id="addBtn">➕ إضافة فيديو جديد</button>
+    <button id="listBtn">📋 قائمة فيديوهاتي</button>
+
+    <!-- نموذج الإضافة -->
+    <div id="addForm" class="hidden">
+      <label>عنوان الفيديو:</label>
+      <input type="text" id="title" placeholder="اسم الفيديو" style="width:100%">
+
+      <label>رابط الفيديو (YouTube):</label>
+      <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=XXXX" style="width:100%">
+
+      <label>مدة الفيديو بالثواني:</label>
+      <input type="number" id="duration" min="50" placeholder="المدة بالثواني (50+)" style="width:100%">
+
+      <label>طريقة المشاهدة:</label>
+      <select id="viewing_method" style="width:100%">
+        <option value="keyword">الكلمات المفتاحية</option>
+      </select>
+
+      <!-- الكلمات المفتاحية -->
+      <div class="section">
+        <label>الكلمات المفتاحية (حتى 5):</label>
+        <div id="keywordsContainer">
+          <input type="text" class="keyword" placeholder="كلمة مفتاحية 1" style="width:80%">
+        </div>
+        <button type="button" id="addKeywordBtn">➕ إضافة كلمة مفتاحية</button>
+      </div> 
+      
+      <div class="section">
+        <label>إعجاب الفيديو:</label>
+        <select id="like">
+          <option value="no" selected>لا</option>
+        </select>
+
+        <label>الاشتراك في القناة:</label>
+        <select id="subscribe">
+          <option value="no" selected>لا</option>
+        </select>
+
+        <label>إضافة تعليق:</label>
+        <select id="comment">
+          <option value="no" selected>لا</option>
+        </select>
+
+        <label>إعجاب على التعليقات:</label>
+        <select id="comment_like">
+          <option value="no" selected>لا</option>
+        </select>
+      </div>
+
+      <!-- سرعة الحملة -->
+      <div class="section">
+        <label>سرعة الحملة</label>
+        <small>اختياري - يتيح لك هذا الحقل تعيين سرعة الحملة بالدقائق والساعات والأيام.</small>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:5px;">
+          <input type="text" id="campaign_speed_status" value="غير نشط" readonly style="flex:1;text-align:center;background:#eee;">
+          <div style="display:flex;align-items:center;gap:5px;">
+            <input type="number" id="campaign_speed_value" value="0" readonly style="width:60px;text-align:center;background:#eee;">
+            <span>المشاهدات</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- تصفية الحركة -->
+      <div class="section">
+        <label>تصفية الحركة المرورية</label>
+        <small>اختياري - استخدم هذه الميزة لتصفية الحركة المرورية الواردة.</small>
+        <select id="filtering">
+          <option value="no" selected>لا</option>
+        </select>
+      </div>
+
+      <!-- إدارة الميزانية -->
+      <div class="section">
+        <label>إدارة الميزانية</label>
+
+        <div style="margin-top:5px;">
+          <strong>حدود الميزانية اليومية</strong>
+          <small>اختياري - عند الوصول إلى الحد اليومي، تتوقف الحملة وتستأنف في اليوم التالي.</small>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:5px;">
+            <input type="number" id="daily_budget" value="0" readonly style="width:80px;text-align:center;background:#eee;">
+            <span>العملات</span>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <strong>حدود الميزانية الإجمالية</strong>
+          <small>اختياري - عند الوصول إلى الميزانية الإجمالية، سيتم إيقاف الحملة.</small>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:5px;">
+            <input type="number" id="total_budget" value="0" readonly style="width:80px;text-align:center;background:#eee;">
+            <span>العملات</span>
+          </div>
+        </div>
+      </div>
+
+      <button id="submitBtn">💾 إضافة الفيديو</button>
+      <button id="cancelBtn">❌ إلغاء</button>
+    </div>
+
+    <!-- جدول الفيديوهات -->
+    <div id="videosSection" class="hidden">
+      <table>
+        <thead>
+          <tr>
+            <th>العنوان</th>
+            <th>المدة (ث)</th>
+            <th>المشاهدات</th>
+            <th>طريقة المشاهدة</th>
+            <th>الكلمات المفتاحية</th>
+            <th>إعجاب</th>
+            <th>اشتراك</th>
+            <th>تعليق</th>
+            <th>إعجاب التعليقات</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody id="videosTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const userId = new URLSearchParams(window.location.search).get('user_id');
+    const addBtn = document.getElementById('addBtn');
+    const listBtn = document.getElementById('listBtn');
+    const addForm = document.getElementById('addForm');
+    const messageBox = document.getElementById('messageBox');
+    const videosSection = document.getElementById('videosSection');
+    const videosTableBody = document.getElementById('videosTableBody');
+    const keywordsContainer = document.getElementById('keywordsContainer');
+    const addKeywordBtn = document.getElementById('addKeywordBtn');
+    let currentVideos = [];
+
+    function showMessage(text, type) {
+      messageBox.textContent = text;
+      messageBox.className = '';
+      messageBox.style.display = 'block';
+      if (type === 'error') messageBox.classList.add('error');
+      else if (type === 'success') messageBox.classList.add('success');
+    }
+
+    // زر إضافة كلمة مفتاحية
+    addKeywordBtn.addEventListener('click', () => {
+      const count = keywordsContainer.querySelectorAll('input.keyword').length;
+      if (count >= 5) {
+        showMessage('يمكنك إضافة 5 كلمات مفتاحية فقط', 'error');
+        return;
+      }
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'keyword';
+      input.placeholder = `كلمة مفتاحية ${count + 1}`;
+      input.style.width = "80%";
+      keywordsContainer.appendChild(input);
+    });
+
+    // عرض النموذج
+    addBtn.addEventListener('click', () => {
+      addForm.classList.remove('hidden');
+      videosSection.classList.add('hidden');
+    });
+
+    document.getElementById('cancelBtn').addEventListener('click', () => addForm.classList.add('hidden'));
+
+    listBtn.addEventListener('click', () => {
+      videosSection.classList.remove('hidden');
+      addForm.classList.add('hidden');
+      loadVideos();
+    });
+
+    async function loadVideos() {
+      const res = await fetch(`/api/my-videos?user_id=${userId}`);
+      let videos = await res.json();
+      if (!Array.isArray(videos)) videos = [];
+      currentVideos = videos;
+      if (videos.length === 0) {
+        videosTableBody.innerHTML = `<tr><td colspan="10">لا توجد فيديوهات حتى الآن</td></tr>`;
+        return;
+      }
+      videosTableBody.innerHTML = videos.map(v => `
+        <tr>
+          <td>${v.title}</td>
+          <td>${v.duration_seconds}</td>
+          <td>${v.views_count}</td>
+          <td>${v.viewing_method || 'keyword'}</td>
+          <td>${Array.isArray(v.keywords) ? v.keywords.join(', ') : ''}</td>
+          <td>${v.like || 'no'}</td>
+          <td>${v.subscribe || 'no'}</td>
+          <td>${v.comment || 'no'}</td>
+          <td>${v.comment_like || 'no'}</td>
+          <td><button onclick="deleteVideo(${v.id})">🗑️ حذف</button></td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', async () => {
+      const title = document.getElementById('title').value;
+      const url = document.getElementById('url').value;
+      const duration = document.getElementById('duration').value;
+      const viewing_method = document.getElementById('viewing_method').value;
+      const like = document.getElementById('like').value;
+      const subscribe = document.getElementById('subscribe').value;
+      const comment = document.getElementById('comment').value;
+      const comment_like = document.getElementById('comment_like').value;
+      const filtering = document.getElementById('filtering').value;
+      const daily_budget = document.getElementById('daily_budget').value;
+      const total_budget = document.getElementById('total_budget').value;
+      const keywordInputs = document.querySelectorAll('.keyword');
+      const keywords = Array.from(keywordInputs).map(i => i.value.trim()).filter(v => v.length > 0);
+
+      if (!title || !url || !duration) return showMessage('املأ جميع الحقول المطلوبة', 'error');
+      if (duration < 50) return showMessage('المدة يجب ألا تقل عن 50 ثانية', 'error');
+
+      const res = await fetch('/api/add-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId, title, video_url: url, duration_seconds: duration,
+          viewing_method, like, subscribe, comment, comment_like, keywords,
+          filtering, daily_budget, total_budget
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        showMessage('✅ تمت إضافة الفيديو بنجاح', 'success');
+        addForm.classList.add('hidden');
+        loadVideos();
+      } else {
+        showMessage('❌ خطأ: ' + (data.error || 'غير معروف'), 'error');
+      }
+    });
+
+    window.deleteVideo = async (videoId) => {
+      const res = await fetch('/api/delete-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, video_id: videoId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadVideos();
+        showMessage('✅ تم حذف الفيديو', 'success');
+      } else showMessage('❌ فشل الحذف', 'error');
+    };
+  </script>
+</body>
+</html>

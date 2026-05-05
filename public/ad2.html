@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>شاهد إعلان واربح</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      text-align: center;
+      background: #f5f7fa;
+      padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 650px;
+      margin: 0 auto;
+      background: white;
+      padding: 25px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    h1 {
+      color: #e53935;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 14px 28px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      background: #1976d2;
+      color: white;
+      cursor: pointer;
+      margin: 12px 5px;
+      min-width: 220px;
+      transition: background 0.3s;
+    }
+    button:hover:not(:disabled) {
+      background: #1565c0;
+    }
+    button:disabled {
+      background: #bdbdbd;
+      cursor: not-allowed;
+    }
+    #player {
+      width: 100%;
+      max-width: 640px;
+      height: 360px;
+      margin: 20px auto;
+      display: none;
+    }
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+      color: #333;
+      min-height: 26px;
+      line-height: 1.5;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎬 شاهد الفيديوهات واربح</h1>
+    <p>اضغط الزر لبدء مشاهدة الفيديوهات المتاحة.</p>
+
+    <button id="startBtn">▶️ عرض الفيديوهات</button>
+    <div id="player"></div>
+    <div id="status"></div>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <script>
+    let videos = [];
+    let currentVideoIndex = 0;
+    let player = null;
+    let watchStartTime = null;
+    let skipAdTimer = null;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get("user_id");
+    const statusEl = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const playerDiv = document.getElementById("player");
+
+    if (!userId) {
+      statusEl.textContent = '❌ خطأ: لم يتم العثور على معرف المستخدم';
+      startBtn.disabled = true;
+    }
+
+    // استخراج معرف الفيديو (بدون دعم Shorts)
+    function extractYouTubeVideoId(url) {
+      try {
+        let decoded = decodeURIComponent(url);
+        if (decoded.includes('/shorts/')) return null; // حظر Shorts
+        const match = decoded.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+        if (match) return match[1];
+        const shortMatch = decoded.match(/youtu\.be\/([a-zA-Z0-9_-]+)/);
+        if (shortMatch) return shortMatch[1];
+        const ytUrlMatch = decoded.match(/(https?:\/\/(?:www\.)?youtube\.com\/watch\?[^"'\s]*)/);
+        if (ytUrlMatch) {
+          const ytUrl = ytUrlMatch[1];
+          const vMatch = ytUrl.match(/[?&]v=([a-zA-Z0-9_-]+)/);
+          if (vMatch) return vMatch[1];
+        }
+        return null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // جلب الفيديوهات العامة
+    async function fetchPublicVideos() {
+      const res = await fetch(`/api/public-videos`);
+      const data = await res.json();
+      return data.map(video => ({
+        url: video.video_url,
+        title: video.title,
+        reward: video.duration_seconds * 0.00001,
+        duration: video.duration_seconds,
+        video_id: video.id
+      }));
+    }
+
+    startBtn.addEventListener("click", async () => {
+      videos = await fetchPublicVideos();
+      if (videos.length === 0) {
+        statusEl.textContent = "لا توجد فيديوهات متاحة حاليًا.";
+        return;
+      }
+      currentVideoIndex = 0;
+      startBtn.classList.add("hidden");
+      playerDiv.style.display = "block";
+      loadCurrentVideo();
+    });
+
+    function loadCurrentVideo() {
+      const video = videos[currentVideoIndex];
+      const videoId = extractYouTubeVideoId(video.url);
+      if (!videoId) {
+        statusEl.textContent = '❌ رابط الفيديو غير صالح.';
+        return;
+      }
+
+      statusEl.textContent = `جارٍ تحميل: ${video.title}...`;
+      if (player) player.destroy();
+
+      player = new YT.Player('player', {
+        height: '360',
+        width: '640',
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          disablekb: 1,
+          fs: 0,
+          iv_load_policy: 3,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1
+        },
+        events: {
+          'onReady': onPlayerReady,
+          'onStateChange': onPlayerStateChange
+        }
+      });
+    }
+
+    function onPlayerReady(event) {
+      statusEl.textContent = "📺 الفيديو قيد التشغيل...";
+      watchStartTime = Date.now();
+
+      skipAdTimer = setInterval(() => {
+        const skipBtn = document.querySelector('.ytp-skip-ad-button');
+        if (skipBtn) {
+          setTimeout(() => {
+            if (skipBtn && skipBtn.offsetParent !== null) {
+              skipBtn.click();
+              statusEl.textContent = "⏩ تم تخطي الإعلان!";
+            }
+          }, 5000);
+          clearInterval(skipAdTimer);
+        }
+      }, 1000);
+    }
+
+    function onPlayerStateChange(event) {
+      const video = videos[currentVideoIndex];
+      const minWatch = video.duration * 0.95 * 1000;
+      const watched = Date.now() - watchStartTime;
+
+      if (event.data === YT.PlayerState.ENDED) {
+        if (watched >= minWatch) {
+          rewardUser(video, watched);
+        } else {
+          statusEl.textContent = "❌ لم تشاهد الفيديو بالكامل.";
+          resetPlayer();
+        }
+      }
+    }
+
+    async function rewardUser(video, watchedMs) {
+      try {
+        const watchedSeconds = Math.floor(watchedMs / 1000);
+        const res = await fetch(
+          `/video-callback?user_id=${userId}&video_id=${video.video_id}&watched_seconds=${watchedSeconds}&source=ad2`
+        );
+        if (res.ok) {
+          statusEl.textContent = `💰 تم إضافة ${video.reward}$ إلى رصيدك!`;
+          currentVideoIndex++;
+          if (currentVideoIndex < videos.length) {
+            setTimeout(() => {
+              statusEl.textContent = "جارٍ تحميل الفيديو التالي...";
+              loadCurrentVideo();
+            }, 2500);
+          } else {
+            statusEl.textContent += " 🎉 تم الانتهاء من جميع الفيديوهات!";
+          }
+        } else {
+          const msg = await res.text();
+          throw new Error(msg);
+        }
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "❌ " + (err.message || 'فشل في إضافة المكافأة.');
+        resetPlayer();
+      }
+    }
+
+    function resetPlayer() {
+      startBtn.classList.remove("hidden");
+      playerDiv.style.display = "none";
+    }
+  </script>
+</body>
+</html>

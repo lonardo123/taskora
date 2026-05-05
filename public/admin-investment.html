@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Admin Investment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  background:#020617;
+  color:#fff;
+  font-family:Arial, sans-serif;
+  padding:20px;
+  margin:0;
+}
+/* 🔐 Styles for access denied */
+.access-denied {
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+  text-align:center;
+  padding:20px;
+}
+.access-denied-content {
+  background:#1e293b;
+  padding:30px;
+  border-radius:12px;
+  max-width:400px;
+}
+.access-denied h2 { margin-top:0; color:#ef4444; }
+.access-denied p { color:#94a3b8; }
+
+/* 🔹 إخفاء العناصر */
+.hidden { display:none !important; }
+
+.card {
+  background:#1e293b;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:15px;
+}
+input, button {
+  width:100%;
+  padding:10px;
+  margin-top:10px;
+  border-radius:6px;
+  border:none;
+  box-sizing:border-box;
+}
+button {
+  background:#22c55e;
+  color:#000;
+  font-size:16px;
+  cursor:pointer;
+  font-weight:600;
+}
+button:hover { background:#16a34a; }
+.message {
+  margin-top:8px;
+  font-size:14px;
+  color:#22c55e;
+  min-height:20px;
+}
+.error { color:#ef4444 !important; }
+table {
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+  font-size:14px;
+}
+th, td {
+  border:1px solid #334155;
+  padding:8px;
+  text-align:left;
+}
+th { background:#334155; }
+</style>
+</head>
+
+<body>
+
+<!-- 🔐 Access Denied Page (Shown by default) -->
+<div id="accessDenied" class="access-denied">
+  <div class="access-denied-content">
+    <h2>🔐 Access Denied</h2>
+    <p>This page is restricted to admin only.</p>
+    <p style="font-size:13px;color:#64748b;margin:15px 0">
+      ❌ Invalid or missing <code>admin_id</code> parameter
+    </p>
+    <p style="font-size:12px;color:#475569">
+      <br>
+      <code style="background:#0f172a;padding:3px 6px;border-radius:4px">
+        
+      </code>
+    </p>
+  </div>
+</div>
+  
+<!-- ✅ Admin Content (Hidden by default, shown after verification) -->
+<div id="adminContent" class="hidden">
+  
+  <h2>⚙️ Investment Admin</h2>
+
+  <!-- 🔹 تغيير سعر السهم -->
+  <div class="card">
+    <h3>💰 Change Stock Price</h3>
+    <input id="price" type="number" step="0.000001" min="0" placeholder="New price (e.g. 0.0001)">
+    <button onclick="setPrice()">Update Price</button>
+    <div id="priceMsg" class="message"></div>
+  </div>
+
+  <!-- 🔹 تغيير الحد الأقصى للشراء -->
+  <div class="card">
+    <h3>🔒 Max Buy Limit</h3>
+    <input id="max" type="number" step="1" min="0" placeholder="Max stocks">
+    <button onclick="setMax()">Update Limit</button>
+    <div id="maxMsg" class="message"></div>
+  </div>
+  
+  <div class="card">
+    <h3>📦 Total Available Stocks</h3>
+    <input id="totalStocks" type="number" min="0" placeholder="Total stocks">
+    <button onclick="setTotalStocks()">Update Total</button>
+    <div id="totalMsg" class="message"></div>
+  </div>
+
+  <!-- 🔹 عرض المستخدمين وعدد الأسهم -->
+  <div class="card">
+    <h3>📊 Users Stocks</h3>
+    <table id="usersTable">
+      <thead>
+        <tr>
+          <th>User (telegram_id)</th>
+          <th>Balance ($)</th>
+          <th>Total Stocks</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div> <!-- ✅ نهاية adminContent -->
+
+<script>
+// ================= CONFIG =================
+const API = "https://perceptive-victory-production.up.railway.app";
+const REQUIRED_ADMIN_ID = "7171208519";
+
+// ================= 🔐 ACCESS CONTROL =================
+function checkAdminAccess() {
+  const url = window.location.href;
+  let adminIdFromUrl = null;
+  
+  try {
+    const urlObj = new URL(url);
+    adminIdFromUrl = urlObj.searchParams.get('admin_id');
+  } catch (e) {
+    const match = url.match(/[?&]admin_id=([^&]+)/);
+    if (match && match[1]) {
+      adminIdFromUrl = decodeURIComponent(match[1].trim());
+    }
+  }
+  
+  // ❌ رفض الوصول إذا لم يطابق المعرف
+  if (!adminIdFromUrl || adminIdFromUrl.toString().trim() !== REQUIRED_ADMIN_ID) {
+    console.error('🔐 Access denied. Required: admin_id=' + REQUIRED_ADMIN_ID);
+    const denied = document.getElementById('accessDenied');
+    const content = document.getElementById('adminContent');
+    if(denied) denied.style.display = 'flex';
+    if(content) content.classList.add('hidden');
+    return false;
+  }
+  
+  // ✅ منح الوصول
+  console.log('✅ Admin access granted');
+  const denied = document.getElementById('accessDenied');
+  const content = document.getElementById('adminContent');
+  if(denied) denied.style.display = 'none';
+  if(content) content.classList.remove('hidden');
+  
+  // حفظ الجلسة محليًا (اختياري)
+  localStorage.setItem('admin_verified', 'true');
+  localStorage.setItem('admin_id', REQUIRED_ADMIN_ID);
+  return true;
+}
+
+// ================= تشغيل التحقق عند تحميل الصفحة =================
+document.addEventListener('DOMContentLoaded', () => {
+  if(checkAdminAccess()) {
+    loadUsersStocks(); // ✅ تحميل البيانات فقط بعد التحقق الناجح
+  }
+});
+  
+// =====================
+// تحديث سعر السهم
+// =====================
+async function setPrice(){
+  const price = document.getElementById("price").value;
+  const msg = document.getElementById("priceMsg");
+  msg.textContent = "Updating...";
+  msg.className = "message";
+
+  try {
+    const res = await fetch('/admin/set-price',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ price })
+    });
+    const data = await res.json();
+    if(data.success){
+      msg.textContent = data.message || "✅ Price updated successfully";
+    } else {
+      msg.textContent = data.message || "❌ Failed to update price";
+      msg.classList.add("error");
+    }
+  } catch(err){
+    msg.textContent = "❌ Server error";
+    msg.classList.add("error");
+  }
+}
+
+// =====================
+// تحديث الحد الأقصى
+// =====================
+async function setMax(){
+  const max = document.getElementById("max").value;
+  const msg = document.getElementById("maxMsg");
+  msg.textContent = "Updating...";
+  msg.className = "message";
+
+  try {
+    const res = await fetch('/admin/set-max',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ max })
+    });
+    const data = await res.json();
+    if(data.success){
+      msg.textContent = data.message || "✅ Max buy updated successfully";
+    } else {
+      msg.textContent = data.message || "❌ Failed to update max buy";
+      msg.classList.add("error");
+    }
+  } catch(err){
+    msg.textContent = "❌ Server error";
+    msg.classList.add("error");
+  }
+}
+
+// =====================
+// إجمالي الأسهم المتاحة
+// =====================  
+async function setTotalStocks(){
+  const total = document.getElementById("totalStocks").value;
+  const msg = document.getElementById("totalMsg");
+  msg.textContent = "Updating...";
+
+  try{
+    const res = await fetch('/admin/set-total-stocks',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ total })
+    });
+    const data = await res.json();
+    if(data.success){
+      msg.textContent = "✅ Total stocks updated";
+    }else{
+      msg.textContent = data.message || "❌ Error";
+      msg.classList.add("error");
+    }
+  }catch{
+    msg.textContent = "❌ Server error";
+    msg.classList.add("error");
+  }
+}
+
+// =====================
+// جلب المستخدمين والأسهم
+// =====================
+async function loadUsersStocks() {
+  try {
+    const res = await fetch('/admin/users-stocks');
+    const users = await res.json();
+    const tbody = document.querySelector('#usersTable tbody');
+    tbody.innerHTML = '';
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${u.user}</td>
+        <td>${Number(u.balance).toFixed(6)}</td>
+        <td>${u.total_stocks}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('❌ Error loading users stocks:', err);
+  }
+}
+// ✅ تم حذف الاستدعاء الخارجي لـ loadUsersStocks() - يعتمد الآن على DOMContentLoaded فقط
+</script>
+
+</body>
+</html>

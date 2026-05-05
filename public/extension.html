@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>الربح من مشاهدات يوتيوب</title>
+  <style>
+    body { font-family: Arial, sans-serif; direction: rtl; text-align: right; margin: 20px; }
+    h1 { color: #2c3e50; }
+    .step { margin-bottom: 15px; }
+    a { color: #3498db; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>🎬 الربح من مشاهدات يوتيوب</h1>
+  <p>يمكنك الربح بسهولة عبر مشاهدة فيديوهات يوتيوب باستخدام إضافة المتصفح.</p>
+
+  <div class="step">
+    <strong>1️⃣</strong> قم بتحميل الإضافة من هنا: 
+    <a href="YOUR_EXTENSION_LINK" target="_blank">تحميل الإضافة</a>
+  </div>
+
+  <div class="step">
+    <strong>2️⃣</strong> بعد تثبيت الإضافة، افتح إعداداتها وأدخل <strong>معرّف المستخدم</strong> الخاص بك:
+    <br>
+    <code id="userId"></code>
+  </div>
+
+  <div class="step">
+    <strong>3️⃣</strong> بعد الحفظ، ابدأ بمشاهدة الفيديوهات من خلال البوت، وسيتم إضافة أرباحك تلقائيًا.
+  </div>
+
+  <script>
+    // التقاط user_id من رابط الدعوة وإظهاره للمستخدم
+    const params = new URLSearchParams(window.location.search);
+    const userId = params.get('user_id');
+    if (userId) {
+      document.getElementById('userId').innerText = userId;
+    }
+  </script>
+</body>
+</html>

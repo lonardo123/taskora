@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Watch Ad</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f9f9f9;
+      padding: 40px;
+    }
+    #status {
+      margin-top: 20px;
+      font-size: 18px;
+      color: #333;
+    }
+    button {
+      padding: 12px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎬 شاهد إعلان واربح</h1>
+  <p>اضغط الزر أدناه لعرض الفيديو الإعلاني.</p>
+
+  <button id="watchAd">▶️ عرض الإعلان</button>
+  <div id="status"></div>
+
+  <script>
+    // جلب user_id من رابط WebApp
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get("user_id");
+
+    const statusEl = document.getElementById("status");
+    const watchBtn = document.getElementById("watchAd");
+
+    // هنا مكان دمج Unity Ads SDK (Rewarded Ads)
+    watchBtn.addEventListener("click", () => {
+      statusEl.textContent = "📺 الإعلان قيد العرض...";
+
+      // ⚠️ في الواقع Unity Ads يتم عرضها داخل تطبيق/لعبة Unity
+      // هنا سنعمل محاكاة فقط (Demo)
+      setTimeout(() => {
+        statusEl.textContent = "✅ تمت مشاهدة الإعلان بنجاح!";
+
+        // محاكاة استدعاء Unity S2S Postback (في الحالة الحقيقية Unity هي من ترسل)
+        fetch(`/unity-callback?sid=${userId}&oid=demo-${Date.now()}&hmac=dummy`, {
+          method: "GET"
+        })
+        .then(() => {
+          statusEl.textContent = "💰 تمت إضافة 0.0003$ إلى رصيدك!";
+          watchBtn.disabled = true;
+        })
+        .catch(() => {
+          statusEl.textContent = "❌ خطأ أثناء إرسال الكولباك.";
+        });
+      }, 5000); // مدة الإعلان 5 ثواني (محاكاة)
+    });
+  </script>
+</body>
+</html>

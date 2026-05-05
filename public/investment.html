@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Digital Units Platform</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- ✅ تم إصلاح رابط Chart.js (إزالة المسافات) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+
+
+
+<style>
+body{
+  background:#020617;
+  color:#fff;
+  font-family:Arial;
+  padding:20px;
+}
+.card{
+  background:#1e293b;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:15px;
+}
+.info{
+  background:#020617;
+  border:1px solid #334155;
+  padding:12px;
+  border-radius:10px;
+  line-height:1.6;
+  font-size:14px;
+}
+input,button{
+  width:100%;
+  padding:10px;
+  margin-top:10px;
+  border-radius:6px;
+  border:none;
+}
+input{
+  background:#020617;
+  color:#fff;
+  border:1px solid #334155;
+}
+button{
+  font-size:16px;
+  cursor:pointer;
+}
+.buy{ background:#22c55e; }
+.sell{ background:#ef4444; }
+.cancel{ background:#475569; }
+
+.message{
+  margin-top:10px;
+  font-weight:bold;
+}
+.success{ color:#22c55e; }
+.error{ color:#ef4444; }
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+th,td{
+  border:1px solid #334155;
+  padding:6px;
+}
+th{ background:#334155; }
+</style>
+
+
+</head>
+
+<body>
+
+<h2>📊 Digital Units Platform</h2>
+
+<div class="info">
+You can acquire and hold digital units within this platform.<br>
+Unit values may change based on internal system indicators and market-related references.<br>
+You are free to release your units whenever you decide.<br><br>
+
+<b>How the system works:</b><br>
+This platform provides a digital unit-based service.<br>
+All unit values are determined by internal system logic and reference indicators used for pricing purposes only.<br>
+No physical assets, commodities, or ownership rights are involved.<br>
+All actions are initiated by the user, and decisions are made independently.<br><br>
+
+<b>Important Notice:</b><br>
+This platform does not provide financial, trading, or investment advice.<br>
+No guaranteed returns or profit promises are offered.<br>
+All balances and units are digital and used within the platform system only.<br>
+Deposits and withdrawals are processed as user-initiated platform transactions.<br>
+Users participate at their own responsibility.<br><br>
+
+Administrative service fees apply to platform operations.
+</div>
+
+
+<!-- 🔹 الأسهم المتاحة -->
+ <div class="card">
+  <h3>📦 Available Units</h3>
+  <p id="availableStocks">Loading...</p>
+</div>
+ 
+<!-- 🔹 إجمالي الأسهم المجمعة -->
+<div class="card" id="totalStocksBox">
+  <h3>📊 Total Units Issued</h3>
+  <div id="totalStocksValue" style="font-size:22px;margin-top:8px;">
+    Loading...
+  </div>
+</div>
+  
+<div class="card">
+<p id="userId" style="display:none;">👤 User ID: --</p>
+  <p id="price">💰 Unit Value: --</p>
+  <p id="balance">💵 Balance: --</p>
+  <p id="stocks">📦 My Units: --</p>
+  <p id="fee">🧾 Service Fee: --</p>
+
+  <input id="amount" type="number" min="1" placeholder="Enter stock quantity">
+
+  <button class="buy" onclick="prepareAction('Acquire')">➕ Acquire Units</button>
+  <button class="sell" onclick="prepareAction('Release')">➖ Release Units</button>
+  <div id="msg" class="message"></div>
+</div>
+
+<div class="card" id="confirmBox" style="display:none;">
+  <div id="confirmText"></div>
+  <button class="buy" onclick="confirmAction()">✅ Confirm</button>
+  <button class="cancel" onclick="cancelAction()">❌ Cancel</button>
+</div>
+
+<div class="card">
+  <!-- جدول أسهم المقفولة -->
+  <h3>⏳ Unit Availability</h3>
+  <table style="width:100%; border-collapse: collapse; margin-bottom:20px;">
+    <thead style="background:#334155; color:#fff;">
+      <tr>
+        <th style="padding:8px; border:1px solid #475569;">Quantity</th>
+        <th style="padding:8px; border:1px solid #475569;">Remaining</th>
+        <th style="padding:8px; border:1px solid #475569;">Status</th>
+        <th style="padding:8px; border:1px solid #475569;">Available Date</th>
+      </tr>
+    </thead>
+    <tbody id="locksTable">
+      <tr><td colspan="4" style="text-align:center; padding:8px;">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <!-- جدول Pending Sales -->
+  <h3>💰 Pending Sales</h3>
+  <table style="width:100%; border-collapse: collapse;">
+    <thead style="background:#334155; color:#fff;">
+      <tr>
+        <th style="padding:8px; border:1px solid #475569;">Amount</th>
+        <th style="padding:8px; border:1px solid #475569;">--</th>
+        <th style="padding:8px; border:1px solid #475569;">Status</th>
+        <th style="padding:8px; border:1px solid #475569;">Release Date</th>
+      </tr>
+    </thead>
+    <tbody id="pendingSalesTable">
+      <tr><td colspan="4" style="text-align:center; padding:8px;">Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+  
+<div class="card">
+  <h3>📈 Unit Value Chart</h3>
+  <canvas id="priceChart" height="120"></canvas>
+</div>
+
+<div class="card">
+  <h3>📑 Activity Log</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Qty</th>
+        <th>Value</th>
+        <th>Fee</th>
+        <th>Total</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody id="txTable"></tbody>
+  </table>
+</div>
+
+<script>
+/* ================== إعدادات ================== */
+const params = new URLSearchParams(location.search);
+const user_id = params.get('user_id');
+
+if(!user_id){
+  alert("User ID is missing");
+  throw new Error("User ID missing");
+}
+
+let stockPrice = 0;
+let feeFixed = 0;
+let feePercent = 0;
+let currentAction = null;
+// ✅ إضافة متغير الشارت للتحديث الديناميكي
+let chartInstance = null;
+
+const priceEl   = document.getElementById("price");
+const balanceEl = document.getElementById("balance");
+const stocksEl  = document.getElementById("stocks");
+const feeEl     = document.getElementById("fee");
+const userIdEl  = document.getElementById("userId");
+const msgEl     = document.getElementById("msg");
+const amount    = document.getElementById("amount");
+const confirmBox= document.getElementById("confirmBox");
+const confirmText= document.getElementById("confirmText");
+const txTable   = document.getElementById("txTable");
+
+/* ================== أدوات ================== */
+function showMsg(text, ok=true){
+  msgEl.textContent = text;
+  msgEl.className = "message " + (ok ? "success" : "error");
+}
+
+// 🔹 دالة موحدة لتنسيق التاريخ بالإنجليزية (بدون ص/م)
+function formatDateTime(dateInput) {
+  if (!dateInput) return "N/A";
+  return new Date(dateInput).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+}
+
+/* ================== تحميل البيانات ================== */
+async function loadInvestment(){
+  try{
+    const r = await fetch(`/api/investment-data?user_id=${user_id}`);
+    const j = await r.json();
+    if(j.status !== "success") return showMsg(j.message,false);
+
+    const d = j.data;
+
+    stockPrice = Number(d.price);
+    feeFixed   = Number(d.admin_fee_fixed);
+    feePercent = Number(d.admin_fee_percent);
+
+    userIdEl.textContent  = `👤 User ID: ${user_id}`;
+    priceEl.textContent   = `💰 Unit Value: ${stockPrice.toFixed(6)}$`;
+    balanceEl.textContent = `💵 Balance: ${Number(d.balance).toFixed(6)}$`;
+    stocksEl.textContent  = `📦 My Units: ${d.stocks}`;
+    feeEl.textContent     = `🧾 Service Fee: ${feeFixed}$ + ${feePercent}%`;
+  }catch{
+    showMsg("Failed to load investment data",false);
+  }
+}
+
+/* ================== تحضير العملية ================== */
+function prepareAction(type){
+  const qty = Number(amount.value);
+  if(!qty || qty <= 0) return showMsg("Invalid quantity", false);
+
+  const subtotal = qty * stockPrice;
+  const fee = feeFixed + (subtotal * feePercent / 100);
+  const total = type === "Acquire" ? subtotal + fee : subtotal - fee;
+
+  currentAction = type;
+  confirmBox.style.display = "block";
+  confirmText.innerHTML = `
+    <b>${type}</b> ${qty} Units<br>
+    Price: ${stockPrice.toFixed(6)}$<br>
+    Subtotal: ${subtotal.toFixed(6)}$<br>
+    Fee: ${fee.toFixed(6)}$<br>
+    <b>Total: ${total.toFixed(6)}$</b>
+  `;
+}
+
+function cancelAction(){
+  confirmBox.style.display = "none";
+  currentAction = null;
+}
+
+/* ================== تنفيذ ================== */
+async function confirmAction(){
+  const qty = Number(amount.value);
+  const endpoint = currentAction === "Acquire" ? "/api/buy-stock" : "/api/sell-stock";
+
+  const r = await fetch(endpoint,{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ user_id, quantity: qty })
+  });
+
+  const j = await r.json();
+  if(j.status === "success"){
+    showMsg(j.message);
+    loadInvestment();
+    loadTransactions();
+    loadChart();
+    // ✅ تحديث فوري لكل الأقسام بعد البيع/الشراء
+    loadTotalStocks();
+    loadAvailableStocks();
+    loadStockLocks();
+    loadPendingSales();
+  }else{
+    showMsg(j.message,false);
+  }
+  cancelAction();
+}
+
+/* ================== سجل العمليات ================== */
+async function loadTransactions(){
+  const r = await fetch(`/api/transactions?user_id=${user_id}`);
+  const j = await r.json();
+  if(j.status !== "success") return;
+
+  txTable.innerHTML = "";
+  j.data.forEach(t=>{
+    const actionName =
+      t.type === "BUY"  ? "Acquire" :
+      t.type === "SELL" ? "Release" :
+      t.type;
+
+    // ✅ تنسيق التاريخ بالإنجليزية فقط (بدون ص/م)
+    txTable.innerHTML += `
+      <tr>
+        <td>${actionName}</td>
+        <td>${t.quantity}</td>
+        <td>${Number(t.price).toFixed(6)}</td>
+        <td>${Number(t.fee).toFixed(6)}</td>
+        <td>${Number(t.total).toFixed(6)}</td>
+        <td>${formatDateTime(t.date)}</td>
+      </tr>
+    `;
+  });
+}
+
+ /* ================== الرسم البياني ================== */
+async function loadChart(){
+  const r = await fetch("/api/stock-chart");
+  const j = await r.json();
+  if(j.status !== "success") return;
+
+  new Chart(document.getElementById("priceChart"),{
+    type:"line",
+    data:{
+      labels:j.data.map(x=>new Date(x.date).toLocaleDateString()),
+      datasets:[{
+        data:j.data.map(x=>x.price),
+        borderWidth:2,
+        tension:0.4
+      }]
+    },
+    options:{
+      plugins:{ legend:{display:false} }
+    }
+  });
+}
+// =====================
+// تحميل إجمالي الأسهم
+// =====================
+async function loadTotalStocks() {
+  try {
+    const res = await fetch('/api/total-stocks');
+    const data = await res.json();
+
+    if (data.status === "success") {
+      document.getElementById("totalStocksValue").textContent =
+        data.total_stocks + " Units";
+    } else {
+      document.getElementById("totalStocksValue").textContent = "Error";
+    }
+  } catch (err) {
+    document.getElementById("totalStocksValue").textContent = "Server Error";
+  }
+}
+
+// =====================
+// الأسهم المتاحة
+// =====================
+async function loadAvailableStocks(){
+  const r = await fetch('/api/available-stocks');
+  const j = await r.json();
+
+  if(j.status === "success"){
+    document.getElementById("availableStocks").textContent =
+      j.available + " Units available";
+  }
+}
+
+// =====================
+// لأسهم المقفولة
+// =====================
+async function loadStockLocks() {
+  try {
+    const r = await fetch(`/api/my-stock-locks?user_id=${user_id}`);
+    const data = await r.json();
+
+    const tbody = document.getElementById("locksTable");
+    tbody.innerHTML = "";
+
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:8px;">No Units holdings</td></tr>`;
+      return;
+    }
+
+    data.forEach(row => {
+      const statusText = row.locked ? "🔒 Locked" : "🔓 Available";
+      const statusColor = row.locked ? "#ef4444" : "#22c55e";
+      // ✅ تنسيق التاريخ بالإنجليزية فقط (بدون ص/م)
+      const unlockDate = formatDateTime(row.unlock_at);
+
+      tbody.innerHTML += `
+        <tr style="transition: background 0.3s; cursor:pointer;" 
+            onmouseover="this.style.background='#1e293b'" 
+            onmouseout="this.style.background='transparent'">
+          <td>${row.quantity}</td>
+          <td>${row.remaining}</td>
+          <td style="color:${statusColor}; font-weight:bold;">${statusText}</td>
+          <td>${unlockDate}</td>
+        </tr>
+      `;
+    });
+
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:8px;">Error loading data</td></tr>`;
+  }
+}
+
+// =====================
+// Pending Sales
+// =====================
+async function loadPendingSales() { 
+  try {
+    const r = await fetch(`/api/pending-sales?user_id=${user_id}`);
+    const data = await r.json();
+
+    const tbody = document.getElementById("pendingSalesTable");
+    tbody.innerHTML = "";
+
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:8px;">No pending sales</td></tr>`;
+      return;
+    }
+
+    data.forEach(s => {
+      const statusText = s.status === 'pending' ? '⏳ Pending' : '✅ Completed';
+      const statusColor = s.status === 'pending' ? "#facc15" : "#22c55e";
+      // ✅ تنسيق التاريخ بالإنجليزية فقط (بدون ص/م)
+      const releaseDate = formatDateTime(s.release_date);
+      
+      tbody.innerHTML += `
+        <tr style="transition: background 0.3s; cursor:pointer;" 
+            onmouseover="this.style.background='#1e293b'" 
+            onmouseout="this.style.background='transparent'">
+          <td>${Number(s.amount).toFixed(6)}</td>
+          <td>--</td>
+          <td style="color:${statusColor}; font-weight:bold;">${statusText}</td>
+          <td>${releaseDate}</td>
+        </tr>
+      `;
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:8px;">Error loading data</td></tr>`;
+  }
+}
+
+
+/* ================== تشغيل ================== */
+loadInvestment();
+loadTransactions();
+loadChart();
+loadTotalStocks(); 
+loadAvailableStocks();  
+loadStockLocks();  
+loadPendingSales();  
+</script>
+
+</body>
+</html>
