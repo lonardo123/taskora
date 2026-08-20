@@ -10,16 +10,6 @@ const app = new Hono();
 app.use('*', cors());
 
 
-
-
-// === السيرفر (Express)
-app.use(express.static(path.join(__dirname, "public")));
-
-// ✅ هذا هو المسار الصحيح لإضافة كروم
-app.get('/worker/start', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/worker/start.html'));
-});
-
 // 🧠 لتخزين آخر رسالة سيرفر مؤقتًا
 let currentMessage = null;
 
@@ -4187,11 +4177,10 @@ setInterval(async () => {
 // === تصدير التطبيق ليعمل كـ Cloudflare Worker ===
 // ==========================================
 export default {
-  // 1. استقبال طلبات HTTP (هذا هو البديل المباشر لـ app.listen)
+  // 1. استقبال طلبات HTTP (بديل app.listen)
   fetch: app.fetch,
 
-  // 2. المعالج المجدول (هذا هو البديل المباشر لـ setInterval)
-  // سيعمل تلقائياً كل دقيقة بناءً على إعدادات crons في ملف wrangler.toml
+  // 2. المعالج المجدول (بديل setInterval لمعالجة المبيعات المؤجلة)
   async scheduled(controller, env, ctx) {
     console.log("⏰ تشغيل معالج المبيعات المؤجلة (Cron)...");
     try {
