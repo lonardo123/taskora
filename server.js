@@ -1,68 +1,16 @@
-require('dotenv').config();
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import crypto from 'crypto'; // مدمج تلقائياً في Cloudflare Workers
+import bcrypt from 'bcryptjs'; // استبدال bcrypt الأصلي بـ bcryptjs المتوافق
+import { pool } from './db.js';
 
-const express = require('express');
-const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
-const cors = require('cors');
-const bcrypt = require('bcrypt');
+const app = new Hono();
 
-const { pool } = require('./db');
-
-const app = express();
-
-/* مهم جدا */
-
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+/* إعدادات عامة (Middleware) */
+app.use('*', cors());
 
 
-// =======================
-// معالج المبيعات المؤجلة (Pending Sales Processor)
-// =======================
-setInterval(async () => {
-  try {
-    const now = new Date();
 
-    const { rows } = await pool.query(
-      `SELECT id, user_id, amount
-       FROM pending_sales
-       WHERE status = 'pending'
-       AND release_date <= $1`,
-      [now]
-    );
-
-    for (const sale of rows) {
-
-      // 1️⃣ نحاول تغيير الحالة أولًا
-      const result = await pool.query(
-        `UPDATE pending_sales
-         SET status = 'done'
-         WHERE id = $1 AND status = 'pending'`,
-        [sale.id]
-      );
-
-      // 2️⃣ لو التغيير تم فعلاً → نضيف الرصيد
-      if (result.rowCount === 1) {
-        await pool.query(
-          `UPDATE users
-           SET balance = balance + $1
-           WHERE telegram_id = $2`,
-          [sale.amount, sale.user_id]
-        );
-      }
-    }
-
-  } catch (err) {
-    console.error("Pending sales processor error:", err);
-  }
-}, 60 * 1000); // كل دقيقة
-
-// التقاط أي أخطاء لاحقة في الـ pool
-pool.on('error', (err) => {
-  console.error('⚠️ PG pool error:', err);
-});
 
 // === السيرفر (Express)
 app.use(express.static(path.join(__dirname, "public")));
@@ -4235,8 +4183,47 @@ setInterval(async () => {
 }, 12 * 60 * 60 * 1000); // كل 3 ساعات
 
 
-// === بدء التشغيل ===
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 السيرفر يعمل على المنفذ ${PORT}`);
-});
+// ==========================================
+// === تصدير التطبيق ليعمل كـ Cloudflare Worker ===
+// ==========================================
+export default {
+  // 1. استقبال طلبات HTTP (هذا هو البديل المباشر لـ app.listen)
+  fetch: app.fetch,
+
+  // 2. المعالج المجدول (هذا هو البديل المباشر لـ setInterval)
+  // سيعمل تلقائياً كل دقيقة بناءً على إعدادات crons في ملف wrangler.toml
+  async scheduled(controller, env, ctx) {
+    console.log("⏰ تشغيل معالج المبيعات المؤجلة (Cron)...");
+    try {
+      const now = new Date();
+      const { rows } = await pool.query(
+        `SELECT id, user_id, amount
+         FROM pending_sales
+         WHERE status = 'pending'
+         AND release_date <= $1`,
+        [now]
+      );
+
+      for (const sale of rows) {
+        const result = await pool.query(
+          `UPDATE pending_sales
+           SET status = 'done'
+           WHERE id = $1 AND status = 'pending'`,
+          [sale.id]
+        );
+
+        if (result.rowCount === 1) {
+          await pool.query(
+            `UPDATE users
+             SET balance = balance + $1
+             WHERE telegram_id = $2`,
+            [sale.amount, sale.user_id]
+          );
+        }
+      }
+      console.log(`✅ تمت معالجة ${rows.length} مبيعات مؤجلة.`);
+    } catch (err) {
+      console.error("Pending sales processor error:", err);
+    }
+  }
+};
