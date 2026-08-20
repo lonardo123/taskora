@@ -53,20 +53,6 @@ async function getOrCreateUser(client, telegramId) {
   };
 }
 
-async function getOrCreateUser(client, telegram_id) {
-  // جلب المستخدم
-  let userQ = await client.query(
-    'SELECT id, balance FROM users WHERE telegram_id = $1',
-    [telegram_id]
-  );
-
-  // إذا لم يوجد، إنشاء المستخدم
-  if (!userQ.rows.length) {
-    userQ = await client.query(
-      'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
-      [telegram_id]
-    );
-  }
 
   return {
     userDbId: userQ.rows[0].id,
