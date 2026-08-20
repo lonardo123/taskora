@@ -1,13 +1,14 @@
-require('dotenv').config();
-const { Pool } = require('pg');
+import { Pool, neonConfig } from '@neondatabase/serverless';
 
-const pool = new Pool({
+// إجبار المكتبة على استخدام WebSocket المدمج في Cloudflare Workers
+neonConfig.webSocketConstructor = WebSocket;
+
+// إنشاء Pool متوافق تماماً مع بيئة Workers (يعمل عبر HTTP/WebSocket)
+export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
 });
 
+// اختبار الاتصال عند بدء التشغيل
 pool.connect()
-  .then(() => console.log('✅ قاعدة البيانات متصلة بنجاح'))
+  .then(() => console.log('✅ قاعدة البيانات متصلة بنجاح عبر Neon Serverless'))
   .catch(err => console.error('❌ فشل الاتصال بقاعدة البيانات:', err));
-
-module.exports = { pool };
