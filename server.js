@@ -54,11 +54,6 @@ async function getOrCreateUser(client, telegramId) {
 }
 
 
-  return {
-    userDbId: userQ.rows[0].id,
-    balance: Number(userQ.rows[0].balance)
-  };
-}
 
 // ======================= API: جلب بيانات الاستثمار =======================
 app.get('/api/investment-data', async (req, res) => {
