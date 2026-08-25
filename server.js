@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from './db.js';
 
