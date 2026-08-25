@@ -1,59 +1,60 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import crypto from 'crypto'; // مدمج تلقائياً في Cloudflare Workers
-import bcrypt from 'bcryptjs'; // استبدال bcrypt الأصلي بـ bcryptjs المتوافق
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { pool } from './db.js';
 
 const app = new Hono();
 
-/* إعدادات عامة (Middleware) */
+/* مهم جدا */
 app.use('*', cors());
 
-
-// 🧠 لتخزين آخر رسالة سيرفر مؤقتًا
-let currentMessage = null;
-
-// 🧩 1. Endpoint لإرسال أمر من السيرفر (مثلاً عبر لوحة التحكم أو API)
-app.post("/api/server/send", (req, res) => {
-  const { action, data } = req.body;
-  if (!action) {
-    return res.status(400).json({ status: "error", message: "action required" });
-  }
-  currentMessage = { action, data: data || {}, time: new Date().toISOString() };
-  console.log("📨 تم تعيين رسالة جديدة إلى الإضافة:", currentMessage);
-  res.json({ status: "ok", message: currentMessage });
+// التقاط أي أخطاء لاحقة في الـ pool
+pool.on('error', (err) => {
+  console.error('⚠️ PG pool error:', err);
 });
 
-// 🧩 2. Endpoint تطلبه الإضافة بشكل دوري (Polling)
-app.get("/api/worker/message", (req, res) => {
-  if (currentMessage) {
-    res.json(currentMessage);
-    // إعادة تعيين الرسالة حتى لا تتكرر
-    currentMessage = null;
-  } else {
-    res.json({ action: "NONE" });
-  }
-});
+// دالة مساعدة واحدة فقط (تم إزالة التكرار نهائياً)
 async function getOrCreateUser(client, telegramId) {
   let q = await client.query(
     'SELECT id, balance FROM users WHERE telegram_id = $1',
     [telegramId]
   );
-
   if (q.rows.length === 0) {
     q = await client.query(
       'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
       [telegramId]
     );
   }
-
   return {
     userDbId: q.rows[0].id,
     balance: Number(q.rows[0].balance)
   };
 }
 
+// 🧠 لتخزين آخر رسالة سيرفر مؤقتًا
+let currentMessage = null;
 
+// 🧩 1. Endpoint لإرسال أمر من السيرفر
+app.post("/api/server/send", async (c) => {
+  const { action, data } = await c.req.json();
+  if (!action) {
+    return c.json({ status: "error", message: "action required" }, 400);
+  }
+  currentMessage = { action, data: data || {}, time: new Date().toISOString() };
+  console.log("📨 تم تعيين رسالة جديدة:", currentMessage);
+  return c.json({ status: "ok", message: currentMessage });
+});
+
+// 🧩 2. Endpoint تطلبه الإضافة بشكل دوري
+app.get("/api/worker/message", (c) => {
+  if (currentMessage) {
+    const msg = currentMessage;
+    currentMessage = null;
+    return c.json(msg);
+  }
+  return c.json({ action: "NONE" });
+});
 
 // ======================= API: جلب بيانات الاستثمار =======================
 app.get('/api/investment-data', async (req, res) => {
@@ -4167,31 +4168,21 @@ export default {
     try {
       const now = new Date();
       const { rows } = await pool.query(
-        `SELECT id, user_id, amount
-         FROM pending_sales
-         WHERE status = 'pending'
-         AND release_date <= $1`,
+        `SELECT id, user_id, amount FROM pending_sales WHERE status = 'pending' AND release_date <= $1`,
         [now]
       );
-
       for (const sale of rows) {
         const result = await pool.query(
-          `UPDATE pending_sales
-           SET status = 'done'
-           WHERE id = $1 AND status = 'pending'`,
+          `UPDATE pending_sales SET status = 'done' WHERE id = $1 AND status = 'pending'`,
           [sale.id]
         );
-
         if (result.rowCount === 1) {
           await pool.query(
-            `UPDATE users
-             SET balance = balance + $1
-             WHERE telegram_id = $2`,
+            `UPDATE users SET balance = balance + $1 WHERE telegram_id = $2`,
             [sale.amount, sale.user_id]
           );
         }
       }
-      console.log(`✅ تمت معالجة ${rows.length} مبيعات مؤجلة.`);
     } catch (err) {
       console.error("Pending sales processor error:", err);
     }
