@@ -1,7 +1,7 @@
 name = "taskora"
 main = "server.js"
-compatibility_date = "2024-01-17"
-compatibility_flags = ["nodejs_compat"] # <-- أضف هذا السطر
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 
 [triggers]
 crons = ["* * * * *"]
