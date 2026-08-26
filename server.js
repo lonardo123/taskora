@@ -12,7 +12,7 @@ app.use('*', cors());
 // التقاط أي أخطاء لاحقة في الـ pool
 pool.on('error', (err) => console.error('⚠️ PG pool error:', err));
 
-// ✅ دالة مساعدة واحدة فقط (تم إزالة التكرار نهائياً)
+
 async function getOrCreateUser(client, telegramId) {
   let q = await client.query('SELECT id, balance FROM users WHERE telegram_id = $1', [telegramId]);
   if (q.rows.length === 0) {
