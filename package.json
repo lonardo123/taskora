@@ -1,5 +1,5 @@
 {
-  "name": "telegram-cpa-bot-workers",
+  "name": "taskora-workers",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
