@@ -13,15 +13,15 @@ pool.on('error', (err) => {
   console.error('⚠️ PG pool error:', err);
 });
 
-// ==========================================
-// دالة مساعدة واحدة فقط
-// ==========================================
+// ✅ دالة مساعدة واحدة فقط (مدمجة ومصححة 100%)
 async function getOrCreateUser(client, telegramId) {
+  // 1. محاولة جلب المستخدم
   let q = await client.query(
     'SELECT id, balance FROM users WHERE telegram_id = $1',
     [telegramId]
   );
 
+  // 2. إذا لم يوجد، قم بإنشائه برصيد 0
   if (q.rows.length === 0) {
     q = await client.query(
       'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
@@ -29,12 +29,12 @@ async function getOrCreateUser(client, telegramId) {
     );
   }
 
+  // 3. إرجاع البيانات
   return {
     userDbId: q.rows[0].id,
     balance: Number(q.rows[0].balance)
   };
 }
-
 // ==========================================
 // تخزين آخر رسالة للسيرفر مؤقتًا
 // ==========================================
