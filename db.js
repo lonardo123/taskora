@@ -9,5 +9,4 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// ملاحظة: تم إزالة pool.connect() من هنا لمنع خطأ النشر في Wrangler
 console.log('✅ تم تهيئة اتصال قاعدة البيانات بنجاح (سيتم الاتصال عند أول طلب)');
