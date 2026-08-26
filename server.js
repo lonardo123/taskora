@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import crypto from 'node:crypto'; // مهم جداً: إضافة node: لحل خطأ البناء
-import bcrypt from 'bcryptjs';    // استخدم bcryptjs بدلاً من bcrypt الأصلي
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { pool } from './db.js';
 
 const app = new Hono();
@@ -12,7 +12,7 @@ app.use('*', cors());
 // التقاط أي أخطاء لاحقة في الـ pool
 pool.on('error', (err) => console.error('⚠️ PG pool error:', err));
 
-// دالة مساعدة (موجودة لاستخدامها في المسارات لاحقاً)
+// ✅ دالة مساعدة واحدة فقط (تم إزالة التكرار نهائياً)
 async function getOrCreateUser(client, telegramId) {
   let q = await client.query('SELECT id, balance FROM users WHERE telegram_id = $1', [telegramId]);
   if (q.rows.length === 0) {
@@ -24,11 +24,8 @@ async function getOrCreateUser(client, telegramId) {
 // 🧠 لتخزين آخر رسالة سيرفر مؤقتًا
 let currentMessage = null;
 
-// ✅ استبدال express.static و path بـ رد HTML بسيط 
-// (لأن Cloudflare Workers لا يدعم نظام الملفات fs أو path)
+// ✅ استبدال express.static و path بـ رد HTML بسيط
 app.get('/worker/start', (c) => {
-  // ملاحظة: إذا كان لديك كود HTML كامل، يفضل رفعه على Cloudflare Pages، 
-  // أو يمكنك لصق محتوى HTML هنا مباشرة داخل c.html('...')
   return c.html(`
     <!DOCTYPE html>
     <html dir="rtl">
@@ -41,19 +38,14 @@ app.get('/worker/start', (c) => {
   `);
 });
 
-// 🧩 1. Endpoint لإرسال أمر من السيرفر (مثلاً عبر لوحة التحكم أو API)
+// 🧩 1. Endpoint لإرسال أمر من السيرفر
 app.post("/api/server/send", async (c) => {
-  // في Hono نستخدم await c.req.json() بدلاً من req.body
-  const { action, data } = await c.req.json(); 
-  
+  const { action, data } = await c.req.json();
   if (!action) {
-    // في Hono نمرر كود الحالة (400) كعامل ثاني في c.json
     return c.json({ status: "error", message: "action required" }, 400);
   }
-  
   currentMessage = { action, data: data || {}, time: new Date().toISOString() };
   console.log("📨 تم تعيين رسالة جديدة إلى الإضافة:", currentMessage);
-  
   return c.json({ status: "ok", message: currentMessage });
 });
 
@@ -61,46 +53,20 @@ app.post("/api/server/send", async (c) => {
 app.get("/api/worker/message", (c) => {
   if (currentMessage) {
     const msg = currentMessage;
-    currentMessage = null; // إعادة تعيين الرسالة حتى لا تتكرر
+    currentMessage = null;
     return c.json(msg);
   }
   return c.json({ action: "NONE" });
 });
 
-// ==========================================
-// دالة مساعدة واحدة فقط (تم إصلاح الكود المكسور وإزالة التكرار)
-// ==========================================
-async function getOrCreateUser(client, telegramId) {
-  let q = await client.query(
-    'SELECT id, balance FROM users WHERE telegram_id = $1',
-    [telegramId]
-  );
-
-  if (q.rows.length === 0) {
-    q = await client.query(
-      'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
-      [telegramId]
-    );
-  }
-
-  return {
-    userDbId: q.rows[0].id,
-    balance: Number(q.rows[0].balance)
-  };
-}
-
 // =======================
-// مسار الملف الشخصي للمستخدم (محول إلى Hono)
+// مسار الملف الشخصي للمستخدم (تبدأ هنا باقي مساراتك الطبيعية)
 // =======================
 app.get('/api/user/profile', async (c) => {
-  // في Hono نستخدم c.req.query('اسم_المتغير') بدلاً من req.query
   const user_id = c.req.query('user_id');
   
   if (!user_id) {
-    return c.json({
-      status: "error",
-      message: "user_id is required"
-    }, 400); // إضافة كود الحالة 400 بشكل صحيح في Hono
+    return c.json({ status: "error", message: "user_id is required" }, 400);
   }
 
   try {
@@ -121,7 +87,6 @@ app.get('/api/user/profile', async (c) => {
         }
       });
     } else {
-      // إنشاء مستخدم جديد برصيد 0
       await pool.query(
         'INSERT INTO users (telegram_id, balance, created_at) VALUES ($1, $2, NOW())',
         [user_id, 0]
@@ -138,10 +103,7 @@ app.get('/api/user/profile', async (c) => {
     }
   } catch (err) {
     console.error('Error in /api/user/profile:', err);
-    return c.json({
-      status: "error",
-      message: "Server error"
-    }, 500);
+    return c.json({ status: "error", message: "Server error" }, 500);
   }
 });
 
