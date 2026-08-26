@@ -3,8 +3,8 @@ name: Deploy to Cloudflare Workers
 on:
   push:
     branches:
-      - main # إذا كان فرعك الرئيسي يسمى master، غيّر main إلى master
-  workflow_dispatch: # يسمح لك بتشغيل النشر يدوياً من زر في GitHub
+      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -30,4 +30,4 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          chore: add cloudflare workers deployment workflow
+          chore: add cloudflare deployment workflow
