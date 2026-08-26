@@ -30,4 +30,3 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          chore: add cloudflare deployment workflow
