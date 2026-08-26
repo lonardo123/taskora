@@ -6,107 +6,222 @@ import { pool } from './db.js';
 
 const app = new Hono();
 
-/* إعدادات عامة (Middleware) */
 app.use('*', cors());
 
 // التقاط أي أخطاء لاحقة في الـ pool
-pool.on('error', (err) => console.error('⚠️ PG pool error:', err));
+pool.on('error', (err) => {
+  console.error('⚠️ PG pool error:', err);
+});
 
-
+// ==========================================
+// دالة مساعدة واحدة فقط
+// ==========================================
 async function getOrCreateUser(client, telegramId) {
-  let q = await client.query('SELECT id, balance FROM users WHERE telegram_id = $1', [telegramId]);
+  let q = await client.query(
+    'SELECT id, balance FROM users WHERE telegram_id = $1',
+    [telegramId]
+  );
+
   if (q.rows.length === 0) {
-    q = await client.query('INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance', [telegramId]);
+    q = await client.query(
+      'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
+      [telegramId]
+    );
   }
-  return { userDbId: q.rows[0].id, balance: Number(q.rows[0].balance) };
+
+  return {
+    userDbId: q.rows[0].id,
+    balance: Number(q.rows[0].balance)
+  };
 }
 
-// 🧠 لتخزين آخر رسالة سيرفر مؤقتًا
+// ==========================================
+// تخزين آخر رسالة للسيرفر مؤقتًا
+// ==========================================
 let currentMessage = null;
 
-// ✅ استبدال express.static و path بـ رد HTML بسيط
+// ==========================================
+// Worker Start
+// Cloudflare Workers لا يستخدم express.static()
+// ==========================================
 app.get('/worker/start', (c) => {
   return c.html(`
     <!DOCTYPE html>
-    <html dir="rtl">
-    <head><title>Worker Started</title></head>
-    <body style="text-align:center; font-family:Arial; margin-top:50px;">
-      <h1>✅ تم تشغيل العامل بنجاح!</h1>
-      <p>السيرفر يعمل ويستقبل الطلبات.</p>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Taskora Worker</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          text-align: center;
+          padding: 40px;
+          background: #f5f5f5;
+        }
+        .box {
+          max-width: 600px;
+          margin: auto;
+          background: white;
+          padding: 30px;
+          border-radius: 15px;
+          box-shadow: 0 4px 20px rgba(0,0,0,.08);
+        }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h1>Taskora</h1>
+        <p>Worker يعمل بنجاح.</p>
+      </div>
     </body>
     </html>
   `);
 });
 
-// 🧩 1. Endpoint لإرسال أمر من السيرفر
-app.post("/api/server/send", async (c) => {
-  const { action, data } = await c.req.json();
-  if (!action) {
-    return c.json({ status: "error", message: "action required" }, 400);
+// ==========================================
+// إرسال أمر إلى Worker
+// ==========================================
+app.post('/api/server/send', async (c) => {
+  try {
+    const { action, data } = await c.req.json();
+
+    if (!action) {
+      return c.json(
+        {
+          status: 'error',
+          message: 'action required'
+        },
+        400
+      );
+    }
+
+    currentMessage = {
+      action,
+      data: data || {},
+      time: new Date().toISOString()
+    };
+
+    console.log(
+      '📨 تم تعيين رسالة جديدة إلى الإضافة:',
+      currentMessage
+    );
+
+    return c.json({
+      status: 'ok',
+      message: currentMessage
+    });
+
+  } catch (err) {
+    console.error('❌ Error in /api/server/send:', err);
+
+    return c.json(
+      {
+        status: 'error',
+        message: 'Invalid JSON request'
+      },
+      400
+    );
   }
-  currentMessage = { action, data: data || {}, time: new Date().toISOString() };
-  console.log("📨 تم تعيين رسالة جديدة إلى الإضافة:", currentMessage);
-  return c.json({ status: "ok", message: currentMessage });
 });
 
-// 🧩 2. Endpoint تطلبه الإضافة بشكل دوري (Polling)
-app.get("/api/worker/message", (c) => {
+// ==========================================
+// Polling
+// ==========================================
+app.get('/api/worker/message', (c) => {
   if (currentMessage) {
     const msg = currentMessage;
+
+    // إزالة الرسالة بعد إرسالها حتى لا تتكرر
     currentMessage = null;
+
     return c.json(msg);
   }
-  return c.json({ action: "NONE" });
+
+  return c.json({
+    action: 'NONE'
+  });
 });
 
-// =======================
-// مسار الملف الشخصي للمستخدم (تبدأ هنا باقي مساراتك الطبيعية)
-// =======================
+// ==========================================
+// مسار الملف الشخصي للمستخدم
+// ==========================================
 app.get('/api/user/profile', async (c) => {
   const user_id = c.req.query('user_id');
-  
+
   if (!user_id) {
-    return c.json({ status: "error", message: "user_id is required" }, 400);
+    return c.json(
+      {
+        status: 'error',
+        message: 'user_id is required'
+      },
+      400
+    );
   }
 
   try {
     const result = await pool.query(
-      'SELECT telegram_id, balance FROM users WHERE telegram_id = $1',
+      `
+      SELECT
+        id,
+        telegram_id,
+        username,
+        name,
+        balance,
+        payeer_wallet,
+        referral_code,
+        referral_earnings,
+        created_at,
+        last_login_at
+      FROM users
+      WHERE telegram_id = $1
+      LIMIT 1
+      `,
       [user_id]
     );
 
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
-      return c.json({
-        status: "success",
-        data: {
-          user_id: user.telegram_id.toString(),
-          fullname: `User ${user.telegram_id}`,
-          balance: parseFloat(user.balance),
-          membership: "Free"
-        }
-      });
-    } else {
+    if (result.rows.length === 0) {
       await pool.query(
-        'INSERT INTO users (telegram_id, balance, created_at) VALUES ($1, $2, NOW())',
+        `
+        INSERT INTO users (
+          telegram_id,
+          balance,
+          created_at
+        )
+        VALUES ($1, $2, NOW())
+        `,
         [user_id, 0]
       );
+
       return c.json({
-        status: "success",
-        data: {
-          user_id: user_id.toString(),
-          fullname: `User ${user_id}`,
-          balance: 0.0,
-          membership: "Free"
+        status: 'ok',
+        user: {
+          telegram_id: Number(user_id),
+          balance: 0
         }
       });
     }
+
+    return c.json({
+      status: 'ok',
+      user: result.rows[0]
+    });
+
   } catch (err) {
-    console.error('Error in /api/user/profile:', err);
-    return c.json({ status: "error", message: "Server error" }, 500);
+    console.error(
+      '❌ Error in /api/user/profile:',
+      err
+    );
+
+    return c.json(
+      {
+        status: 'error',
+        message: 'Server error'
+      },
+      500
+    );
   }
 });
-
 // =======================
 // المسار الرئيسي للتحقق من عمل السيرفر
 // =======================
