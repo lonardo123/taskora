@@ -1,10 +1,9 @@
 import { Pool, neonConfig } from '@neondatabase/serverless';
 
-// إجبار المكتبة على استخدام WebSocket المتوافق مع Cloudflare Workers
+// إجبار المكتبة على استخدام WebSocket المدمج والآمن في Cloudflare Workers
 neonConfig.webSocketConstructor = WebSocket;
 
-// تهيئة الـ Pool فقط (بدون استدعاء connect() في المستوى الأعلى)
-// سيتم الاتصال فعلياً وآمناً عند تنفيذ أول استعلام (Query)
+// تهيئة الـ Pool فقط (سيتم الاتصال فعلياً عند تنفيذ أول استعلام query)
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
