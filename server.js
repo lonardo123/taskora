@@ -2596,14 +2596,13 @@ async function distributeReferralCommission(telegramId, earningAmount) {
 }
 
 // =====================================================================
-// === نهاية ملف server.js (استبدل app.listen و setInterval بهذا تماماً) ===
+// === نهاية ملف server.js (هذا هو الكود الصحيح تماماً) ===
 // =====================================================================
 export default {
   // 1. استقبال طلبات HTTP (بديل app.listen)
   fetch: app.fetch,
 
-  // 2. المعالج المجدول (بديل setInterval للموافقة التلقائية بعد 24 ساعة)
-  // سيعمل هذا الكود تلقائياً بناءً على إعدادات crons في ملف wrangler.toml
+  // 2. المعالج المجدول (بديل setInterval)
   async scheduled(controller, env, ctx) {
     console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
     const client = await pool.connect();
@@ -2621,19 +2620,15 @@ export default {
       for (const exec of rows) {
         try {
           await client.query('BEGIN');
-          
           await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [exec.payment_amount, exec.executor_id]);
           
           const totalCost = parseFloat(exec.payment_amount) + parseFloat(exec.commission_amount || 0);
           await client.query('UPDATE tasks SET spent = spent + $1 WHERE id = $2', [totalCost, exec.task_id]);
-          
           await client.query(`UPDATE task_executions SET status = 'approved', reviewed_at = NOW(), reviewed_by = 'auto' WHERE id = $1`, [exec.id]);
           
           await client.query('COMMIT');
           console.log(`✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`);
-          
           await distributeReferralCommission(exec.executor_id, exec.payment_amount);
-          
         } catch (err) {
           await client.query('ROLLBACK');
           console.error(`❌ Auto-approve failed for execution ${exec.id}:`, err);
