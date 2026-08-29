@@ -2114,7 +2114,7 @@ app.post('/api/tasks/:id/proofs/:proofId/approve', async (c) => {
       [paymentAmount, executorId]
     );
     
-    const adminId = process.env.ADMIN_ID;
+    const adminId = c.env.ADMIN_ID;
     if (adminId && adminCommission > 0) {
       await client.query(
         'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', 
@@ -2241,7 +2241,7 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
       ['disputed', proofId]
     );
     
-    if (typeof bot !== 'undefined' && bot?.telegram && process.env.ADMIN_ID) {
+    if (typeof bot !== 'undefined' && bot?.telegram && c.env.ADMIN_ID) {
       try {
         await bot.telegram.sendMessage(
           process.env.ADMIN_ID,
