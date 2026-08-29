@@ -292,7 +292,7 @@ app.get('/callback', async (c) => {
   const secret = c.req.query('secret');
   const network = c.req.query('network');
 
-  if (secret !== process.env.CALLBACK_SECRET) {
+  if (secret !== c.env.CALLBACK_SECRET) {
     return c.text('Forbidden: Invalid Secret', 403);
   }
   if (!transaction_id) {
@@ -890,7 +890,7 @@ app.post("/api/deposit/submit", async (c) => {
     const requestId = result.rows[0].id;
     const fullTxid = result.rows[0].txid;
     
-    const ADMIN_ID = process.env.ADMIN_ID;
+    const ADMIN_ID = c.env.ADMIN_ID;
     
     // ملاحظة: كود البوت لن يعمل داخل Worker مباشرة، ولكن شرط التحقق يمنعه من التسبب في خطأ
     if (ADMIN_ID && typeof bot !== 'undefined' && bot?.telegram) {
@@ -1124,7 +1124,7 @@ app.post("/api/contact/submit", async (c) => {
     );
     
     const messageId = result.rows[0].id;
-    const ADMIN_ID = process.env.ADMIN_ID;
+    const ADMIN_ID = c.env.ADMIN_ID;
     
     if (ADMIN_ID && typeof bot !== 'undefined' && bot?.telegram) {
       try {
@@ -1200,7 +1200,7 @@ const verifyAdmin = async (c, next) => {
     } catch (e) { /* تجاهل إذا لم يكن الطلب JSON */ }
     
     const adminId = queryId || bodyId;
-    const REQUIRED_ADMIN_ID = process.env.ADMIN_ID || '7171208519';
+    const REQUIRED_ADMIN_ID = c.env.ADMIN_ID || '7171208519';
     
     if (!adminId || adminId !== String(REQUIRED_ADMIN_ID).trim()) {
       console.warn(`❌ Access denied: received="${adminId}", required="${REQUIRED_ADMIN_ID}"`);
