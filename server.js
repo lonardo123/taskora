@@ -2244,7 +2244,7 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     if (typeof bot !== 'undefined' && bot?.telegram && c.env.ADMIN_ID) {
       try {
         await bot.telegram.sendMessage(
-          process.env.ADMIN_ID,
+          c.env.ADMIN_ID,
           `⚠️ New Dispute:\n📋 Task: #${taskId}\n🔍 Execution: #${proofId}\n👤 User: ${user_id}\n📝 Reason:\n${reason.substring(0, 200)}...`
         );
       } catch (_) {}
@@ -2513,7 +2513,7 @@ const isAdminAuthenticated = async (c, next) => {
   }
   
   const adminId = (queryId || bodyId)?.toString()?.trim();
-  const REQUIRED_ADMIN_ID = process.env.ADMIN_ID || "7171208519";
+  const REQUIRED_ADMIN_ID = c.env.ADMIN_ID || "7171208519";
   
   if (adminId === REQUIRED_ADMIN_ID) {
     await next();
