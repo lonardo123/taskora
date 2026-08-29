@@ -1587,58 +1587,47 @@ app.post('/api/admin/messages/:id/reply', verifyAdmin, async (c) => {
 });
 
 // =========================
-// 📊 إحصائيات الأدمن (النسخة المدمجة الكاملة)
+// 📊 إحصائيات الأدمن (النسخة الموحدة والدقيقة)
 // =========================
 app.get('/api/admin/stats', verifyAdmin, async (c) => {
   try {
-    // جلب كل الإحصائيات من جميع الجداول دفعة واحدة
     const [
       deposits, withdrawals, messages, users, 
-      proofs, disputes, commission,
-      approvedToday, pendingProofsTasks, openDisputesTasks, commissionTasks
+      approvedToday, pendingProofs, openDisputes, commission
     ] = await Promise.all([
-      // من deposit_requests
       pool.query("SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'"),
-      // من withdrawals
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"),
-      // من admin_messages
       pool.query("SELECT COUNT(*) FROM admin_messages WHERE replied = false"),
-      // من users
       pool.query("SELECT COUNT(*) FROM users"),
-      // من task_proofs (الجدول القديم)
-      pool.query("SELECT COUNT(*) FROM task_proofs WHERE status = 'pending'"),
-      // من task_disputes (الجدول القديم)
-      pool.query("SELECT COUNT(*) FROM task_disputes WHERE status = 'open'"),
-      // من earnings (العمولات القديمة)
-      pool.query("SELECT COALESCE(SUM(amount), 0) AS total FROM earnings WHERE source IN ('admin_fee', 'referral_deposit')"),
-      
-      // ✅ الإحصائيات الجديدة من task_executions (للنظام الحديث)
       pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
       pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL`),
       pool.query(`SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'`),
       pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
     ]);
     
-    // ✅ دمج كل البيانات في استجابة واحدة شاملة
+    // 🔍 طباعة القيم الحقيقية في سجلات Cloudflare للتأكد من عمل الاستعلامات
+    console.log('📊 Stats Raw Data from DB:', {
+      deposits: deposits.rows[0].count,
+      withdrawals: withdrawals.rows[0].count,
+      messages: messages.rows[0].count,
+      users: users.rows[0].count,
+      approvedToday: approvedToday.rows[0].count,
+      pendingProofs: pendingProofs.rows[0].count,
+      openDisputes: openDisputes.rows[0].count,
+      commission: commission.rows[0].total
+    });
+
     return c.json({
       success: true,
       data: {
-        // البيانات الأساسية
         pending_deposits: parseInt(deposits.rows[0].count) || 0,
         pending_withdrawals: parseInt(withdrawals.rows[0].count) || 0,
         unread_messages: parseInt(messages.rows[0].count) || 0,
         total_users: parseInt(users.rows[0].count) || 0,
-        
-        // بيانات المهام (من النظام الحديث)
-        pending_proofs: parseInt(pendingProofsTasks.rows[0].count) || 0,
-        open_disputes: parseInt(openDisputesTasks.rows[0].count) || 0,
+        pending_proofs: parseInt(pendingProofs.rows[0].count) || 0,
+        open_disputes: parseInt(openDisputes.rows[0].count) || 0,
         approved_today: parseInt(approvedToday.rows[0].count) || 0,
-        
-        // العمولات (مجموع من النظامين)
-        admin_commission: (
-          parseFloat(commission.rows[0].total || 0) + 
-          parseFloat(commissionTasks.rows[0].total || 0)
-        ).toFixed(4)
+        admin_commission: parseFloat(commission.rows[0].total || 0).toFixed(4)
       }
     });
   } catch (err) {
