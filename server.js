@@ -2,26 +2,39 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { pool } from './db.js';
+import { pool, initDb } from './db.js'; // <-- لاحظ إضافة initDb هنا
 
 const app = new Hono();
 
+// 1. إعداد CORS
 app.use('*', cors());
 
-// التقاط أي أخطاء لاحقة في الـ pool
+// 2. 🚀 Middleware حاسم: يهيئ قاعدة البيانات باستخدام أسرار Cloudflare (c.env)
+// هذا يحل مشكلة "No database host" نهائياً
+app.use('*', async (c, next) => {
+  try {
+    initDb(c.env); // نمرر متغيرات البيئة الخاصة بـ Cloudflare هنا
+  } catch (err) {
+    console.error('❌ Failed to init DB:', err.message);
+    return c.json({ status: 'error', message: 'Database connection failed: ' + err.message }, 500);
+  }
+  await next();
+});
+
+// 3. التقاط أي أخطاء لاحقة في الـ pool (الآن أصبح آمناً 100% بسبب الخدعة في db.js)
 pool.on('error', (err) => {
   console.error('⚠️ PG pool error:', err);
 });
 
-// ✅ دالة مساعدة واحدة فقط (مدمجة ومصححة 100%)
+// ==========================================
+// دالة مساعدة واحدة فقط (مدمجة ومصححة)
+// ==========================================
 async function getOrCreateUser(client, telegramId) {
-  // 1. محاولة جلب المستخدم
   let q = await client.query(
     'SELECT id, balance FROM users WHERE telegram_id = $1',
     [telegramId]
   );
 
-  // 2. إذا لم يوجد، قم بإنشائه برصيد 0
   if (q.rows.length === 0) {
     q = await client.query(
       'INSERT INTO users (telegram_id, balance) VALUES ($1, 0) RETURNING id, balance',
@@ -29,12 +42,12 @@ async function getOrCreateUser(client, telegramId) {
     );
   }
 
-  // 3. إرجاع البيانات
   return {
     userDbId: q.rows[0].id,
     balance: Number(q.rows[0].balance)
   };
 }
+
 // ==========================================
 // تخزين آخر رسالة للسيرفر مؤقتًا
 // ==========================================
