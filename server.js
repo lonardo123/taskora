@@ -1587,35 +1587,63 @@ app.post('/api/admin/messages/:id/reply', verifyAdmin, async (c) => {
 });
 
 // =========================
-// 📊 Bonus: إحصائيات
+// 📊 إحصائيات الأدمن (النسخة المدمجة الكاملة)
 // =========================
 app.get('/api/admin/stats', verifyAdmin, async (c) => {
   try {
-    const [deposits, withdrawals, messages, users, proofs, disputes, commission] = await Promise.all([
+    // جلب كل الإحصائيات من جميع الجداول دفعة واحدة
+    const [
+      deposits, withdrawals, messages, users, 
+      proofs, disputes, commission,
+      approvedToday, pendingProofsTasks, openDisputesTasks, commissionTasks
+    ] = await Promise.all([
+      // من deposit_requests
       pool.query("SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'"),
+      // من withdrawals
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"),
+      // من admin_messages
       pool.query("SELECT COUNT(*) FROM admin_messages WHERE replied = false"),
+      // من users
       pool.query("SELECT COUNT(*) FROM users"),
+      // من task_proofs (الجدول القديم)
       pool.query("SELECT COUNT(*) FROM task_proofs WHERE status = 'pending'"),
+      // من task_disputes (الجدول القديم)
       pool.query("SELECT COUNT(*) FROM task_disputes WHERE status = 'open'"),
-      pool.query("SELECT COALESCE(SUM(amount), 0) AS total FROM earnings WHERE source IN ('admin_fee', 'referral_deposit')")
+      // من earnings (العمولات القديمة)
+      pool.query("SELECT COALESCE(SUM(amount), 0) AS total FROM earnings WHERE source IN ('admin_fee', 'referral_deposit')"),
+      
+      // ✅ الإحصائيات الجديدة من task_executions (للنظام الحديث)
+      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
+      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL`),
+      pool.query(`SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'`),
+      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
     ]);
     
+    // ✅ دمج كل البيانات في استجابة واحدة شاملة
     return c.json({
       success: true,
       data: {
-        pending_deposits: parseInt(deposits.rows[0].count),
-        pending_withdrawals: parseInt(withdrawals.rows[0].count),
-        unread_messages: parseInt(messages.rows[0].count),
-        total_users: parseInt(users.rows[0].count),
-        pending_proofs: parseInt(proofs.rows[0].count),
-        open_disputes: parseInt(disputes.rows[0].count),
-        admin_commission: parseFloat(commission.rows[0].total).toFixed(4)
+        // البيانات الأساسية
+        pending_deposits: parseInt(deposits.rows[0].count) || 0,
+        pending_withdrawals: parseInt(withdrawals.rows[0].count) || 0,
+        unread_messages: parseInt(messages.rows[0].count) || 0,
+        total_users: parseInt(users.rows[0].count) || 0,
+        
+        // بيانات المهام (من النظام الحديث)
+        pending_proofs: parseInt(pendingProofsTasks.rows[0].count) || 0,
+        open_disputes: parseInt(openDisputesTasks.rows[0].count) || 0,
+        approved_today: parseInt(approvedToday.rows[0].count) || 0,
+        
+        // العمولات (مجموع من النظامين)
+        admin_commission: (
+          parseFloat(commission.rows[0].total || 0) + 
+          parseFloat(commissionTasks.rows[0].total || 0)
+        ).toFixed(4)
       }
     });
   } catch (err) {
     console.error('❌ GET /api/admin/stats:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+    return c.json({ success: false, message: 'Server error', error: err.message }, 500);
   }
 });
 
@@ -2521,33 +2549,6 @@ const isAdminAuthenticated = async (c, next) => {
     return c.json({ success: false, message: "Admin access required" }, 403);
   }
 };
-
-// ✅ GET /api/admin/stats
-app.get('/api/admin/stats', isAdminAuthenticated, async (c) => {
-  try {
-    const [pendingProofs, openDisputes, approvedToday, commissionStats] = await Promise.all([
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL`),
-      pool.query(`SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'`),
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
-    ]);
-    
-    return c.json({
-      success: true,
-      data: {
-        pending_proofs: parseInt(pendingProofs.rows[0].count),
-        open_disputes: parseInt(openDisputes.rows[0].count),
-        approved_today: parseInt(approvedToday.rows[0].count),
-        admin_commission: parseFloat(commissionStats.rows[0].total)
-      }
-    });
-    
-  } catch (err) {
-    console.error('❌ /api/admin/stats:', err);
-    return c.json({ success: false, message: "Failed to load stats", error: err.message }, 500);
-  }
-});
-
 
 app.get('/api/admin/pending-proofs', isAdminAuthenticated, async (c) => {
   try {
