@@ -610,13 +610,17 @@ function checkAdminAccess() {
 window.addEventListener('load', async () => {
   const hasAccess = checkAdminAccess();
   if (!hasAccess) return;
-  await loadDashboardStats();
-  await loadTotalUsers(); 
-  await loadDeposits();
-  await loadMessages();
-  await loadPendingProofs();
-  await loadDisputes();
-  await loadCommissionStats();
+  
+  // ✅ استخدام allSettled لضمان عدم توقف التحميل إذا فشل طلب واحد مؤقتاً
+  await Promise.allSettled([
+    loadDashboardStats(),
+    loadTotalUsers(), 
+    loadDeposits(),
+    loadMessages(),
+    loadPendingProofs(),
+    loadDisputes(),
+    loadCommissionStats()
+  ]);
 });
 
 // ================= UTILS =================
@@ -1745,49 +1749,46 @@ function openResolveModal(disputeId, executionId, proof = '') {
 // ================= COMMISSION STATS =================
 async function loadCommissionStats() {
   const content = document.getElementById('statsContent');
+  if (!content) return;
   content.innerHTML = '<div class="loading">Loading statistics...</div>';
   
   try {
-    const res = await fetch(`${API}/api/admin/commission-stats?user_id=${REQUIRED_ADMIN_ID}`);
+    // ✅ تم التوحيد لاستخدام admin_id بدلاً من user_id
+    const res = await fetch(`${API}/api/admin/commission-stats?admin_id=${REQUIRED_ADMIN_ID}`);
+    if (!res.ok) throw new Error('Network response was not ok');
     const data = await res.json();
     
-    if (!data.success) {
-      content.innerHTML = '<p class="alert alert-error">Failed to load statistics</p>';
+    if (!data.success || !data.data) {
+      content.innerHTML = '<p class="alert alert-error">Failed to load statistics. Please refresh.</p>';
       return;
     }
     
     const stats = data.data;
-    
     content.innerHTML = `
       <div style="display:grid;gap:15px">
         <div class="card">
           <h4>💰 Today's Commission</h4>
           <p class="value" style="font-size:28px;color:#22c55e">${formatPrice(stats.today)}</p>
-          <p style="color:#94a3b8;font-size:13px;margin-top:5px">From task completions</p>
         </div>
         <div class="card">
           <h4>📊 This Week</h4>
           <p class="value" style="font-size:28px;color:#22c55e">${formatPrice(stats.week)}</p>
-          <p style="color:#94a3b8;font-size:13px;margin-top:5px">Total admin commission</p>
         </div>
         <div class="card">
           <h4>📈 This Month</h4>
           <p class="value" style="font-size:28px;color:#22c55e">${formatPrice(stats.month)}</p>
-          <p style="color:#94a3b8;font-size:13px;margin-top:5px">Total admin commission</p>
         </div>
         <div class="card">
           <h4>🏆 All Time</h4>
           <p class="value" style="font-size:28px;color:#22c55e">${formatPrice(stats.all_time)}</p>
-          <p style="color:#94a3b8;font-size:13px;margin-top:5px">Total admin commission earned</p>
         </div>
       </div>
     `;
   } catch (err) {
-    console.error(err);
-    content.innerHTML = '<p class="alert alert-error">Failed to load statistics</p>';
+    console.error('❌ loadCommissionStats:', err);
+    content.innerHTML = '<p class="alert alert-error">Failed to load statistics. Please refresh.</p>';
   }
 }
-
 
   
 // ================= REFRESH ALL =================
