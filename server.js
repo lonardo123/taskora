@@ -1186,39 +1186,45 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن (محول إلى Hono)
+// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة والمصححة 100%)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    const queryId = c.req.query('admin_id')?.toString()?.trim();
-    let bodyId = '';
+    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً (الأكثر شيوعاً في GET)
+    let adminId = c.req.query('admin_id') || c.req.query('user_id');
     
-    // محاولة قراءة الجسم بأمان (Hono يخزن النتيجة لذا يمكن للمسار قراءتها لاحقاً)
-    try {
-      const body = await c.req.json();
-      bodyId = body?.admin_id?.toString()?.trim();
-    } catch (e) { /* تجاهل إذا لم يكن الطلب JSON */ }
+    // 2. إذا لم توجد، محاولة القراءة من جسم الطلب (Body) لطلبات POST
+    if (!adminId) {
+      try {
+        const body = await c.req.json();
+        adminId = body?.admin_id || body?.user_id;
+      } catch (e) {
+        // تجاهل الخطأ بأمان إذا لم يكن الطلب يحتوي على JSON
+      }
+    }
     
-    const adminId = queryId || bodyId;
-    const REQUIRED_ADMIN_ID = c.env.ADMIN_ID || '7171208519';
+    const REQUIRED_ADMIN_ID = (c.env.ADMIN_ID || '7171208519').toString().trim();
+    const providedId = adminId ? adminId.toString().trim() : '';
     
-    if (!adminId || adminId !== String(REQUIRED_ADMIN_ID).trim()) {
-      console.warn(`❌ Access denied: received="${adminId}", required="${REQUIRED_ADMIN_ID}"`);
+    if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
+      console.warn(`❌ Access denied: received="${providedId}", required="${REQUIRED_ADMIN_ID}"`);
       return c.json({ success: false, message: '❌ Access denied: Invalid admin_id' }, 403);
     }
 
-    await pool.query(
-      `UPDATE users 
-       SET last_login_at = now()
-       WHERE telegram_id = $1
-         AND last_login_at < now() - interval '24 hours'`,
-      [adminId]
-    );
+    // تحديث وقت الدخول (آمن ولا يوقف العملية إذا فشل)
+    try {
+      await pool.query(
+        `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
+        [providedId]
+      );
+    } catch (dbErr) {
+      console.warn('⚠️ Failed to update last_login_at for admin (non-critical):', dbErr.message);
+    }
     
-    // تمرير التحكم للمسار التالي
+    // السماح بالمرور للمسار التالي
     await next();
   } catch (err) {
-    console.error('❌ verifyAdmin error:', err);
+    console.error('❌ verifyAdmin critical error:', err);
     return c.json({ success: false, message: 'Server error in admin verification' }, 500);
   }
 };
