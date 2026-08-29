@@ -144,24 +144,19 @@ app.get('/api/worker/message', (c) => {
 });
 
 // ==========================================
-// مسار الملف الشخصي للمستخدم
+// مسار الملف الشخصي للمستخدم (مُحسّن ومتوافق 100% مع Schema)
 // ==========================================
 app.get('/api/user/profile', async (c) => {
   const user_id = c.req.query('user_id');
 
+  // 1. التحقق من وجود المعرف
   if (!user_id) {
-    return c.json(
-      {
-        status: 'error',
-        message: 'user_id is required'
-      },
-      400
-    );
+    return c.json({ status: 'error', message: 'user_id is required' }, 400);
   }
 
   try {
-    const result = await pool.query(
-      `
+    // 2. محاولة جلب بيانات المستخدم
+    const result = await pool.query(`
       SELECT
         id,
         telegram_id,
@@ -176,50 +171,51 @@ app.get('/api/user/profile', async (c) => {
       FROM users
       WHERE telegram_id = $1
       LIMIT 1
-      `,
-      [user_id]
-    );
+    `, [user_id]);
 
+    // 3. إذا لم يكن المستخدم موجوداً، نقوم بإنشائه
     if (result.rows.length === 0) {
-      await pool.query(
-        `
-        INSERT INTO users (
-          telegram_id,
-          balance,
-          created_at
-        )
-        VALUES ($1, $2, NOW())
-        `,
-        [user_id, 0]
-      );
+      await pool.query(`
+        INSERT INTO users (telegram_id, balance, created_at, last_login_at)
+        VALUES ($1, $2, NOW(), NOW())
+      `, [user_id, 0]);
 
       return c.json({
         status: 'ok',
         user: {
           telegram_id: Number(user_id),
-          balance: 0
+          balance: 0,
+          username: null,
+          name: null,
+          referral_code: null,
+          referral_earnings: 0
         }
       });
     }
 
+    // 4. إذا كان موجوداً، نقوم بتنسيق البيانات (تحويل الأرقام من string إلى number)
+    const user = result.rows[0];
+    const formattedUser = {
+      id: user.id,
+      telegram_id: Number(user.telegram_id),
+      username: user.username,
+      name: user.name,
+      balance: parseFloat(user.balance) || 0,          // تحويل مهم جداً
+      payeer_wallet: user.payeer_wallet,
+      referral_code: user.referral_code,
+      referral_earnings: parseFloat(user.referral_earnings) || 0, // تحويل مهم جداً
+      created_at: user.created_at,
+      last_login_at: user.last_login_at
+    };
+
     return c.json({
       status: 'ok',
-      user: result.rows[0]
+      user: formattedUser
     });
 
   } catch (err) {
-    console.error(
-      '❌ Error in /api/user/profile:',
-      err
-    );
-
-    return c.json(
-      {
-        status: 'error',
-        message: 'Server error'
-      },
-      500
-    );
+    console.error('❌ Error in /api/user/profile:', err);
+    return c.json({ status: 'error', message: 'Server error' }, 500);
   }
 });
 // =======================
