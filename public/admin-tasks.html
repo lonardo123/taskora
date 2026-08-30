@@ -1063,67 +1063,87 @@ async function loadDashboardStats() {
   }
 }
 
-// ================= 📥 DEPOSITS =================
-async function loadDeposits() {
-  const list = document.getElementById('depositsList');
-  list.innerHTML = '<div class="loading">Loading deposit requests...</div>';
+// ================= DISPUTES =================
+let currentDispute = null;
+
+async function loadDisputes() {
+  const list = document.getElementById('disputesList');
+  if (!list) return;
+  list.innerHTML = '<div class="loading">Loading disputes...</div>';
   
   try {
-    // ✅ جلب الإيداعات المعلقة من السيرفر مباشرة
-    const res = await fetch(`${API}/api/admin/deposits?admin_id=${REQUIRED_ADMIN_ID}&status=pending`);
-    
-    if (!res.ok) throw new Error('Failed to fetch deposits');
-    
+    // ✅ تم تصحيح الرابط هنا: كان يطلب deposits بالخطأ
+    const res = await fetch(
+      `${API}/api/admin/disputes?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+
+    // ✅ الطريقة الأنظف والأكثر أماناً لقراءة JSON
     const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.message || `HTTP ${res.status}`);
+    }
     
-    // ✅ التعامل مع حالة عدم وجود إيداعات معلقة
+    const count = data.success && data.data ? data.data.length : 0;
+    document.getElementById('openDisputesCount').textContent = count;
+    
     if (!data.success || !data.data?.length) {
-      list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No pending deposit requests</p>';
-      document.getElementById('pendingDepositsCount').textContent = '0';
+      list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No open disputes</p>';
       return;
     }
     
-    // ✅ تحديث عداد الإيداعات المعلقة
-    document.getElementById('pendingDepositsCount').textContent = data.data.length;
-    
-    // ✅ عرض قائمة الإيداعات
-    list.innerHTML = data.data.map(dep => `
-      <div class="request-item">
-        <div class="request-header">
-          <div class="request-info">
-            <p><strong>👤 User:</strong> @${dep.username || dep.user_id} <span style="color:#64748b">(ID: ${dep.user_id})</span></p>
-            <p><strong>🔗 TxID:</strong> <span class="txid-box">${dep.txid}</span></p>
-            <p><strong>📅 Submitted:</strong> ${formatDate(dep.created_at)}</p>
-            <p><strong>💰 Amount:</strong> <span style="color:#22c55e">$${parseFloat(dep.amount).toFixed(2)}</span></p>
+    list.innerHTML = data.data.map(d => `
+      <div class="proof-item" style="border-left:4px solid #8b5cf6">
+        <div class="proof-header" style="border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:15px">
+          <strong>⚠️ Dispute #${d.dispute_id}</strong>
+          <span class="status-badge status-disputed">Open</span>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px">
+          <div style="background:#0f172a;padding:12px;border-radius:8px">
+            <h4 style="color:#60a5fa;font-size:14px;margin-bottom:10px">📋 Task Details</h4>
+            <p style="font-size:13px"><strong>Title:</strong> ${d.task_title} <span style="color:#94a3b8">#${d.task_id}</span></p>
+            <p style="font-size:13px"><strong>Creator:</strong> @${d.creator_username || d.creator_telegram}</p>
+            <p style="font-size:13px"><strong>Reward:</strong> <span style="color:#22c55e">${formatPrice(d.executor_reward)}</span></p>
+            ${d.target_url ? `<p style="font-size:13px"><strong>URL:</strong> <a href="${d.target_url}" target="_blank" style="color:#60a5fa">Open Link ↗</a></p>` : ''}
           </div>
-          <div class="request-actions">
-            <!-- ✅ زر الموافقة مع البيانات الصحيحة -->
-            <button class="btn-approve" 
-                    onclick="openApproveModal(this)" 
-                    data-deposit-id="${dep.id}" 
-                    data-user-id="${dep.user_id}" 
-                    data-txid="${dep.txid || ''}" 
-                    data-amount="${dep.amount}"
-                    style="padding:8px 16px; background:#27ae60; color:#fff; border:none; border-radius:6px; cursor:pointer;">
-              ✅ Approve
-            </button>
-            <!-- زر الرفض -->
-            <button class="btn btn-danger btn-sm" onclick="rejectDeposit(${dep.id}, ${dep.user_id})">❌ Reject</button>
+          
+          <div style="background:#0f172a;padding:12px;border-radius:8px">
+            <h4 style="color:#60a5fa;font-size:14px;margin-bottom:10px">👤 Executor Details</h4>
+            <p style="font-size:13px"><strong>Executor:</strong> @${d.executor_username || d.executor_telegram}</p>
+            <p style="font-size:13px"><strong>Submitted:</strong> ${formatDate(d.proof_submitted_at)}</p>
+            <p style="font-size:13px"><strong>Amount:</strong> <span style="color:#22c55e">${formatPrice(d.payment_amount)}</span></p>
           </div>
+        </div>
+        
+        <div style="margin-bottom:15px">
+          <h4 style="color:#94a3b8;font-size:13px;margin-bottom:5px">📄 Task Description:</h4>
+          <div style="background:#0f172a;padding:12px;border-radius:6px;color:#cbd5e1;font-size:13px;white-space:pre-wrap">${d.task_description || 'No description'}</div>
+        </div>
+        
+        <div style="margin-bottom:15px">
+          <h4 style="color:#94a3b8;font-size:13px;margin-bottom:5px">📤 Executor's Proof:</h4>
+          <div class="proof-content" style="margin:0;background:#0f172a;border:1px solid #475569">${d.executor_proof || '<span style="color:#ef4444">No proof</span>'}</div>
+        </div>
+        
+        <div style="margin-bottom:15px">
+          <h4 style="color:#facc15;font-size:13px;margin-bottom:5px">⚠️ Dispute Reason:</h4>
+          <div style="background:#fef3c720;padding:12px;border-radius:6px;color:#facc15;font-size:13px;white-space:pre-wrap;border:1px solid #facc1540">${d.reason}</div>
+        </div>
+        
+        <div class="proof-actions" style="border-top:1px solid #334155;padding-top:15px">
+          <button class="btn btn-primary btn-sm" onclick="openResolveModal(${d.dispute_id}, ${d.execution_id}, '${d.executor_proof?.replace(/'/g, "\\'") || ''}')">⚖️ Review & Resolve</button>
         </div>
       </div>
     `).join('');
     
   } catch (err) {
-    console.error('❌ loadDeposits:', err);
-    // ✅ رسالة خطأ بديلة بدون إشارة للبوت
-    list.innerHTML = `
-      <div class="alert alert-warning" style="padding:15px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:6px;margin:10px 0;">
-        ⚠️ Failed to load deposits. Please refresh or check server connection.<br>
-        <button class="btn btn-primary btn-sm" onclick="loadDeposits()" style="margin-top:10px;padding:8px 16px;background:#3b82f6;color:#fff;border:none;border-radius:4px;cursor:pointer;">
-          🔄 Retry
-        </button>
-      </div>`;
+    console.error('❌ loadDisputes:', err);
+    list.innerHTML = '<p class="alert alert-error">Failed to load disputes. Please refresh.</p>';
   }
 }
 // ========================
@@ -1255,10 +1275,9 @@ async function rejectDeposit(depositId, userId) {
   openRejectModal(depositId, userId);
 }
 // ================= 📤 WITHDRAWALS =================
-
 let currentWithdrawalId = null;  
   
-  async function loadWithdrawals() {
+async function loadWithdrawals() {
   const list = document.getElementById('withdrawalsList');
   const countEl = document.getElementById('pendingWithdrawalsCount');
   
@@ -1267,42 +1286,18 @@ let currentWithdrawalId = null;
   
   try {
     const res = await fetch(
-  `${API}/api/admin/withdrawals?status=pending&admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-  {
-    cache: 'no-store',
-    headers: {
-      'Accept': 'application/json'
+      `${API}/api/admin/withdrawals?status=pending&admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.message || `HTTP ${res.status}`);
     }
-  }
-);
-
-const text = await res.text();
-
-let data;
-
-try {
-
-  data = JSON.parse(text);
-
-} catch (jsonError) {
-
-  console.error(
-    '❌ withdrawals returned non-JSON:',
-    text.substring(0, 500)
-  );
-
-  throw new Error(
-    `Invalid withdrawals response (${res.status})`
-  );
-}
-
-if (!res.ok) {
-
-  throw new Error(
-    data.message || `HTTP ${res.status}`
-  );
-
-}
     
     if (!data.success || !data.data?.length) {
       list.innerHTML = '<p class="empty-state">✅ No pending withdrawal requests</p>';
@@ -1312,33 +1307,30 @@ if (!res.ok) {
     
     if (countEl) countEl.textContent = data.data.length;
     
-    // ✅ عرض القائمة مع عنصر الرسالة الداخلي
     list.innerHTML = data.data.map(wd => `
-  <div class="request-item" id="withdrawal-${wd.id}">
-    <div class="request-header">
-      <div class="request-info">
-        <p><strong>👤 User:</strong> <span style="color:#64748b">(ID: ${wd.user_id})</span></p>
-        <p><strong>💳 Payeer:</strong> <span class="txid-box">${wd.payeer_wallet || 'N/A'}</span></p>
-        <p><strong>📅 Requested:</strong> ${formatDate(wd.requested_at)}</p>
-        <p><strong>💰 Amount:</strong> <span style="color:#f59e0b">$${parseFloat(wd.amount).toFixed(2)}</span></p>
-        <p><strong>📊 Status:</strong> <span class="status-badge status-pending">⏳ Pending</span></p>
+      <div class="request-item" id="withdrawal-${wd.id}">
+        <div class="request-header">
+          <div class="request-info">
+            <p><strong>👤 User:</strong> <span style="color:#64748b">(ID: ${wd.user_id})</span></p>
+            <p><strong>💳 Payeer:</strong> <span class="txid-box">${wd.payeer_wallet || 'N/A'}</span></p>
+            <p><strong>📅 Requested:</strong> ${formatDate(wd.requested_at)}</p>
+            <p><strong>💰 Amount:</strong> <span style="color:#f59e0b">$${parseFloat(wd.amount).toFixed(2)}</span></p>
+            <p><strong>📊 Status:</strong> <span class="status-badge status-pending">⏳ Pending</span></p>
+          </div>
+          <div class="request-actions">
+            <button class="btn btn-success btn-sm" onclick="openWithdrawalModal('approve', ${wd.id}, ${wd.user_id}, ${wd.amount})">✅ Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="openWithdrawalModal('reject', ${wd.id}, ${wd.user_id}, ${wd.amount})">❌ Reject</button>
+          </div>
+        </div>
+        <div class="action-message" id="msg-${wd.id}"></div>
       </div>
-      <div class="request-actions">
-  <button class="btn btn-success btn-sm" onclick="openWithdrawalModal('approve', ${wd.id}, ${wd.user_id}, ${wd.amount})">✅ Approve</button>
-  <button class="btn btn-danger btn-sm" onclick="openWithdrawalModal('reject', ${wd.id}, ${wd.user_id}, ${wd.amount})">❌ Reject</button>
-</div>
-    </div>
-    <!-- ✅ الحاوية التي ستظهر فيها الرسالة أسفل الطلب مباشرة -->
-    <div class="action-message" id="msg-${wd.id}"></div>
-  </div>
-`).join('');
+    `).join('');
     
   } catch (err) {
     console.error('❌ loadWithdrawals:', err);
     list.innerHTML = `<div class="alert alert-error">⚠️ Failed to load withdrawals.<br><button onclick="loadWithdrawals()">🔄 Retry</button></div>`;
   }
 }
-
 // ================= 🪟 مودال السحب (موافقة/رفض) =================
 let pendingWithdrawal = null;
 
@@ -1793,38 +1785,19 @@ async function loadPendingProofs() {
   list.innerHTML = '<div class="loading">Loading pending proofs...</div>';
   
   try {
-   const res = await fetch(
-  `${API}/api/admin/pending-proofs?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-  {
-    cache: 'no-store',
-    headers: {
-      'Accept': 'application/json'
+    const res = await fetch(
+      `${API}/api/admin/pending-proofs?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.message || `HTTP ${res.status}`);
     }
-  }
-);
-
-const text = await res.text();
-
-let data;
-
-try {
-  data = JSON.parse(text);
-} catch (jsonError) {
-  console.error(
-    '❌ pending-proofs returned non-JSON:',
-    text.substring(0, 500)
-  );
-
-  throw new Error(
-    `Invalid server response (${res.status})`
-  );
-}
-
-if (!res.ok) {
-  throw new Error(
-    data.message || `HTTP ${res.status}`
-  );
-}
     
     if (!data.success || !data.data?.length) {
       list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No pending proofs to review</p>';
@@ -1861,11 +1834,10 @@ if (!res.ok) {
       </div>
     `).join('');
   } catch (err) {
-    console.error(err);
+    console.error('❌ loadPendingProofs:', err);
     list.innerHTML = '<p class="alert alert-error">Failed to load proofs</p>';
   }
 }
-
 async function approveProof(taskId, proofId) {
   if (!confirm('✅ Confirm approving this proof and sending payment?')) return;
   
