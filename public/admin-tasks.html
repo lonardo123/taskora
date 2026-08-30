@@ -614,39 +614,24 @@ window.addEventListener('load', async () => {
   const hasAccess = checkAdminAccess();
   if (!hasAccess) return;
   
-  console.log('🚀 بدء تحميل البيانات بشكل متتابع لتجنب إرهاق قاعدة البيانات...');
-
   try {
-    // 1. تحميل الإحصائيات الرئيسية أولاً (الأهم)
     await loadDashboardStats();
-    await delay(150); // استراحة 150 ملي ثانية
-    
-    // 2. تحميل عدد المستخدمين
+    await delay(50);
     await loadTotalUsers();
-    await delay(150);
-    
-    // 3. تحميل القوائم واحدة تلو الأخرى
+    await delay(70);
     await loadDeposits();
-    await delay(150);
-    
+    await delay(90);
     await loadWithdrawals();
-    await delay(150);
-    
+    await delay(110);
     await loadMessages();
-    await delay(150);
-    
+    await delay(130);
     await loadPendingProofs();
     await delay(150);
-    
     await loadDisputes();
-    await delay(150);
-    
+    await delay(170);
     await loadCommissionStats();
-    
-    console.log('✅ تم تحميل جميع البيانات بنجاح وأمان!');
-    
   } catch (error) {
-    console.error('❌ حدث خطأ أثناء التحميل المتتابع:', error);
+    console.error('❌ Error:', error);
   }
 });
 
