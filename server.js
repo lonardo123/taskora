@@ -1186,20 +1186,24 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن وتحديث وقت الدخول (النسخة النهائية الآمنة)
+// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة 100% من أخطاء الـ I/O)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً (الأكثر أماناً لطلبات GET)
+    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً
     let adminId = c.req.query('admin_id') || c.req.query('user_id');
     
-    // 2. محاولة القراءة من جسم الطلب (Body) فقط إذا كانت الطريقة POST, PUT, أو DELETE
+    // 2. إذا لم توجد، محاولة القراءة من جسم الطلب بأمان شديد
     if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
       try {
-        const body = await c.req.json();
-        adminId = body?.admin_id || body?.user_id;
+        // نتأكد أولاً أن الطلب يحتوي فعلياً على JSON قبل محاولة قراءته
+        const contentType = c.req.header('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const body = await c.req.json();
+          adminId = body?.admin_id || body?.user_id;
+        }
       } catch (e) {
-        // تجاهل الخطأ بأمان إذا لم يكن الطلب يحتوي على JSON
+        console.warn('⚠️ Failed to parse admin body (non-critical):', e.message);
       }
     }
     
@@ -1211,7 +1215,7 @@ const verifyAdmin = async (c, next) => {
       return c.json({ success: false, message: '❌ Access denied: Invalid admin_id' }, 403);
     }
 
-    // ✅ تحديث وقت الدخول (محصور داخل try/catch لضمان عدم إيقاف الطلب إذا فشل)
+    // 3. تحديث وقت الدخول (محصور داخل try/catch لضمان عدم إيقاف الطلب)
     try {
       await pool.query(
         `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
@@ -1221,11 +1225,41 @@ const verifyAdmin = async (c, next) => {
       console.warn('⚠️ Failed to update last_login_at for admin (non-critical):', dbErr.message);
     }
     
-    // السماح بالمرور للمسار التالي
     await next();
   } catch (err) {
     console.error('❌ verifyAdmin critical error:', err);
-    return c.json({ success: false, message: 'Server error in admin verification' }, 500);
+    return c.json({ success: false, message: 'Server error in admin verification: ' + err.message }, 500);
+  }
+};
+
+// =========================
+// 🔐 Middleware بديل للتحقق (مستخدم في بعض مسارات المهام)
+// =========================
+const isAdminAuthenticated = async (c, next) => {
+  try {
+    let adminId = c.req.query('admin_id') || c.req.query('user_id');
+    
+    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
+      try {
+        const contentType = c.req.header('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const body = await c.req.json();
+          adminId = body?.admin_id || body?.user_id;
+        }
+      } catch (e) {}
+    }
+
+    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
+    const providedId = adminId ? adminId.toString().trim() : '';
+
+    if (providedId === REQUIRED_ADMIN_ID) {
+      await next();
+    } else {
+      return c.json({ success: false, message: "Admin access required" }, 403);
+    }
+  } catch (err) {
+    console.error('❌ isAdminAuthenticated CRITICAL ERROR:', err);
+    return c.json({ success: false, message: 'Server error: ' + err.message }, 500);
   }
 };
 // =========================
@@ -2523,34 +2557,6 @@ app.get('/api/tasks/:id', async (c) => {
 
 // ======================= ⚙️ ADMIN PANEL ROUTES =======================
 
-// =========================
-// 🔐 Middleware بديل للتحقق (مستخدم في بعض مسارات المهام)
-// =========================
-const isAdminAuthenticated = async (c, next) => {
-  try {
-    let adminId = c.req.query('admin_id') || c.req.query('user_id');
-    
-    // قراءة الجسم فقط لطلبات POST/PUT/DELETE لمنع أخطاء I/O
-    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
-      try {
-        const body = await c.req.json();
-        adminId = body?.admin_id || body?.user_id;
-      } catch (e) {}
-    }
-
-    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
-    const providedId = adminId ? adminId.toString().trim() : '';
-
-    if (providedId === REQUIRED_ADMIN_ID) {
-      await next();
-    } else {
-      return c.json({ success: false, message: "Admin access required" }, 403);
-    }
-  } catch (err) {
-    console.error('❌ isAdminAuthenticated CRITICAL ERROR:', err);
-    return c.json({ success: false, message: 'Server error: ' + err.message }, 500);
-  }
-};
 
 app.get('/api/admin/pending-proofs', isAdminAuthenticated, async (c) => {
   try {
@@ -2734,17 +2740,24 @@ export default {
     return app.fetch(request, env, ctx);
   },
 
-  // 2. المعالج المجدول (Cron) - مع إصلاح حاسم لتهيئة قاعدة البيانات
+   // 2. المعالج المجدول (Cron) - مع تحسينات الأمان والتشخيص
   async scheduled(controller, env, ctx) {
     console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
     
-    // ✅ إصلاح حاسم: تهيئة قاعدة البيانات باستخدام env الخاص بالـ Cron
-    if (typeof initDb === 'function' && !globalThis._dbPool) {
-      initDb(env);
+    try {
+      // محاولة تهيئة قاعدة البيانات بأمان
+      if (typeof initDb === 'function' && !globalThis._dbPool) {
+        console.log("🔍 محاولة تهيئة قاعدة البيانات للـ Cron...");
+        initDb(env);
+      }
+    } catch (initErr) {
+      console.error("❌ فشل تهيئة قاعدة البيانات في الـ Cron:", initErr.message);
+      console.error("🔍 مفاتيح البيئة المتاحة:", Object.keys(env || {}));
+      return; // الخروج بأمان إذا فشلت التهيئة لمنع انهيار الـ Worker
     }
 
-    const client = await pool.connect();
     try {
+      const client = await pool.connect();
       const now = new Date();
       const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
       
@@ -2780,10 +2793,7 @@ export default {
         console.log(`✅ Auto-approved ${rows.length} pending proof(s) after 24 hours`);
       }
     } catch (err) {
-      await client.query('ROLLBACK');
       console.error('❌ Auto-approve cron error:', err);
-    } finally {
-      client.release();
     }
   }
 };
