@@ -606,21 +606,48 @@ function checkAdminAccess() {
   return true;
 }
 
-// ================= INIT =================
+// ================= دالة مساعدة للتأخير البسيط =================
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ================= INIT (تحميل متتابع وآمن) =================
 window.addEventListener('load', async () => {
   const hasAccess = checkAdminAccess();
   if (!hasAccess) return;
   
-  // ✅ استخدام allSettled لضمان عدم توقف التحميل إذا فشل طلب واحد مؤقتاً
-  await Promise.allSettled([
-    loadDashboardStats(),
-    loadTotalUsers(), 
-    loadDeposits(),
-    loadMessages(),
-    loadPendingProofs(),
-    loadDisputes(),
-    loadCommissionStats()
-  ]);
+  console.log('🚀 بدء تحميل البيانات بشكل متتابع لتجنب إرهاق قاعدة البيانات...');
+
+  try {
+    // 1. تحميل الإحصائيات الرئيسية أولاً (الأهم)
+    await loadDashboardStats();
+    await delay(150); // استراحة 150 ملي ثانية
+    
+    // 2. تحميل عدد المستخدمين
+    await loadTotalUsers();
+    await delay(150);
+    
+    // 3. تحميل القوائم واحدة تلو الأخرى
+    await loadDeposits();
+    await delay(150);
+    
+    await loadWithdrawals();
+    await delay(150);
+    
+    await loadMessages();
+    await delay(150);
+    
+    await loadPendingProofs();
+    await delay(150);
+    
+    await loadDisputes();
+    await delay(150);
+    
+    await loadCommissionStats();
+    
+    console.log('✅ تم تحميل جميع البيانات بنجاح وأمان!');
+    
+  } catch (error) {
+    console.error('❌ حدث خطأ أثناء التحميل المتتابع:', error);
+  }
 });
 
 // ================= UTILS =================
