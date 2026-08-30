@@ -1186,15 +1186,15 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة والمصححة 100%)
+// 🔐 Middleware: التحقق من الأدمن وتحديث وقت الدخول (النسخة النهائية الآمنة)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً (الأكثر شيوعاً في GET)
+    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً (الأكثر أماناً لطلبات GET)
     let adminId = c.req.query('admin_id') || c.req.query('user_id');
     
-    // 2. إذا لم توجد، محاولة القراءة من جسم الطلب (Body) لطلبات POST
-    if (!adminId) {
+    // 2. محاولة القراءة من جسم الطلب (Body) فقط إذا كانت الطريقة POST, PUT, أو DELETE
+    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
       try {
         const body = await c.req.json();
         adminId = body?.admin_id || body?.user_id;
@@ -1203,7 +1203,7 @@ const verifyAdmin = async (c, next) => {
       }
     }
     
-    const REQUIRED_ADMIN_ID = (c.env.ADMIN_ID || '7171208519').toString().trim();
+    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
     
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
@@ -1211,7 +1211,7 @@ const verifyAdmin = async (c, next) => {
       return c.json({ success: false, message: '❌ Access denied: Invalid admin_id' }, 403);
     }
 
-    // تحديث وقت الدخول (آمن ولا يوقف العملية إذا فشل)
+    // ✅ تحديث وقت الدخول (محصور داخل try/catch لضمان عدم إيقاف الطلب إذا فشل)
     try {
       await pool.query(
         `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
@@ -1228,7 +1228,6 @@ const verifyAdmin = async (c, next) => {
     return c.json({ success: false, message: 'Server error in admin verification' }, 500);
   }
 };
-
 // =========================
 // 📥 1. جلب طلبات الإيداع
 // =========================
@@ -2531,14 +2530,15 @@ const isAdminAuthenticated = async (c, next) => {
   try {
     let adminId = c.req.query('admin_id') || c.req.query('user_id');
     
-    if (!adminId) {
+    // قراءة الجسم فقط لطلبات POST/PUT/DELETE لمنع أخطاء I/O
+    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
       try {
         const body = await c.req.json();
         adminId = body?.admin_id || body?.user_id;
       } catch (e) {}
     }
 
-    const REQUIRED_ADMIN_ID = (c.env.ADMIN_ID || '7171208519').toString().trim();
+    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
 
     if (providedId === REQUIRED_ADMIN_ID) {
@@ -2723,15 +2723,26 @@ async function distributeReferralCommission(telegramId, earningAmount) {
 }
 
 // =====================================================================
-// === نهاية ملف server.js (هذا هو الكود الصحيح تماماً) ===
+// === نهاية ملف server.js (النسخة النهائية والمضمونة) ===
 // =====================================================================
 export default {
-  // 1. استقبال طلبات HTTP (بديل app.listen)
-  fetch: app.fetch,
+  // 1. استقبال طلبات HTTP (مع ضمان تهيئة قاعدة البيانات أولاً)
+  fetch: async (request, env, ctx) => {
+    if (typeof initDb === 'function' && !globalThis._dbPool) {
+      initDb(env);
+    }
+    return app.fetch(request, env, ctx);
+  },
 
-  // 2. المعالج المجدول (بديل setInterval)
+  // 2. المعالج المجدول (Cron) - مع إصلاح حاسم لتهيئة قاعدة البيانات
   async scheduled(controller, env, ctx) {
     console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
+    
+    // ✅ إصلاح حاسم: تهيئة قاعدة البيانات باستخدام env الخاص بالـ Cron
+    if (typeof initDb === 'function' && !globalThis._dbPool) {
+      initDb(env);
+    }
+
     const client = await pool.connect();
     try {
       const now = new Date();
@@ -2755,7 +2766,10 @@ export default {
           
           await client.query('COMMIT');
           console.log(`✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`);
-          await distributeReferralCommission(exec.executor_id, exec.payment_amount);
+          
+          if (typeof distributeReferralCommission === 'function') {
+            await distributeReferralCommission(exec.executor_id, exec.payment_amount);
+          }
         } catch (err) {
           await client.query('ROLLBACK');
           console.error(`❌ Auto-approve failed for execution ${exec.id}:`, err);
