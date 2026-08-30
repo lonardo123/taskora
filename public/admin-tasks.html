@@ -1303,7 +1303,6 @@ if (!res.ok) {
   );
 
 }
-    const data = await res.json();
     
     if (!data.success || !data.data?.length) {
       list.innerHTML = '<p class="empty-state">✅ No pending withdrawal requests</p>';
