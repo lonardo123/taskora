@@ -1186,34 +1186,38 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن (النسخة المبسطة والآمنة)
+// 🔐 Middleware الأدمن
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // نقرأ المعرف من رابط الاستعلام فقط (لا نقرأ الـ Body أبداً)
-    const adminId = c.req.query('admin_id') || c.req.query('user_id');
-    
-    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
-    const providedId = adminId ? adminId.toString().trim() : '';
-    
+
+    const adminId =
+      c.req.query('admin_id') ||
+      c.req.query('user_id');
+
+    const REQUIRED_ADMIN_ID =
+      String(c.env?.ADMIN_ID || '7171208519').trim();
+
+    const providedId =
+      adminId ? String(adminId).trim() : '';
+
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json({ success: false, message: '❌ Access denied' }, 403);
+      return c.json({
+        success: false,
+        message: '❌ Access denied'
+      }, 403);
     }
 
-    // تحديث وقت الدخول (آمن)
-    try {
-      await pool.query(
-        `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
-        [providedId]
-      );
-    } catch (dbErr) {
-      // نتجاهل الخطأ
-    }
-    
     await next();
+
   } catch (err) {
+
     console.error('❌ verifyAdmin error:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Server error'
+    }, 500);
   }
 };
 
@@ -1596,80 +1600,96 @@ app.post('/api/admin/messages/:id/reply', verifyAdmin, async (c) => {
 });
 
 // =========================
-// 📊 إحصائيات الأدمن (النسخة الموحدة والدقيقة)
+// 📊 إحصائيات الأدمن - محسنة
 // =========================
 app.get('/api/admin/stats', verifyAdmin, async (c) => {
   try {
-    const [
-      deposits, withdrawals, messages, users, 
-      approvedToday, pendingProofs, openDisputes, commission
-    ] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'"),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"),
-      pool.query("SELECT COUNT(*) FROM admin_messages WHERE replied = false"),
-      pool.query("SELECT COUNT(*) FROM users"),
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL`),
-      pool.query(`SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
-    ]);
-    
-    // 🔍 طباعة القيم الحقيقية في سجلات Cloudflare للتأكد من عمل الاستعلامات
-    console.log('📊 Stats Raw Data from DB:', {
-      deposits: deposits.rows[0].count,
-      withdrawals: withdrawals.rows[0].count,
-      messages: messages.rows[0].count,
-      users: users.rows[0].count,
-      approvedToday: approvedToday.rows[0].count,
-      pendingProofs: pendingProofs.rows[0].count,
-      openDisputes: openDisputes.rows[0].count,
-      commission: commission.rows[0].total
-    });
+    const result = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending') AS pending_deposits,
+        (SELECT COUNT(*) FROM withdrawals WHERE status = 'pending') AS pending_withdrawals,
+        (SELECT COUNT(*) FROM admin_messages WHERE replied = false) AS unread_messages,
+        (SELECT COUNT(*) FROM users) AS total_users,
+
+        (SELECT COUNT(*)
+         FROM task_executions
+         WHERE status = 'approved'
+           AND reviewed_at::date = CURRENT_DATE) AS approved_today,
+
+        (SELECT COUNT(*)
+         FROM task_executions
+         WHERE status = 'pending'
+           AND proof IS NOT NULL) AS pending_proofs,
+
+        (SELECT COUNT(*)
+         FROM task_disputes
+         WHERE status = 'open') AS open_disputes,
+
+        (SELECT COALESCE(SUM(commission_amount), 0)
+         FROM task_executions
+         WHERE status = 'approved') AS admin_commission
+    `);
+
+    const row = result.rows[0];
+
+    console.log('📊 Admin Stats:', row);
 
     return c.json({
       success: true,
       data: {
-        pending_deposits: parseInt(deposits.rows[0].count) || 0,
-        pending_withdrawals: parseInt(withdrawals.rows[0].count) || 0,
-        unread_messages: parseInt(messages.rows[0].count) || 0,
-        total_users: parseInt(users.rows[0].count) || 0,
-        pending_proofs: parseInt(pendingProofs.rows[0].count) || 0,
-        open_disputes: parseInt(openDisputes.rows[0].count) || 0,
-        approved_today: parseInt(approvedToday.rows[0].count) || 0,
-        admin_commission: parseFloat(commission.rows[0].total || 0).toFixed(4)
+        pending_deposits: Number(row.pending_deposits) || 0,
+        pending_withdrawals: Number(row.pending_withdrawals) || 0,
+        unread_messages: Number(row.unread_messages) || 0,
+        total_users: Number(row.total_users) || 0,
+        approved_today: Number(row.approved_today) || 0,
+        pending_proofs: Number(row.pending_proofs) || 0,
+        open_disputes: Number(row.open_disputes) || 0,
+        admin_commission: Number(row.admin_commission) || 0
       }
     });
+
   } catch (err) {
     console.error('❌ GET /api/admin/stats:', err);
-    return c.json({ success: false, message: 'Server error', error: err.message }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Server error',
+      error: err.message
+    }, 500);
   }
 });
 
 // =========================
 // 👥 جلب عدد المستخدمين الكلي
 // =========================
-app.get('/api/admin/stats/total-users', async (c) => {
+app.get('/api/admin/stats/total-users', verifyAdmin, async (c) => {
   try {
-    const admin_id = c.req.query('admin_id');
-    const REQUIRED_ADMIN_ID = '7171208519';
-    
-    if (admin_id != REQUIRED_ADMIN_ID) {
-      return c.json({ success: false, message: '❌ Access denied' }, 403);
-    }
-    
-    const result = await pool.query('SELECT COUNT(*) as total FROM users');
-    const totalUsers = parseInt(result.rows[0]?.total) || 0;
-    
-    return c.json({ 
-      success: true, 
-      data: { total_users: totalUsers }
+
+    const result = await pool.query(`
+      SELECT COUNT(*) AS total_users
+      FROM users
+    `);
+
+    const totalUsers = Number(result.rows[0]?.total_users) || 0;
+
+    return c.json({
+      success: true,
+      data: {
+        total_users: totalUsers
+      }
     });
+
   } catch (err) {
-    console.error('❌ ERROR /total-users:', err.message);
-    return c.json({ success: false, message: 'Server error: ' + err.message }, 500);
+
+    console.error('❌ GET /api/admin/stats/total-users:', err);
+
+    return c.json({
+      success: false,
+      message: 'Server error',
+      error: err.message
+    }, 500);
   }
 });
-
 // ======================= 📝 TASKS SYSTEM API - FULL COMPATIBLE =======================
 
 // ======================= ✅ تنفيذات المستخدم TASK =======================
@@ -2574,30 +2594,80 @@ app.get('/api/admin/disputes', isAdminAuthenticated, async (c) => {
   }
 });
 
-app.get('/api/admin/commission-stats', isAdminAuthenticated, async (c) => {
+// =========================
+// 💰 إحصائيات عمولة الأدمن
+// =========================
+app.get('/api/admin/commission-stats', verifyAdmin, async (c) => {
   try {
-    const [today, week, month, allTime] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved' AND reviewed_at >= NOW() - INTERVAL '7 days'`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved' AND reviewed_at >= NOW() - INTERVAL '30 days'`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
-    ]);
-    
+
+    const result = await pool.query(`
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN reviewed_at::date = CURRENT_DATE
+              THEN commission_amount
+              ELSE 0
+            END
+          ), 0
+        ) AS today,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN reviewed_at >= NOW() - INTERVAL '7 days'
+              THEN commission_amount
+              ELSE 0
+            END
+          ), 0
+        ) AS week,
+
+        COALESCE(
+          SUM(
+            CASE
+              WHEN reviewed_at >= NOW() - INTERVAL '30 days'
+              THEN commission_amount
+              ELSE 0
+            END
+          ), 0
+        ) AS month,
+
+        COALESCE(
+          SUM(commission_amount),
+          0
+        ) AS all_time
+
+      FROM task_executions
+
+      WHERE status = 'approved'
+    `);
+
+    const row = result.rows[0];
+
     return c.json({
       success: true,
       data: {
-        today: parseFloat(today.rows[0].total),
-        week: parseFloat(week.rows[0].total),
-        month: parseFloat(month.rows[0].total),
-        all_time: parseFloat(allTime.rows[0].total)
+        today: Number(row.today) || 0,
+        week: Number(row.week) || 0,
+        month: Number(row.month) || 0,
+        all_time: Number(row.all_time) || 0
       }
     });
+
   } catch (err) {
-    console.error('❌ /api/admin/commission-stats:', err);
-    return c.json({ success: false, message: "Failed to load commission stats", error: err.message }, 500);
+
+    console.error(
+      '❌ /api/admin/commission-stats:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: 'Failed to load commission stats',
+      error: err.message
+    }, 500);
   }
 });
-
 app.post('/api/admin/task-disputes/:id/resolve', isAdminAuthenticated, async (c) => {
   const client = await pool.connect();
   try {
