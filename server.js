@@ -1186,36 +1186,46 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة 100% - بدون اتصال DB)
+// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة والمصححة 100%)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // 1. جلب المعرف من الرابط (لطلبات GET)
+    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً (الأكثر شيوعاً في GET)
     let adminId = c.req.query('admin_id') || c.req.query('user_id');
     
-    // 2. إذا لم يوجد، محاولة جلبه من الجسم (لطلبات POST)
+    // 2. إذا لم توجد، محاولة القراءة من جسم الطلب (Body) لطلبات POST
     if (!adminId) {
       try {
         const body = await c.req.json();
         adminId = body?.admin_id || body?.user_id;
       } catch (e) {
-        // تجاهل الخطأ بأمان إذا لم يكن هناك جسم للطلب
+        // تجاهل الخطأ بأمان إذا لم يكن الطلب يحتوي على JSON
       }
     }
-
+    
     const REQUIRED_ADMIN_ID = (c.env.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
-
+    
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
       console.warn(`❌ Access denied: received="${providedId}", required="${REQUIRED_ADMIN_ID}"`);
       return c.json({ success: false, message: '❌ Access denied: Invalid admin_id' }, 403);
     }
 
-    // ✅ النجاح: السماح للطلب بالمرور للمسار التالي
+    // تحديث وقت الدخول (آمن ولا يوقف العملية إذا فشل)
+    try {
+      await pool.query(
+        `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
+        [providedId]
+      );
+    } catch (dbErr) {
+      console.warn('⚠️ Failed to update last_login_at for admin (non-critical):', dbErr.message);
+    }
+    
+    // السماح بالمرور للمسار التالي
     await next();
   } catch (err) {
-    console.error('❌ verifyAdmin CRITICAL ERROR:', err);
-    return c.json({ success: false, message: 'Server error in admin verification: ' + err.message }, 500);
+    console.error('❌ verifyAdmin critical error:', err);
+    return c.json({ success: false, message: 'Server error in admin verification' }, 500);
   }
 };
 
