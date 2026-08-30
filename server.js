@@ -1186,69 +1186,40 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware: التحقق من الأدمن (النسخة الآمنة 100% من أخطاء الـ I/O)
+// 🔐 Middleware: التحقق من الأدمن (النسخة المبسطة والآمنة)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // 1. محاولة القراءة من رابط الاستعلام (Query) أولاً
-    let adminId = c.req.query('admin_id') || c.req.query('user_id');
-    
-    // 2. إذا لم توجد، محاولة القراءة من جسم الطلب بأمان شديد
-    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
-      try {
-        // نتأكد أولاً أن الطلب يحتوي فعلياً على JSON قبل محاولة قراءته
-        const contentType = c.req.header('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const body = await c.req.json();
-          adminId = body?.admin_id || body?.user_id;
-        }
-      } catch (e) {
-        console.warn('⚠️ Failed to parse admin body (non-critical):', e.message);
-      }
-    }
+    // نقرأ المعرف من رابط الاستعلام فقط (لا نقرأ الـ Body أبداً)
+    const adminId = c.req.query('admin_id') || c.req.query('user_id');
     
     const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
     
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      console.warn(`❌ Access denied: received="${providedId}", required="${REQUIRED_ADMIN_ID}"`);
-      return c.json({ success: false, message: '❌ Access denied: Invalid admin_id' }, 403);
+      return c.json({ success: false, message: '❌ Access denied' }, 403);
     }
 
-    // 3. تحديث وقت الدخول (محصور داخل try/catch لضمان عدم إيقاف الطلب)
+    // تحديث وقت الدخول (آمن)
     try {
       await pool.query(
         `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
         [providedId]
       );
     } catch (dbErr) {
-      console.warn('⚠️ Failed to update last_login_at for admin (non-critical):', dbErr.message);
+      // نتجاهل الخطأ
     }
     
     await next();
   } catch (err) {
-    console.error('❌ verifyAdmin critical error:', err);
-    return c.json({ success: false, message: 'Server error in admin verification: ' + err.message }, 500);
+    console.error('❌ verifyAdmin error:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 };
 
-// =========================
-// 🔐 Middleware بديل للتحقق (مستخدم في بعض مسارات المهام)
-// =========================
 const isAdminAuthenticated = async (c, next) => {
   try {
-    let adminId = c.req.query('admin_id') || c.req.query('user_id');
-    
-    if (!adminId && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'DELETE')) {
-      try {
-        const contentType = c.req.header('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const body = await c.req.json();
-          adminId = body?.admin_id || body?.user_id;
-        }
-      } catch (e) {}
-    }
-
+    const adminId = c.req.query('admin_id') || c.req.query('user_id');
     const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
 
@@ -1258,8 +1229,7 @@ const isAdminAuthenticated = async (c, next) => {
       return c.json({ success: false, message: "Admin access required" }, 403);
     }
   } catch (err) {
-    console.error('❌ isAdminAuthenticated CRITICAL ERROR:', err);
-    return c.json({ success: false, message: 'Server error: ' + err.message }, 500);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 };
 // =========================
