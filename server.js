@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { pool, initDb } from './db.js'; // <-- لاحظ إضافة initDb هنا
+import { pool, initDb } from './db.js';
 
 const app = new Hono();
 
@@ -10,10 +10,11 @@ const app = new Hono();
 app.use('*', cors());
 
 // 2. 🚀 Middleware حاسم: يهيئ قاعدة البيانات باستخدام أسرار Cloudflare (c.env)
-// هذا يحل مشكلة "No database host" نهائياً
 app.use('*', async (c, next) => {
   try {
-    initDb(c.env); // نمرر متغيرات البيئة الخاصة بـ Cloudflare هنا
+    if (typeof initDb === 'function' && !globalThis._dbPool) {
+      initDb(c.env);
+    }
   } catch (err) {
     console.error('❌ Failed to init DB:', err.message);
     return c.json({ status: 'error', message: 'Database connection failed: ' + err.message }, 500);
@@ -21,7 +22,7 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// 3. التقاط أي أخطاء لاحقة في الـ pool (الآن أصبح آمناً 100% بسبب الخدعة في db.js)
+// 3. التقاط أي أخطاء لاحقة في الـ pool
 pool.on('error', (err) => {
   console.error('⚠️ PG pool error:', err);
 });
@@ -47,7 +48,6 @@ async function getOrCreateUser(client, telegramId) {
     balance: Number(q.rows[0].balance)
   };
 }
-
 // ==========================================
 // تخزين آخر رسالة للسيرفر مؤقتًا
 // ==========================================
@@ -1190,29 +1190,18 @@ app.get("/api/contact/history", async (c) => {
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // نقرأ المعرف من رابط الاستعلام فقط (لا نقرأ الـ Body أبداً)
     const adminId = c.req.query('admin_id') || c.req.query('user_id');
-    
     const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
     
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
       return c.json({ success: false, message: '❌ Access denied' }, 403);
     }
-
-    // تحديث وقت الدخول (آمن)
     try {
-      await pool.query(
-        `UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`,
-        [providedId]
-      );
-    } catch (dbErr) {
-      // نتجاهل الخطأ
-    }
-    
+      await pool.query(`UPDATE users SET last_login_at = now() WHERE telegram_id = $1 AND last_login_at < now() - interval '24 hours'`, [providedId]);
+    } catch (dbErr) { /* نتجاهل الخطأ */ }
     await next();
   } catch (err) {
-    console.error('❌ verifyAdmin error:', err);
     return c.json({ success: false, message: 'Server error' }, 500);
   }
 };
@@ -1222,12 +1211,8 @@ const isAdminAuthenticated = async (c, next) => {
     const adminId = c.req.query('admin_id') || c.req.query('user_id');
     const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
-
-    if (providedId === REQUIRED_ADMIN_ID) {
-      await next();
-    } else {
-      return c.json({ success: false, message: "Admin access required" }, 403);
-    }
+    if (providedId === REQUIRED_ADMIN_ID) { await next(); } 
+    else { return c.json({ success: false, message: "Admin access required" }, 403); }
   } catch (err) {
     return c.json({ success: false, message: 'Server error' }, 500);
   }
@@ -2699,68 +2684,44 @@ async function distributeReferralCommission(telegramId, earningAmount) {
 }
 
 // =====================================================================
-// === نهاية ملف server.js (النسخة النهائية والمضمونة) ===
+// === نهاية ملف server.js (التهيئة الصحيحة للـ Fetch و Cron) ===
 // =====================================================================
 export default {
-  // 1. استقبال طلبات HTTP (مع ضمان تهيئة قاعدة البيانات أولاً)
   fetch: async (request, env, ctx) => {
     if (typeof initDb === 'function' && !globalThis._dbPool) {
-      initDb(env);
+      try { initDb(env); } catch (e) { console.error("❌ Failed to init DB in fetch:", e); }
     }
     return app.fetch(request, env, ctx);
   },
 
-   // 2. المعالج المجدول (Cron) - مع تحسينات الأمان والتشخيص
   async scheduled(controller, env, ctx) {
     console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
-    
     try {
-      // محاولة تهيئة قاعدة البيانات بأمان
       if (typeof initDb === 'function' && !globalThis._dbPool) {
         console.log("🔍 محاولة تهيئة قاعدة البيانات للـ Cron...");
         initDb(env);
       }
     } catch (initErr) {
       console.error("❌ فشل تهيئة قاعدة البيانات في الـ Cron:", initErr.message);
-      console.error("🔍 مفاتيح البيئة المتاحة:", Object.keys(env || {}));
-      return; // الخروج بأمان إذا فشلت التهيئة لمنع انهيار الـ Worker
+      return;
     }
 
     try {
       const client = await pool.connect();
-      const now = new Date();
-      const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-      
-      const { rows } = await client.query(`
-        SELECT te.id, te.task_id, te.executor_id, te.payment_amount, te.commission_amount, t.creator_id, t.title as task_title
-        FROM task_executions te
-        JOIN tasks t ON t.id = te.task_id
-        WHERE te.status = 'pending' AND te.proof IS NOT NULL AND te.submitted_at < $1 AND t.deleted_at IS NULL
-      `, [twentyFourHoursAgo]);
+      const twentyFourHoursAgo = new Date(new Date().getTime() - (24 * 60 * 60 * 1000));
+      const { rows } = await client.query(`SELECT te.id, te.task_id, te.executor_id, te.payment_amount, te.commission_amount, t.creator_id, t.title as task_title FROM task_executions te JOIN tasks t ON t.id = te.task_id WHERE te.status = 'pending' AND te.proof IS NOT NULL AND te.submitted_at < $1 AND t.deleted_at IS NULL`, [twentyFourHoursAgo]);
       
       for (const exec of rows) {
         try {
           await client.query('BEGIN');
           await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [exec.payment_amount, exec.executor_id]);
-          
           const totalCost = parseFloat(exec.payment_amount) + parseFloat(exec.commission_amount || 0);
           await client.query('UPDATE tasks SET spent = spent + $1 WHERE id = $2', [totalCost, exec.task_id]);
           await client.query(`UPDATE task_executions SET status = 'approved', reviewed_at = NOW(), reviewed_by = 'auto' WHERE id = $1`, [exec.id]);
-          
           await client.query('COMMIT');
-          console.log(`✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`);
-          
-          if (typeof distributeReferralCommission === 'function') {
-            await distributeReferralCommission(exec.executor_id, exec.payment_amount);
-          }
         } catch (err) {
           await client.query('ROLLBACK');
-          console.error(`❌ Auto-approve failed for execution ${exec.id}:`, err);
         }
-      }
-      
-      if (rows.length > 0) {
-        console.log(`✅ Auto-approved ${rows.length} pending proof(s) after 24 hours`);
       }
     } catch (err) {
       console.error('❌ Auto-approve cron error:', err);
