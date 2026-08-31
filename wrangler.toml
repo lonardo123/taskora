@@ -10,3 +10,6 @@ directory = "./public"
 # إعداد المهمة المجدولة (Cron)
 [triggers]
 crons = ["* * * * *"]
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "67988f0e9c144cf1848bc6f4a49a9083"
