@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool, initDb } from './db.js';
 
+// ✅ تعريف التطبيق (كان هذا السطر مفقوداً ويسبب الانهيار)
 const app = new Hono();
 
 // 1. إعداد CORS
