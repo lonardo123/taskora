@@ -1,6 +1,6 @@
 name = "taskora"
 main = "server.js"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-02-04"
 compatibility_flags = ["nodejs_compat"]
 
 # 🚀 تفعيل خدمة الملفات الثابتة (HTML, CSS, Images)
