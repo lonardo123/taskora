@@ -7,7 +7,7 @@ const app = new Hono();
 app.use('*', cors());
 app.use('*', async (c, next) => {
   try {
-    if (typeof initDb === 'function' && !globalThis._dbPool) {
+    if (typeof initDb === 'function') {
       initDb(c.env);
     }
   } catch (err) {
@@ -1580,43 +1580,48 @@ app.post('/api/admin/messages/:id/reply', verifyAdmin, async (c) => {
 // =========================
 app.get('/api/admin/stats', verifyAdmin, async (c) => {
   try {
-    const [
-      deposits, withdrawals, messages, users, 
-      approvedToday, pendingProofs, openDisputes, commission
-    ] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'"),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'"),
-      pool.query("SELECT COUNT(*) FROM admin_messages WHERE replied = false"),
-      pool.query("SELECT COUNT(*) FROM users"),
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE`),
-      pool.query(`SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL`),
-      pool.query(`SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'`),
-      pool.query(`SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'`)
-    ]);
-    
-    // 🔍 طباعة القيم الحقيقية في سجلات Cloudflare للتأكد من عمل الاستعلامات
-    console.log('📊 Stats Raw Data from DB:', {
-      deposits: deposits.rows[0].count,
-      withdrawals: withdrawals.rows[0].count,
-      messages: messages.rows[0].count,
-      users: users.rows[0].count,
-      approvedToday: approvedToday.rows[0].count,
-      pendingProofs: pendingProofs.rows[0].count,
-      openDisputes: openDisputes.rows[0].count,
-      commission: commission.rows[0].total
-    });
+    const queries = [
+      { key: 'pending_deposits',    text: "SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'" },
+      { key: 'pending_withdrawals', text: "SELECT COUNT(*) FROM withdrawals WHERE status = 'pending'" },
+      { key: 'unread_messages',     text: "SELECT COUNT(*) FROM admin_messages WHERE replied = false" },
+      { key: 'total_users',         text: "SELECT COUNT(*) FROM users" },
+      { key: 'approved_today',     text: "SELECT COUNT(*) as count FROM task_executions WHERE status = 'approved' AND reviewed_at::date = CURRENT_DATE" },
+      { key: 'pending_proofs',     text: "SELECT COUNT(*) as count FROM task_executions WHERE status = 'pending' AND proof IS NOT NULL" },
+      { key: 'open_disputes',       text: "SELECT COUNT(*) as count FROM task_disputes WHERE status = 'open'" },
+      { key: 'admin_commission',    text: "SELECT COALESCE(SUM(commission_amount), 0) as total FROM task_executions WHERE status = 'approved'" },
+    ];
+
+    // Promise.allSettled بدلاً من Promise.all
+    const results = await Promise.allSettled(
+      queries.map(async (q) => {
+        const res = await pool.query(q.text);
+        return { key: q.key, value: res.rows[0] };
+      })
+    );
+
+    const stats = {};
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const key = queries[i].key;
+      if (r.status === 'fulfilled') {
+        stats[key] = r.value.value;
+      } else {
+        console.error(`❌ Stats query "${key}" failed:`, r.reason?.message);
+        stats[key] = { count: 0, total: 0 };
+      }
+    }
 
     return c.json({
       success: true,
       data: {
-        pending_deposits: parseInt(deposits.rows[0].count) || 0,
-        pending_withdrawals: parseInt(withdrawals.rows[0].count) || 0,
-        unread_messages: parseInt(messages.rows[0].count) || 0,
-        total_users: parseInt(users.rows[0].count) || 0,
-        pending_proofs: parseInt(pendingProofs.rows[0].count) || 0,
-        open_disputes: parseInt(openDisputes.rows[0].count) || 0,
-        approved_today: parseInt(approvedToday.rows[0].count) || 0,
-        admin_commission: parseFloat(commission.rows[0].total || 0).toFixed(4)
+        pending_deposits: parseInt(stats.pending_deposits?.count) || 0,
+        pending_withdrawals: parseInt(stats.pending_withdrawals?.count) || 0,
+        unread_messages: parseInt(stats.unread_messages?.count) || 0,
+        total_users: parseInt(stats.total_users?.count) || 0,
+        pending_proofs: parseInt(stats.pending_proofs?.count) || 0,
+        open_disputes: parseInt(stats.open_disputes?.count) || 0,
+        approved_today: parseInt(stats.approved_today?.count) || 0,
+        admin_commission: parseFloat(stats.admin_commission?.total || 0).toFixed(4)
       }
     });
   } catch (err) {
@@ -2683,17 +2688,16 @@ async function distributeReferralCommission(telegramId, earningAmount) {
 // =====================================================================
 export default {
   fetch: async (request, env, ctx) => {
-    if (typeof initDb === 'function' && !globalThis._dbPool) {
+    if (typeof initDb === 'function') {
       try { initDb(env); } catch (e) { console.error("❌ Failed to init DB in fetch:", e); }
     }
     return app.fetch(request, env, ctx);
   },
 
-  async scheduled(controller, env, ctx) {
-    console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
+ async scheduled(controller, env, ctx) {
+    console.log("⏰ تشغيل مهمة الموافقة التلقائية...");
     try {
-      if (typeof initDb === 'function' && !globalThis._dbPool) {
-        console.log("🔍 محاولة تهيئة قاعدة البيانات للـ Cron...");
+      if (typeof initDb === 'function') {
         initDb(env);
       }
     } catch (initErr) {
@@ -2709,15 +2713,13 @@ export default {
       for (const exec of rows) {
         try {
           await client.query('BEGIN');
-          await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [exec.payment_amount, exec.executor_id]);
-          const totalCost = parseFloat(exec.payment_amount) + parseFloat(exec.commission_amount || 0);
-          await client.query('UPDATE tasks SET spent = spent + $1 WHERE id = $2', [totalCost, exec.task_id]);
-          await client.query(`UPDATE task_executions SET status = 'approved', reviewed_at = NOW(), reviewed_by = 'auto' WHERE id = $1`, [exec.id]);
+          // ...
           await client.query('COMMIT');
         } catch (err) {
           await client.query('ROLLBACK');
         }
       }
+      client.release();  // ← أضف هذا السطر
     } catch (err) {
       console.error('❌ Auto-approve cron error:', err);
     }
