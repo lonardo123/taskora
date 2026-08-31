@@ -1,34 +1,55 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { Client } from 'pg';
 
-// إجبار المكتبة على استخدام WebSocket المتوافق مع Cloudflare Workers
-neonConfig.webSocketConstructor = WebSocket;
+let _env = null;
 
-// دالة لتهيئة قاعدة البيانات (سيتم استدعاؤها من server.js عند أول طلب)
 export function initDb(env) {
-  if (!globalThis._dbPool) {
-    if (!env.DATABASE_URL) {
-      throw new Error('DATABASE_URL is missing in Cloudflare Secrets');
-    }
-    globalThis._dbPool = new Pool({ connectionString: env.DATABASE_URL });
-    console.log('✅ Database pool initialized successfully with Cloudflare Secrets');
-  }
-  return globalThis._dbPool;
+  _env = env;
+  return createPool();
 }
 
-// كائن "وهمي" يتصرف مثل pool الحقيقي، لكنه يهيئه بأمان عند أول استخدام
+function getConnectionString() {
+  if (_env?.HYPERDRIVE?.connectionString) {
+    return _env.HYPERDRIVE.connectionString;
+  }
+  if (_env?.DATABASE_URL) {
+    console.warn('⚠️ HYPERDRIVE binding not found — falling back to DATABASE_URL');
+    return _env.DATABASE_URL;
+  }
+  throw new Error('No database connection: HYPERDRIVE binding and DATABASE_URL are both missing');
+}
+
+function createPool() {
+  return {
+    async query(text, params) {
+      const client = new Client({ connectionString: getConnectionString() });
+      await client.connect();
+      try {
+        return await client.query(text, params);
+      } finally {
+        await client.end();
+      }
+    },
+    async connect() {
+      const client = new Client({ connectionString: getConnectionString() });
+      await client.connect();
+      client.release = async () => { await client.end(); };
+      return client;
+    },
+    on() {},
+    async end() {},
+  };
+}
+
 export const pool = {
   query: async (...args) => {
-    if (!globalThis._dbPool) throw new Error('Database not initialized. Ensure initDb(env) is called.');
-    return globalThis._dbPool.query(...args);
+    if (!_env) throw new Error('Database not initialized. Ensure initDb(env) is called.');
+    const p = createPool();
+    return p.query(...args);
   },
   connect: async () => {
-    if (!globalThis._dbPool) throw new Error('Database not initialized. Ensure initDb(env) is called.');
-    return globalThis._dbPool.connect();
+    if (!_env) throw new Error('Database not initialized. Ensure initDb(env) is called.');
+    const p = createPool();
+    return p.connect();
   },
-  on: (event, callback) => {
-    // هذا يمنع الخطأ عند استدعاء pool.on في أعلى الملف قبل التهيئة
-    if (globalThis._dbPool) {
-      globalThis._dbPool.on(event, callback);
-    }
-  }
+  on: () => {},
 };
