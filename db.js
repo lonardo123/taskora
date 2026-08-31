@@ -1,4 +1,4 @@
-import { Client } from 'pg';
+import { Pool, neonConfig } from '@neondatabase/serverless';
 
 let _env = null;
 
@@ -15,41 +15,21 @@ function getConnectionString() {
     console.warn('⚠️ HYPERDRIVE binding not found — falling back to DATABASE_URL');
     return _env.DATABASE_URL;
   }
-  throw new Error('No database connection: HYPERDRIVE binding and DATABASE_URL are both missing');
+  throw new Error('No database connection: HYPERDRIVE and DATABASE_URL are both missing');
 }
 
 function createPool() {
-  return {
-    async query(text, params) {
-      const client = new Client({ connectionString: getConnectionString() });
-      await client.connect();
-      try {
-        return await client.query(text, params);
-      } finally {
-        await client.end();
-      }
-    },
-    async connect() {
-      const client = new Client({ connectionString: getConnectionString() });
-      await client.connect();
-      client.release = async () => { await client.end(); };
-      return client;
-    },
-    on() {},
-    async end() {},
-  };
+  return new Pool({ connectionString: getConnectionString() });
 }
 
 export const pool = {
   query: async (...args) => {
     if (!_env) throw new Error('Database not initialized. Ensure initDb(env) is called.');
-    const p = createPool();
-    return p.query(...args);
+    return createPool().query(...args);
   },
   connect: async () => {
     if (!_env) throw new Error('Database not initialized. Ensure initDb(env) is called.');
-    const p = createPool();
-    return p.connect();
+    return createPool().connect();
   },
   on: () => {},
 };
