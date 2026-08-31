@@ -3,14 +3,8 @@ import { cors } from 'hono/cors';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool, initDb } from './db.js';
-
-// ✅ هذا السطر كان مفقوداً ويسبب انهيار السيرفر
 const app = new Hono();
-
-// 1. إعداد CORS
 app.use('*', cors());
-
-// 2. 🚀 Middleware حاسم: يهيئ قاعدة البيانات باستخدام أسرار Cloudflare (c.env)
 app.use('*', async (c, next) => {
   try {
     if (typeof initDb === 'function' && !globalThis._dbPool) {
