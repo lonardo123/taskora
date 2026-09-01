@@ -4,7 +4,7 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 neonConfig.webSocketConstructor = WebSocket;
 
 let _env = null;
-
+ 
 export function initDb(env) {
   _env = env;
   return createPool();
