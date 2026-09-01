@@ -1,5 +1,8 @@
 import { Pool, neonConfig } from '@neondatabase/serverless';
 
+// ⚠️ هذا السطر إلزامي لكي تعمل قاعدة البيانات في Cloudflare Workers
+neonConfig.webSocketConstructor = WebSocket;
+
 let _env = null;
 
 export function initDb(env) {
@@ -12,7 +15,6 @@ function getConnectionString() {
     return _env.HYPERDRIVE.connectionString;
   }
   if (_env?.DATABASE_URL) {
-    console.warn('⚠️ HYPERDRIVE binding not found — falling back to DATABASE_URL');
     return _env.DATABASE_URL;
   }
   throw new Error('No database connection: HYPERDRIVE and DATABASE_URL are both missing');
@@ -31,5 +33,7 @@ export const pool = {
     if (!_env) throw new Error('Database not initialized. Ensure initDb(env) is called.');
     return createPool().connect();
   },
-  on: () => {},
+  on: (event, callback) => {
+    if (_env) createPool().on(event, callback);
+  },
 };
