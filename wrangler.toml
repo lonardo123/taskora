@@ -1,15 +1,17 @@
 name = "taskora"
 main = "server.js"
-compatibility_date = "2025-02-04"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 # 🚀 تفعيل خدمة الملفات الثابتة (HTML, CSS, Images)
 [assets]
 directory = "./public"
 
-# إعداد المهمة المجدولة (Cron)
+# ⏰ إعداد المهمة المجدولة (Cron)
 [triggers]
 crons = ["* * * * *"]
+
+# 🗄️ إعداد Hyperdrive (إذا كنت تستخدمه)
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "67988f0e9c144cf1848bc6f4a49a9083"
