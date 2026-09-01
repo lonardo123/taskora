@@ -17,11 +17,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22' # ✅ تم التغيير إلى 22 لتجنب حظر GitHub لـ Node 20
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          npm install
+          # إنشاء package-lock.json إذا لم يكن موجوداً
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only
+          fi
 
       - name: Publish to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
