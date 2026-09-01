@@ -18,15 +18,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Dependencies & Generate Lock File
         run: |
+          # ✅ استخدام npm install بدلاً من npm ci
+          # npm install سيقوم بإنشاء package-lock.json تلقائياً إذا لم يكن موجوداً
           npm install
-          # إنشاء package-lock.json إذا لم يكن موجوداً
+          
+          # ✅ التحقق من وجود الملف
           if [ ! -f package-lock.json ]; then
-            npm install --package-lock-only
+            echo "❌ Failed to generate package-lock.json"
+            exit 1
           fi
+          echo "✅ package-lock.json generated successfully"
 
       - name: Publish to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
