@@ -2,17 +2,23 @@
   "name": "taskora-workers",
   "version": "1.0.0",
   "main": "server.js",
+
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "check": "node --check server.js && node --check db.js"
   },
+
   "dependencies": {
     "hono": "^4.0.0",
     "@neondatabase/serverless": "^0.9.0",
     "bcryptjs": "^2.4.3"
   },
+
   "devDependencies": {
-    "wrangler": "^3.28.0",
+    "wrangler": "^4.0.0",
     "@cloudflare/workers-types": "^4.20240117.0"
-  }
+  },
+
+  "type": "module"
 }
