@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool, initDb } from './db.js';
-
+ 
 // ✅ تعريف التطبيق (هذا السطر كان مفقوداً أو مكسوراً)
 const app = new Hono();
 
