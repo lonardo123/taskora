@@ -611,28 +611,43 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ================= INIT (تحميل متتابع وآمن) =================
 window.addEventListener('load', async () => {
-  const hasAccess = checkAdminAccess();
-  if (!hasAccess) return;
-  
-  try {
-    await loadDashboardStats();
-    await delay(50);
-    await loadTotalUsers();
-    await delay(70);
-    await loadDeposits();
-    await delay(90);
-    await loadWithdrawals();
-    await delay(110);
-    await loadMessages();
-    await delay(130);
-    await loadPendingProofs();
-    await delay(150);
-    await loadDisputes();
-    await delay(170);
-    await loadCommissionStats();
-  } catch (error) {
-    console.error('❌ Error:', error);
+
+  // ==========================================
+  // 🔐 تسجيل دخول الأدمن مرة واحدة عند فتح الصفحة
+  // ==========================================
+  const loggedIn = await adminLogin();
+
+  if (!loggedIn) {
+    console.error('❌ Admin login failed');
+    return;
   }
+
+  // ==========================================
+  // 📊 تحميل بيانات لوحة الأدمن
+  // ==========================================
+
+  await loadDashboardStats();
+
+  await delay(50);
+  await loadTotalUsers();
+
+  await delay(70);
+  await loadDeposits();
+
+  await delay(90);
+  await loadWithdrawals();
+
+  await delay(110);
+  await loadMessages();
+
+  await delay(130);
+  await loadPendingProofs();
+
+  await delay(150);
+  await loadDisputes();
+
+  await delay(170);
+  await loadCommissionStats();
 });
 
 // ================= UTILS =================
@@ -733,7 +748,67 @@ function openInvestmentPanel() {
   const url = `${API}/admin-investment.html?admin_id=${REQUIRED_ADMIN_ID}`;
   window.open(url, '_blank', 'width=1200,height=800');
 }
+// =========================
+// 🔐 تسجيل دخول الأدمن
+// مرة واحدة عند فتح الصفحة
+// =========================
+async function adminLogin() {
+  try {
+    const res = await fetch(
+      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      console.error(
+        '❌ Admin login failed:',
+        data.message || 'Unknown error'
+      );
+
+      return false;
+    }
+
+    console.log(
+      '✅ Admin login recorded:',
+      data.data?.last_login_at
+    );
+
+    // حفظ حالة الأدمن
+    localStorage.setItem(
+      'admin_verified',
+      'true'
+    );
+
+    localStorage.setItem(
+      'admin_id',
+      REQUIRED_ADMIN_ID
+    );
+
+    if (data.data?.last_login_at) {
+      localStorage.setItem(
+        'admin_last_login',
+        data.data.last_login_at
+      );
+    }
+
+    return true;
+
+  } catch (err) {
+    console.error(
+      '❌ Admin login error:',
+      err
+    );
+
+    return false;
+  }
+}
 // ================= 🚀 TELEGRAM DEEP LINKS (Fallback) =================
 function openTelegramSection(command, hint) {
   const url = `https://t.me/${BOT_USERNAME}?start=admin`;
@@ -1709,15 +1784,25 @@ async function submitResolution() {
   }
   
   try {
-    const res = await fetch(`${API}/api/admin/task-disputes/${currentDispute.id}/resolve`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        admin_id: REQUIRED_ADMIN_ID,
-        payout_to: payout,
-        resolution
-      })
-    });
+    const res = await fetch(
+  `${API}/api/admin/task-disputes/${currentDispute.id}/resolve?admin_id=${REQUIRED_ADMIN_ID}`,
+  {
+    method: 'POST',
+
+    headers: {
+      'Content-Type': 'application/json'
+    },
+
+    body: JSON.stringify({
+
+      payout_to: payout,
+
+      resolution: resolution
+
+    })
+
+  }
+);
     const data = await res.json();
     
     if (data.success) {
