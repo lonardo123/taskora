@@ -1185,17 +1185,11 @@ app.get("/api/contact/history", async (c) => {
   }
 });
 
-// =====================================================
-// 🔐 ADMIN AUTH MIDDLEWARE + ADMIN ROUTES
-// =====================================================
-
-
-// =====================================================
-// 🔐 Middleware موحد للتحقق من الأدمن
-// =====================================================
+// =========================
+// 🔐 Middleware الأدمن
+// =========================
 const verifyAdmin = async (c, next) => {
   try {
-    // السماح بـ admin_id أو user_id من Query فقط
     const adminId =
       c.req.query('admin_id') ||
       c.req.query('user_id');
@@ -1208,78 +1202,130 @@ const verifyAdmin = async (c, next) => {
       ? adminId.toString().trim()
       : '';
 
-    // التحقق من الأدمن
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json({
-        success: false,
-        message: '❌ Admin access denied'
-      }, 403);
+      return c.json(
+        {
+          success: false,
+          message: '❌ Access denied'
+        },
+        403
+      );
     }
 
-    // =================================================
-    // 💾 حفظ معرف الأدمن داخل Context
-    // =================================================
-    c.set('adminId', providedId);
-
-
-    // =================================================
-    // 🕒 تحديث آخر دخول الأدمن في قاعدة البيانات
-    // يتم التحديث في كل دخول/طلب محمي للأدمن
-    // =================================================
-    try {
-      const updateAdminLogin = await pool.query(
-        `
-        UPDATE users
-        SET last_login_at = NOW()
-        WHERE telegram_id = $1
-        RETURNING telegram_id, last_login_at
-        `,
-        [providedId]
-      );
-
-      // إذا لم يكن الأدمن موجوداً في جدول users
-      if (updateAdminLogin.rowCount === 0) {
-        console.warn(
-          `⚠️ Admin ${providedId} not found in users table`
-        );
-      } else {
-        console.log(
-          `🕒 Admin last login updated:`,
-          updateAdminLogin.rows[0].last_login_at
-        );
-      }
-
-    } catch (dbErr) {
-      console.error(
-        '⚠️ Failed to update admin last_login_at:',
-        dbErr.message
-      );
-
-      // لا نمنع الأدمن من الدخول بسبب خطأ تحديث الوقت
-    }
-
-
-    // متابعة الطلب
+    // ⚠️ مهم:
+    // لا يوجد هنا أي UPDATE لـ last_login_at.
+    // هذا Middleware للتحقق فقط.
+    
     await next();
 
   } catch (err) {
     console.error('❌ verifyAdmin error:', err);
 
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
+    return c.json(
+      {
+        success: false,
+        message: 'Server error'
+      },
+      500
+    );
   }
 };
 
 
-// =====================================================
-// 🔐 Middleware متوافق مع الاسم القديم
-// =====================================================
+// =========================
+// 🔐 Admin Authentication
+// =========================
+// يستخدم نفس نظام التحقق بدون تسجيل دخول
 const isAdminAuthenticated = verifyAdmin;
 
+// =========================
+// 🔐 ADMIN LOGIN
+// تسجيل دخول الأدمن وتحديث آخر دخول
+// =========================
+app.post('/api/admin/login', async (c) => {
+  try {
+    const adminId =
+      c.req.query('admin_id') ||
+      c.req.query('user_id');
 
+    const REQUIRED_ADMIN_ID = (
+      c.env?.ADMIN_ID || '7171208519'
+    ).toString().trim();
 
+    const providedId = adminId
+      ? adminId.toString().trim()
+      : '';
+
+    // =========================
+    // التحقق من Admin ID
+    // =========================
+    if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
+      return c.json(
+        {
+          success: false,
+          message: '❌ Admin access required'
+        },
+        403
+      );
+    }
+
+    // =========================
+    // تسجيل آخر دخول
+    // =========================
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET last_login_at = NOW()
+      WHERE telegram_id = $1
+      RETURNING telegram_id, username, last_login_at
+      `,
+      [providedId]
+    );
+
+    // =========================
+    // الأدمن غير موجود في users
+    // =========================
+    if (!result.rows.length) {
+      return c.json(
+        {
+          success: false,
+          message: '❌ Admin user not found in users table'
+        },
+        404
+      );
+    }
+
+    const admin = result.rows[0];
+
+    console.log(
+      `✅ Admin login recorded: ${providedId} at ${admin.last_login_at}`
+    );
+
+    return c.json({
+      success: true,
+      message: '✅ Admin login recorded successfully',
+      data: {
+        telegram_id: admin.telegram_id,
+        username: admin.username,
+        last_login_at: admin.last_login_at
+      }
+    });
+
+  } catch (err) {
+    console.error(
+      '❌ POST /api/admin/login:',
+      err.message
+    );
+
+    return c.json(
+      {
+        success: false,
+        message: 'Server error'
+      },
+      500
+    );
+  }
+});
 // =====================================================
 // 📥 1. جلب طلبات الإيداع
 // =====================================================
@@ -2698,14 +2744,14 @@ app.get(
             `
           ),
 
-          pool.query(
-            `
-            SELECT COUNT(*) AS count
-            FROM task_executions
-            WHERE status = 'pending'
-            AND proof IS NOT NULL
-            `
-          ),
+          pool.query(`
+  SELECT COUNT(*) AS count
+  FROM task_executions te
+  INNER JOIN tasks t ON t.id = te.task_id
+  WHERE te.status = 'pending'
+    AND te.proof IS NOT NULL
+    AND t.deleted_at IS NULL
+`),
 
           pool.query(
             `
@@ -3783,64 +3829,330 @@ app.get('/api/admin/commission-stats', isAdminAuthenticated, async (c) => {
   }
 });
 
-app.post('/api/admin/task-disputes/:id/resolve', isAdminAuthenticated, async (c) => {
-  const client = await pool.connect();
-  try {
-    const id = c.req.param('id');
-    const { payout_to, resolution, admin_id } = await c.req.json();
-    
-    console.log('🔍 Resolve dispute:', { id, payout_to, admin_id });
-    await client.query('BEGIN');
-    
-    const dispute = await client.query(`
-      SELECT td.id, td.execution_id, te.task_id, te.executor_id, te.payment_amount, t.creator_id
-      FROM task_disputes td
-      INNER JOIN task_executions te ON td.execution_id = te.id
-      INNER JOIN tasks t ON te.task_id = t.id
-      WHERE td.id = $1::integer
-    `, [id]);
-    
-    if (dispute.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: "Dispute not found" }, 404);
+app.post(
+  '/api/admin/task-disputes/:id/resolve',
+  verifyAdmin,
+  async (c) => {
+
+    const client = await pool.connect();
+
+    try {
+
+      const id = c.req.param('id');
+
+      const body = await c.req.json().catch(() => ({}));
+
+      const {
+        payout_to,
+        resolution = 'Resolved by admin'
+      } = body;
+
+
+      // =================================================
+      // 🔐 معرف الأدمن من Middleware وليس من Body
+      // =================================================
+      const adminId = c.get('adminId');
+
+
+      // التحقق من القرار
+      if (
+        payout_to !== 'executor' &&
+        payout_to !== 'creator'
+      ) {
+
+        return c.json({
+          success: false,
+          message: '❌ Invalid payout decision'
+        }, 400);
+
+      }
+
+
+      await client.query('BEGIN');
+
+
+      // =================================================
+      // 🔒 جلب النزاع وقفل الصف
+      // =================================================
+      const dispute = await client.query(
+        `
+        SELECT
+          td.id,
+          td.execution_id,
+          td.status AS dispute_status,
+
+          te.task_id,
+          te.executor_id,
+          te.payment_amount,
+          te.commission_amount,
+
+          t.creator_id
+
+        FROM task_disputes td
+
+        INNER JOIN task_executions te
+          ON td.execution_id = te.id
+
+        INNER JOIN tasks t
+          ON te.task_id = t.id
+
+        WHERE td.id = $1::integer
+        AND td.status = 'open'
+
+        FOR UPDATE OF td, te
+        `,
+        [id]
+      );
+
+
+      if (dispute.rows.length === 0) {
+
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Dispute not found or already resolved'
+        }, 404);
+
+      }
+
+
+      const d = dispute.rows[0];
+
+
+      const paymentAmount =
+        Number(d.payment_amount || 0);
+
+
+      const adminCommission =
+        Number(d.commission_amount || 0);
+
+
+      const totalCost =
+        paymentAmount +
+        adminCommission;
+
+
+      // =================================================
+      // تحديث النزاع
+      // =================================================
+      await client.query(
+        `
+        UPDATE task_disputes
+
+        SET
+          status = 'resolved',
+          resolved_at = NOW(),
+          resolved_by = $1,
+          resolution = $2
+
+        WHERE id = $3
+        `,
+        [
+          adminId,
+          resolution,
+          id
+        ]
+      );
+
+
+      // =================================================
+      // في حالة قبول المنفذ
+      // =================================================
+      if (payout_to === 'executor') {
+
+        // إضافة المكافأة للمنفذ
+        const userUpdate =
+          await client.query(
+            `
+            UPDATE users
+
+            SET balance =
+              COALESCE(balance, 0) + $1
+
+            WHERE telegram_id = $2
+
+            RETURNING telegram_id, balance
+            `,
+            [
+              paymentAmount,
+              d.executor_id
+            ]
+          );
+
+
+        if (userUpdate.rowCount === 0) {
+
+          await client.query('ROLLBACK');
+
+          return c.json({
+            success: false,
+            message: '❌ Executor not found'
+          }, 404);
+
+        }
+
+
+        // اعتماد تنفيذ المهمة
+        await client.query(
+          `
+          UPDATE task_executions
+
+          SET
+            status = 'approved',
+            reviewed_at = NOW(),
+            reviewed_by = $1
+
+          WHERE id = $2
+          `,
+          [
+            adminId,
+            d.execution_id
+          ]
+        );
+
+
+        // تحديث المبلغ المصروف في المهمة
+        await client.query(
+          `
+          UPDATE tasks
+
+          SET spent =
+            COALESCE(spent, 0) + $1
+
+          WHERE id = $2
+          `,
+          [
+            totalCost,
+            d.task_id
+          ]
+        );
+
+
+      }
+
+
+      // =================================================
+      // في حالة رفض المنفذ
+      // =================================================
+      else {
+
+        await client.query(
+          `
+          UPDATE task_executions
+
+          SET
+            status = 'rejected',
+            reviewed_at = NOW(),
+            reviewed_by = $1
+
+          WHERE id = $2
+          `,
+          [
+            adminId,
+            d.execution_id
+          ]
+        );
+
+      }
+
+
+      await client.query('COMMIT');
+
+
+      // =================================================
+      // 🎁 عمولة الإحالة بعد نجاح العملية
+      // =================================================
+      if (
+        payout_to === 'executor' &&
+        paymentAmount > 0 &&
+        typeof distributeReferralCommission === 'function'
+      ) {
+
+        try {
+
+          await distributeReferralCommission(
+            d.executor_id,
+            paymentAmount
+          );
+
+        } catch (commissionError) {
+
+          console.error(
+            '⚠️ Referral commission error:',
+            commissionError.message
+          );
+
+        }
+
+      }
+
+
+      console.log(
+        `✅ Dispute ${id} resolved by admin ${adminId}`
+      );
+
+
+      return c.json({
+
+        success: true,
+
+        message:
+          '✅ Dispute resolved successfully',
+
+        data: {
+
+          dispute_id:
+            Number(id),
+
+          payout_to,
+
+          payment_amount:
+            paymentAmount,
+
+          commission_amount:
+            adminCommission
+
+        }
+
+      });
+
+
+    } catch (err) {
+
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+
+
+      console.error(
+        '❌ /api/admin/task-disputes/:id/resolve:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Failed to resolve dispute',
+
+        error:
+          err.message
+
+      }, 500);
+
+
+    } finally {
+
+      client.release();
+
     }
-    
-    const d = dispute.rows[0];
-    const executorId = d.executor_id;
-    const paymentAmount = parseFloat(d.payment_amount);
-    const adminCommission = parseFloat(d.commission_amount || (paymentAmount * 0.25));
-    const totalCost = paymentAmount + adminCommission;
-    
-    await client.query(
-      `UPDATE task_disputes SET status = 'resolved', resolved_at = NOW(), resolved_by = $1::bigint, resolution = $2 WHERE id = $3::integer`,
-      [admin_id, resolution, id]
-    );
-    
-    if (payout_to === 'executor') {
-      await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2::bigint', [d.payment_amount, d.executor_id]);
-      await client.query('UPDATE task_executions SET status = \'approved\', reviewed_at = NOW() WHERE id = $1::integer', [d.execution_id]);
-      await client.query('UPDATE tasks SET spent = spent + $1 WHERE id = $2::integer', [totalCost, d.task_id]);
-    } else {
-      await client.query('UPDATE task_executions SET status = \'rejected\', reviewed_at = NOW() WHERE id = $1::integer', [d.execution_id]);
-    }
-    
-    await client.query('COMMIT');
-    
-    if (payout_to === 'executor' && typeof distributeReferralCommission === 'function') {
-      await distributeReferralCommission(d.executor_id, d.payment_amount);
-    }
-    
-    console.log('✅ Dispute resolved:', id);
-    return c.json({ success: true, message: "Dispute resolved successfully" });
-    
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ /api/admin/task-disputes/:id/resolve:', err);
-    return c.json({ success: false, message: "Failed to resolve dispute", error: err.message }, 500);
-  } finally {
-    client.release();
+
   }
-});
+);
 
 // ======================= END TASKS SYSTEM API =======================
 
