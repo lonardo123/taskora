@@ -4199,68 +4199,128 @@ async function distributeReferralCommission(telegramId, earningAmount) {
 // === نهاية ملف server.js (النسخة النهائية والمضمونة) ===
 // =====================================================================
 export default {
-  // 1. استقبال طلبات HTTP (مع ضمان تهيئة قاعدة البيانات أولاً)
   fetch: async (request, env, ctx) => {
-    if (typeof initDb === 'function' && !globalThis._dbPool) {
-      initDb(env);
-    }
     return app.fetch(request, env, ctx);
   },
 
-   // 2. المعالج المجدول (Cron) - مع تحسينات الأمان والتشخيص
   async scheduled(controller, env, ctx) {
-    console.log("⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)...");
-    
-    try {
-      // محاولة تهيئة قاعدة البيانات بأمان
-      if (typeof initDb === 'function' && !globalThis._dbPool) {
-        console.log("🔍 محاولة تهيئة قاعدة البيانات للـ Cron...");
-        initDb(env);
-      }
-    } catch (initErr) {
-      console.error("❌ فشل تهيئة قاعدة البيانات في الـ Cron:", initErr.message);
-      console.error("🔍 مفاتيح البيئة المتاحة:", Object.keys(env || {}));
-      return; // الخروج بأمان إذا فشلت التهيئة لمنع انهيار الـ Worker
-    }
+    console.log(
+      "⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)..."
+    );
 
     try {
+      initDb(env);
+
       const client = await pool.connect();
-      const now = new Date();
-      const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-      
-      const { rows } = await client.query(`
-        SELECT te.id, te.task_id, te.executor_id, te.payment_amount, te.commission_amount, t.creator_id, t.title as task_title
-        FROM task_executions te
-        JOIN tasks t ON t.id = te.task_id
-        WHERE te.status = 'pending' AND te.proof IS NOT NULL AND te.submitted_at < $1 AND t.deleted_at IS NULL
-      `, [twentyFourHoursAgo]);
-      
-      for (const exec of rows) {
-        try {
-          await client.query('BEGIN');
-          await client.query('UPDATE users SET balance = balance + $1 WHERE telegram_id = $2', [exec.payment_amount, exec.executor_id]);
-          
-          const totalCost = parseFloat(exec.payment_amount) + parseFloat(exec.commission_amount || 0);
-          await client.query('UPDATE tasks SET spent = spent + $1 WHERE id = $2', [totalCost, exec.task_id]);
-          await client.query(`UPDATE task_executions SET status = 'approved', reviewed_at = NOW(), reviewed_by = 'auto' WHERE id = $1`, [exec.id]);
-          
-          await client.query('COMMIT');
-          console.log(`✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`);
-          
-          if (typeof distributeReferralCommission === 'function') {
-            await distributeReferralCommission(exec.executor_id, exec.payment_amount);
+
+      try {
+        const now = new Date();
+
+        const twentyFourHoursAgo = new Date(
+          now.getTime() - (24 * 60 * 60 * 1000)
+        );
+
+        const { rows } = await client.query(`
+          SELECT
+            te.id,
+            te.task_id,
+            te.executor_id,
+            te.payment_amount,
+            te.commission_amount,
+            t.creator_id,
+            t.title AS task_title
+          FROM task_executions te
+          JOIN tasks t ON t.id = te.task_id
+          WHERE te.status = 'pending'
+            AND te.proof IS NOT NULL
+            AND te.submitted_at < $1
+            AND t.deleted_at IS NULL
+        `, [twentyFourHoursAgo]);
+
+        for (const exec of rows) {
+          try {
+            await client.query('BEGIN');
+
+            await client.query(
+              `
+              UPDATE users
+              SET balance = COALESCE(balance, 0) + $1
+              WHERE telegram_id = $2
+              `,
+              [
+                exec.payment_amount,
+                exec.executor_id
+              ]
+            );
+
+            const totalCost =
+              parseFloat(exec.payment_amount) +
+              parseFloat(exec.commission_amount || 0);
+
+            await client.query(
+              `
+              UPDATE tasks
+              SET spent = COALESCE(spent, 0) + $1
+              WHERE id = $2
+              `,
+              [
+                totalCost,
+                exec.task_id
+              ]
+            );
+
+            await client.query(
+              `
+              UPDATE task_executions
+              SET
+                status = 'approved',
+                reviewed_at = NOW(),
+                reviewed_by = 'auto'
+              WHERE id = $1
+              `,
+              [exec.id]
+            );
+
+            await client.query('COMMIT');
+
+            console.log(
+              `✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`
+            );
+
+            if (typeof distributeReferralCommission === 'function') {
+              await distributeReferralCommission(
+                exec.executor_id,
+                exec.payment_amount
+              );
+            }
+
+          } catch (err) {
+            try {
+              await client.query('ROLLBACK');
+            } catch {}
+
+            console.error(
+              `❌ Auto-approve failed for execution ${exec.id}:`,
+              err.message
+            );
           }
-        } catch (err) {
-          await client.query('ROLLBACK');
-          console.error(`❌ Auto-approve failed for execution ${exec.id}:`, err);
         }
+
+        if (rows.length > 0) {
+          console.log(
+            `✅ Auto-approved ${rows.length} pending proof(s) after 24 hours`
+          );
+        }
+
+      } finally {
+        client.release();
       }
-      
-      if (rows.length > 0) {
-        console.log(`✅ Auto-approved ${rows.length} pending proof(s) after 24 hours`);
-      }
+
     } catch (err) {
-      console.error('❌ Auto-approve cron error:', err);
+      console.error(
+        '❌ Auto-approve cron error:',
+        err.message
+      );
     }
   }
 };
