@@ -847,46 +847,41 @@ const API = "https://taskora.taskora.workers.dev";
 const REQUIRED_ADMIN_ID = "7171208519";
 const BOT_USERNAME = "TasksRewardBot";
 
-<script>
-
 // ================= 🔐 ACCESS CONTROL =================
 function checkAdminAccess() {
-
   const url = window.location.href;
-  let adminIdFromUrl = null;
+  let adminIdFromUrl = "";
 
   try {
     const urlObj = new URL(url);
-    adminIdFromUrl = urlObj.searchParams.get("admin_id");
-  } catch (e) {
-    console.error("❌ Failed to read URL:", e);
+    adminIdFromUrl =
+      urlObj.searchParams.get("admin_id") || "";
+  } catch (error) {
+    console.error("❌ Failed to read URL:", error);
 
-    const match = url.match(/[?&]admin_id=([^&]+)/);
+    const match =
+      url.match(/[?&]admin_id=([^&]+)/);
 
     if (match && match[1]) {
       try {
-        adminIdFromUrl = decodeURIComponent(match[1].trim());
+        adminIdFromUrl =
+          decodeURIComponent(match[1]).trim();
       } catch {
-        adminIdFromUrl = match[1].trim();
+        adminIdFromUrl =
+          match[1].trim();
       }
     }
   }
 
-  const receivedId = adminIdFromUrl
-    ? adminIdFromUrl.toString().trim()
-    : "";
+  const receivedId =
+    String(adminIdFromUrl).trim();
 
   const requiredId =
-    REQUIRED_ADMIN_ID.toString().trim();
+    String(REQUIRED_ADMIN_ID).trim();
 
-  console.log("🔐 URL:", url);
   console.log("🔐 Received admin_id:", receivedId);
   console.log("🔐 Required admin_id:", requiredId);
 
-
-  // ==========================================
-  // عناصر الصفحة
-  // ==========================================
   const denied =
     document.getElementById("accessDenied");
 
@@ -894,13 +889,14 @@ function checkAdminAccess() {
     document.getElementById("adminContent");
 
 
-  // ==========================================
-  // ❌ admin_id مفقود
-  // ==========================================
-  if (!receivedId) {
+  // ❌ admin_id مفقود أو غير صحيح
+  if (
+    !receivedId ||
+    receivedId !== requiredId
+  ) {
 
     console.error(
-      "❌ Invalid or missing admin_id parameter"
+      "❌ Admin access denied"
     );
 
     if (denied) {
@@ -915,32 +911,10 @@ function checkAdminAccess() {
   }
 
 
-  // ==========================================
-  // ❌ admin_id غير صحيح
-  // ==========================================
-  if (receivedId !== requiredId) {
-
-    console.error(
-      "❌ Invalid admin_id:",
-      receivedId
-    );
-
-    if (denied) {
-      denied.style.display = "flex";
-    }
-
-    if (content) {
-      content.classList.add("hidden");
-    }
-
-    return false;
-  }
-
-
-  // ==========================================
   // ✅ الأدمن صحيح
-  // ==========================================
-  console.log("✅ Admin access granted");
+  console.log(
+    "✅ Admin access granted"
+  );
 
   if (denied) {
     denied.style.display = "none";
@@ -950,27 +924,19 @@ function checkAdminAccess() {
     content.classList.remove("hidden");
   }
 
-  localStorage.setItem(
-    "admin_verified",
-    "true"
-  );
-
-  localStorage.setItem(
-    "admin_id",
-    requiredId
-  );
-
   return true;
 }
 
 
 // ================= ⏳ DELAY =================
 const delay = (ms) =>
-  new Promise(resolve => setTimeout(resolve, ms));
+  new Promise(resolve =>
+    setTimeout(resolve, ms)
+  );
 
 
 // ================= 🔐 ADMIN LOGIN =================
-// يتم تسجيل الدخول مرة واحدة فقط عند فتح الصفحة
+// يتم مرة واحدة فقط عند فتح الصفحة
 async function adminLogin() {
 
   try {
@@ -983,27 +949,15 @@ async function adminLogin() {
 
     const providedId =
       adminId
-        ? adminId.toString().trim()
+        ? String(adminId).trim()
         : "";
 
 
-    // ==========================================
-    // ❌ admin_id مفقود
-    // ==========================================
-    if (!providedId) {
-
-      console.error(
-        "❌ Admin login blocked: missing admin_id"
-      );
-
-      return false;
-    }
-
-
-    // ==========================================
-    // ❌ admin_id غير صحيح
-    // ==========================================
-    if (providedId !== REQUIRED_ADMIN_ID) {
+    // التحقق من ID
+    if (
+      !providedId ||
+      providedId !== String(REQUIRED_ADMIN_ID)
+    ) {
 
       console.error(
         "❌ Admin login blocked: invalid admin_id"
@@ -1018,38 +972,31 @@ async function adminLogin() {
     );
 
 
-    // ==========================================
-    // 📡 تسجيل دخول الأدمن في Worker
-    // ==========================================
+    // إرسال طلب تسجيل الدخول مرة واحدة
     const response = await fetch(
-      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      `${API}/api/admin/login?admin_id=${encodeURIComponent(providedId)}`,
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type":
+            "application/json"
         }
       }
     );
 
 
-    // ==========================================
-    // قراءة الرد
-    // ==========================================
-    let data = null;
+    // قراءة الاستجابة
+    let data;
 
     try {
 
-      data = await response.json();
+      data =
+        await response.json();
 
-    } catch (jsonError) {
-
-      console.error(
-        "❌ Invalid JSON response from server"
-      );
+    } catch (error) {
 
       console.error(
-        "❌ HTTP status:",
-        response.status
+        "❌ Server returned invalid JSON"
       );
 
       return false;
@@ -1062,31 +1009,23 @@ async function adminLogin() {
     );
 
 
-    // ==========================================
-    // ❌ تسجيل الدخول فشل
-    // ==========================================
-    if (!response.ok || !data.success) {
+    // فشل تسجيل الدخول
+    if (
+      !response.ok ||
+      !data ||
+      !data.success
+    ) {
 
       console.error(
         "❌ Admin login failed:",
-        data?.message || "Unknown error"
+        data?.message || response.status
       );
-
-      if (data?.error) {
-
-        console.error(
-          "❌ Server error:",
-          data.error
-        );
-      }
 
       return false;
     }
 
 
-    // ==========================================
-    // ✅ تسجيل الدخول ناجح
-    // ==========================================
+    // نجاح تسجيل الدخول
     localStorage.setItem(
       "admin_verified",
       "true"
@@ -1094,11 +1033,14 @@ async function adminLogin() {
 
     localStorage.setItem(
       "admin_id",
-      REQUIRED_ADMIN_ID
+      String(REQUIRED_ADMIN_ID)
     );
 
 
-    if (data.data?.last_login_at) {
+    if (
+      data.data &&
+      data.data.last_login_at
+    ) {
 
       localStorage.setItem(
         "admin_last_login",
@@ -1108,8 +1050,7 @@ async function adminLogin() {
 
 
     console.log(
-      "✅ Admin login recorded:",
-      data.data?.last_login_at || "N/A"
+      "✅ Admin login successful"
     );
 
     return true;
@@ -1127,98 +1068,105 @@ async function adminLogin() {
 
 
 // ================= 🚀 INIT =================
-// يتم التنفيذ مرة واحدة فقط عند فتح الصفحة
-window.addEventListener("load", async () => {
-
-  console.log(
-    "🚀 Admin panel initializing..."
-  );
-
-
-  // ==========================================
-  // 1️⃣ التحقق من صلاحية admin_id
-  // ==========================================
-  const accessGranted =
-    checkAdminAccess();
-
-
-  if (!accessGranted) {
-
-    console.error(
-      "❌ Admin access denied"
-    );
-
-    return;
-  }
-
-
-  // ==========================================
-  // 2️⃣ تسجيل دخول الأدمن مرة واحدة
-  // ==========================================
-  const loggedIn =
-    await adminLogin();
-
-
-  if (!loggedIn) {
-
-    console.error(
-      "❌ Admin login failed"
-    );
-
-    return;
-  }
-
-
-  // ==========================================
-  // 3️⃣ تحميل بيانات لوحة الأدمن
-  // ==========================================
-
-  try {
-
-    await loadDashboardStats();
-
-    await delay(50);
-
-    await loadTotalUsers();
-
-    await delay(70);
-
-    await loadDeposits();
-
-    await delay(90);
-
-    await loadWithdrawals();
-
-    await delay(110);
-
-    await loadMessages();
-
-    await delay(130);
-
-    await loadPendingProofs();
-
-    await delay(150);
-
-    await loadDisputes();
-
-    await delay(170);
-
-    await loadCommissionStats();
-
+// مهم جداً: يوجد INIT واحد فقط
+window.addEventListener(
+  "load",
+  async () => {
 
     console.log(
-      "✅ Admin dashboard loaded successfully"
+      "🚀 Admin panel initializing..."
     );
 
-  } catch (error) {
 
-    console.error(
-      "❌ Admin dashboard loading error:",
-      error
-    );
+    // =====================================
+    // 1️⃣ التحقق من الوصول
+    // =====================================
+    const accessGranted =
+      checkAdminAccess();
+
+
+    if (!accessGranted) {
+      return;
+    }
+
+
+    // =====================================
+    // 2️⃣ تسجيل الدخول مرة واحدة فقط
+    // =====================================
+    const loggedIn =
+      await adminLogin();
+
+
+    if (!loggedIn) {
+
+      console.error(
+        "❌ Admin login failed"
+      );
+
+      return;
+    }
+
+
+    // =====================================
+    // 3️⃣ تحميل لوحة الأدمن
+    // =====================================
+
+    try {
+
+      await loadDashboardStats();
+
+      await delay(50);
+
+
+      await loadTotalUsers();
+
+      await delay(70);
+
+
+      await loadDeposits();
+
+      await delay(90);
+
+
+      await loadWithdrawals();
+
+      await delay(110);
+
+
+      await loadMessages();
+
+      await delay(130);
+
+
+      await loadPendingProofs();
+
+      await delay(150);
+
+
+      await loadDisputes();
+
+      await delay(170);
+
+
+      await loadCommissionStats();
+
+
+      console.log(
+        "✅ Admin dashboard loaded successfully"
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ Dashboard loading error:",
+        error
+      );
+
+    }
+
   }
+);
 
-});
 
 
 function switchTab(tab) {
