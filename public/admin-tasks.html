@@ -527,6 +527,277 @@ tr:hover{background:#1e293b/50}
       <div id="pendingProofsList"></div>
     </div>
 
+  <!-- =====================================================
+     🟢 APPROVE PROOF MODAL
+===================================================== -->
+
+<div
+  id="approveProofModal"
+  class="modal"
+  style="display:none;"
+>
+
+  <div
+    class="modal-content proof-modal approve-proof-modal"
+    style="max-width:450px;"
+  >
+
+    <div class="modal-header">
+
+      <h3 style="color:#22c55e;margin:0;">
+        ✅ Approve Proof
+      </h3>
+
+      <button
+        type="button"
+        class="modal-close"
+        onclick="closeApproveProofModal()"
+      >
+        &times;
+      </button>
+
+    </div>
+
+    <div
+      style="
+        background:#0f172a;
+        padding:18px;
+        border-radius:10px;
+        margin-bottom:20px;
+        text-align:center;
+      "
+    >
+
+      <div
+        style="
+          color:#94a3b8;
+          font-size:14px;
+          margin-bottom:8px;
+        "
+      >
+        Proof ID
+      </div>
+
+      <input
+        type="hidden"
+        id="approveProofId"
+      >
+
+      <div
+        style="
+          color:#60a5fa;
+          font-size:18px;
+          font-weight:700;
+          margin-bottom:15px;
+        "
+        id="approveProofIdDisplay"
+      >
+        #
+      </div>
+
+      <div
+        style="
+          color:#94a3b8;
+          font-size:14px;
+          margin-bottom:5px;
+        "
+      >
+        Payment Amount
+      </div>
+
+      <div
+        id="approveProofAmount"
+        style="
+          color:#22c55e;
+          font-size:28px;
+          font-weight:700;
+        "
+      >
+        $0.00
+      </div>
+
+    </div>
+
+    <p
+      style="
+        color:#cbd5e1;
+        text-align:center;
+        margin-bottom:20px;
+      "
+    >
+      Are you sure you want to approve this proof
+      and send the payment to the executor?
+    </p>
+
+    <div
+      style="
+        display:flex;
+        gap:10px;
+        justify-content:flex-end;
+      "
+    >
+
+      <button
+        type="button"
+        class="btn btn-secondary"
+        onclick="closeApproveProofModal()"
+      >
+        ❌ Cancel
+      </button>
+
+      <button
+        type="button"
+        id="confirmApproveProofBtn"
+        class="btn btn-success"
+        onclick="confirmApproveProof()"
+      >
+        ✅ Confirm Approval
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- =====================================================
+     🔴 REJECT PROOF MODAL
+===================================================== -->
+
+<div
+  id="rejectProofModal"
+  class="modal"
+  style="display:none;"
+>
+
+  <div
+    class="modal-content proof-modal reject-proof-modal"
+    style="max-width:550px;"
+  >
+
+    <div class="modal-header">
+
+      <h3 style="color:#ef4444;margin:0;">
+        ❌ Reject Proof
+      </h3>
+
+      <button
+        type="button"
+        class="modal-close"
+        onclick="closeRejectProofModal()"
+      >
+        &times;
+      </button>
+
+    </div>
+
+    <input
+      type="hidden"
+      id="rejectProofId"
+    >
+
+    <div
+      style="
+        background:#0f172a;
+        padding:15px;
+        border-radius:8px;
+        margin-bottom:18px;
+      "
+    >
+
+      <p
+        style="
+          color:#94a3b8;
+          margin:0;
+          font-size:14px;
+        "
+      >
+        📋 Proof ID:
+
+        <strong
+          id="rejectProofIdDisplay"
+          style="color:#60a5fa;"
+        >
+          #
+        </strong>
+      </p>
+
+    </div>
+
+    <div class="input-group">
+
+      <label
+        for="rejectProofReason"
+        style="color:#cbd5e1;"
+      >
+        Reason for rejection
+        <span style="color:#ef4444;">
+          *
+        </span>
+      </label>
+
+      <textarea
+        id="rejectProofReason"
+        rows="5"
+        minlength="20"
+        placeholder="Please enter the reason for rejecting this proof (minimum 20 characters)..."
+        style="
+          width:100%;
+          padding:12px;
+          border:1px solid #475569;
+          border-radius:8px;
+          background:#0f172a;
+          color:#fff;
+          font-size:14px;
+          resize:vertical;
+        "
+      ></textarea>
+
+      <small
+        style="
+          display:block;
+          color:#94a3b8;
+          margin-top:5px;
+        "
+      >
+        Minimum 20 characters required.
+      </small>
+
+    </div>
+
+    <div
+      style="
+        display:flex;
+        gap:10px;
+        justify-content:flex-end;
+        margin-top:20px;
+      "
+    >
+
+      <button
+        type="button"
+        class="btn btn-secondary"
+        onclick="closeRejectProofModal()"
+      >
+        Cancel
+      </button>
+
+      <button
+        type="button"
+        id="confirmRejectProofBtn"
+        class="btn btn-danger"
+        onclick="confirmRejectProof()"
+      >
+        ❌ Confirm Rejection
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+    
     <!-- Disputes Section -->
     <div id="disputesSection" class="card hidden">
       <h3>⚠️ Open Disputes</h3>
@@ -1154,128 +1425,615 @@ async function loadDeposits() {
 // ========================
 let pendingApproveData = null;
 
-// 🔓 فتح مودال إدخال المبلغ
+
+// =====================================================
+// 🔓 فتح مودال إدخال مبلغ الموافقة
+// =====================================================
 function openApproveModal(btn) {
-  const depositId = btn.dataset.depositId;
-  const userId = btn.dataset.userId;
-  const txid = btn.dataset.txid;
-  const requestedAmount = parseFloat(btn.dataset.amount) || 0;
-  
-  // تعبئة بيانات المودال
-  document.getElementById('modalUserId').textContent = userId;
-  document.getElementById('modalTxid').textContent = txid || 'N/A';
-  document.getElementById('modalRequestedAmount').textContent = requestedAmount.toFixed(2);
-  document.getElementById('modalFinalAmount').value = requestedAmount.toFixed(2);
-  
-  // تخزين البيانات للمعالجة
-  pendingApproveData = { depositId, userId, requestedAmount };
-  
-  // إظهار المودال
-  document.getElementById('approveDepositModal').style.display = 'flex';
+
+  const depositId =
+    btn.dataset.depositId;
+
+  const userId =
+    btn.dataset.userId;
+
+  const txid =
+    btn.dataset.txid;
+
+  const requestedAmount =
+    parseFloat(btn.dataset.amount) || 0;
+
+
+  // ===================================================
+  // 📝 تعبئة بيانات المودال
+  // ===================================================
+
+  const modalUserId =
+    document.getElementById('modalUserId');
+
+  const modalTxid =
+    document.getElementById('modalTxid');
+
+  const modalRequestedAmount =
+    document.getElementById('modalRequestedAmount');
+
+  const modalFinalAmount =
+    document.getElementById('modalFinalAmount');
+
+
+  if (modalUserId) {
+    modalUserId.textContent =
+      userId || 'N/A';
+  }
+
+  if (modalTxid) {
+    modalTxid.textContent =
+      txid || 'N/A';
+  }
+
+  if (modalRequestedAmount) {
+    modalRequestedAmount.textContent =
+      requestedAmount.toFixed(2);
+  }
+
+  if (modalFinalAmount) {
+    modalFinalAmount.value =
+      requestedAmount.toFixed(2);
+  }
+
+
+  // ===================================================
+  // 💾 تخزين البيانات مؤقتًا
+  // ===================================================
+
+  pendingApproveData = {
+    depositId,
+    userId,
+    requestedAmount
+  };
+
+
+  // ===================================================
+  // 🔓 إظهار المودال
+  // ===================================================
+
+  const modal =
+    document.getElementById('approveDepositModal');
+
+  if (modal) {
+    modal.style.display = 'flex';
+  }
 }
 
-// ❌ إغلاق المودال
+
+// =====================================================
+// ❌ إغلاق مودال الموافقة
+// =====================================================
 function closeApproveModal() {
-  document.getElementById('approveDepositModal').style.display = 'none';
+
+  const modal =
+    document.getElementById('approveDepositModal');
+
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
   pendingApproveData = null;
 }
 
-// ✅ تأكيد الموافقة وإرسال الطلب للسيرفر
-async function confirmApproveDeposit() {
-  if (!pendingApproveData) return;
-  
-  const finalAmount = parseFloat(document.getElementById('modalFinalAmount').value);
-  if (isNaN(finalAmount) || finalAmount <= 0) {
-    showAlert('⚠️ يرجى إدخال مبلغ صحيح أكبر من 0', 'error');
+
+// =====================================================
+// ✅ تأكيد الموافقة على الإيداع
+// =====================================================
+async function confirmApproveDeposit(button) {
+
+  if (!pendingApproveData) {
     return;
   }
-  
-  const btn = event.target;
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Processing...';
-  
+
+
+  // ===================================================
+  // 💰 قراءة المبلغ النهائي
+  // ===================================================
+
+  const amountInput =
+    document.getElementById('modalFinalAmount');
+
+  const finalAmount =
+    parseFloat(
+      amountInput?.value
+    );
+
+
+  if (
+    !Number.isFinite(finalAmount) ||
+    finalAmount <= 0
+  ) {
+
+    showAlert(
+      '⚠️ يرجى إدخال مبلغ صحيح أكبر من 0',
+      'error'
+    );
+
+    return;
+  }
+
+
+  // ===================================================
+  // 🔒 تعطيل الزر أثناء المعالجة
+  // ===================================================
+
+  if (!button) {
+    button =
+      document.getElementById(
+        'confirmApproveDepositBtn'
+      );
+  }
+
+  let originalText = '';
+
+  if (button) {
+
+    originalText =
+      button.textContent;
+
+    button.disabled = true;
+
+    button.textContent =
+      '⏳ Processing...';
+  }
+
+
   try {
-    const response = await fetch(`${API}/api/admin/deposits/${pendingApproveData.depositId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        admin_id: REQUIRED_ADMIN_ID,
-        user_id: pendingApproveData.userId,
-        final_amount: finalAmount  // 🆕 المبلغ الجديد
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      showAlert('✅ ' + data.message, 'success');
-      closeApproveModal();
-      loadDeposits();
-      loadDashboardStats();
-    } else {
-      showAlert('❌ ' + (data.message || 'Failed'), 'error');
+
+    // =================================================
+    // 📡 إرسال الطلب للسيرفر
+    // =================================================
+
+    const response =
+      await fetch(
+        `${API}/api/admin/deposits/${pendingApproveData.depositId}/approve`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+
+            admin_id:
+              REQUIRED_ADMIN_ID,
+
+            user_id:
+              pendingApproveData.userId,
+
+            final_amount:
+              finalAmount
+
+          })
+        }
+      );
+
+
+    // =================================================
+    // 📥 قراءة الاستجابة
+    // =================================================
+
+    const data =
+      await response.json();
+
+
+    // =================================================
+    // ❌ HTTP Error
+    // =================================================
+
+    if (!response.ok) {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to approve deposit'
+        ),
+        'error'
+      );
+
+      return;
     }
+
+
+    // =================================================
+    // ✅ نجاح
+    // =================================================
+
+    if (data.success) {
+
+      showAlert(
+        '✅ ' +
+        (
+          data.message ||
+          'Deposit approved successfully'
+        ),
+        'success'
+      );
+
+
+      // إغلاق المودال
+      closeApproveModal();
+
+
+      // تحديث الإيداعات
+      await loadDeposits();
+
+
+      // تحديث الإحصائيات
+      await loadDashboardStats();
+
+
+    } else {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to approve deposit'
+        ),
+        'error'
+      );
+    }
+
+
   } catch (err) {
-    console.error('❌ Error:', err);
-    showAlert('⚠️ Connection error', 'error');
+
+    console.error(
+      '❌ confirmApproveDeposit:',
+      err
+    );
+
+    showAlert(
+      '⚠️ Connection error. Please try again.',
+      'error'
+    );
+
+
   } finally {
-    btn.disabled = false;
-    btn.textContent = originalText;
+
+    // =================================================
+    // 🔓 إعادة تفعيل الزر
+    // =================================================
+
+    if (button) {
+
+      button.disabled =
+        false;
+
+      button.textContent =
+        originalText ||
+        '✅ Confirm Approval';
+    }
   }
 }
 
-// متغير عالمي لتخزين بيانات الرفض المؤقت
+
+// =====================================================
+// 📦 متغير عالمي لبيانات الرفض
+// =====================================================
 let pendingReject = null;
 
-// ✅ دالة فتح نموذج الرفض (بدون prompt)
-function openRejectModal(depositId, userId) {
-  pendingReject = { depositId, userId };
-  document.getElementById('rejectDepositId').textContent = depositId;
-  document.getElementById('rejectUserId').textContent = userId;
-  document.getElementById('rejectReason').value = ''; // مسح أي نص سابق
-  openModal('rejectModal');
-}
 
-// ✅ دالة تأكيد الرفض (تُستدعى عند الضغط على الزر داخل المودال)
-async function confirmReject() {
-  if (!pendingReject) return;
-  
-  const { depositId, userId } = pendingReject;
-  const reason = document.getElementById('rejectReason').value.trim() || 'Does not meet requirements';
-  
-  try {
-    const res = await fetch(`${API}/api/admin/deposits/${depositId}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        admin_id: REQUIRED_ADMIN_ID, 
-        reason: reason 
-      })
-    });
-    const data = await res.json();
-    
-    if (data.success) {
-      showAlert('❌ Deposit rejected', 'success');
-      closeModal('rejectModal');
-      loadDeposits();      // تحديث القائمة
-      loadDashboardStats(); // تحديث الإحصائيات
-    } else {
-      showAlert('❌ ' + (data.message || 'Failed to reject'), 'error');
-    }
-  } catch (err) {
-    console.error('❌ confirmReject:', err);
-    showAlert('⚠️ Connection error. Please try again.', 'error');
+// =====================================================
+// 🔓 فتح مودال رفض الإيداع
+// =====================================================
+function openRejectModal(
+  depositId,
+  userId
+) {
+
+  pendingReject = {
+    depositId,
+    userId
+  };
+
+
+  // ===================================================
+  // 📝 تعبئة بيانات المودال
+  // ===================================================
+
+  const rejectDepositId =
+    document.getElementById(
+      'rejectDepositId'
+    );
+
+  const rejectUserId =
+    document.getElementById(
+      'rejectUserId'
+    );
+
+  const rejectReason =
+    document.getElementById(
+      'rejectReason'
+    );
+
+
+  if (rejectDepositId) {
+
+    rejectDepositId.textContent =
+      depositId;
   }
-  
-  // مسح البيانات المؤقتة
-  pendingReject = null;
+
+
+  if (rejectUserId) {
+
+    rejectUserId.textContent =
+      userId || 'N/A';
+  }
+
+
+  if (rejectReason) {
+
+    rejectReason.value =
+      '';
+  }
+
+
+  // ===================================================
+  // 🔓 فتح المودال
+  // ===================================================
+
+  if (typeof openModal === 'function') {
+
+    openModal('rejectModal');
+
+  } else {
+
+    const modal =
+      document.getElementById(
+        'rejectModal'
+      );
+
+    if (modal) {
+      modal.style.display =
+        'flex';
+    }
+  }
 }
 
-// ✅ دالة رفض الإيداع (تُستدعى من زر الرفض في القائمة)
-async function rejectDeposit(depositId, userId) {
-  // فتح المودال بدلاً من prompt
-  openRejectModal(depositId, userId);
+
+// =====================================================
+// ❌ إغلاق مودال الرفض
+// =====================================================
+function closeRejectModal() {
+
+  if (typeof closeModal === 'function') {
+
+    closeModal('rejectModal');
+
+  } else {
+
+    const modal =
+      document.getElementById(
+        'rejectModal'
+      );
+
+    if (modal) {
+      modal.style.display =
+        'none';
+    }
+  }
+
+
+  pendingReject = null;
+
+
+  const reason =
+    document.getElementById(
+      'rejectReason'
+    );
+
+  if (reason) {
+    reason.value = '';
+  }
+}
+
+
+// =====================================================
+// ❌ تأكيد رفض الإيداع
+// =====================================================
+async function confirmReject(button) {
+
+  if (!pendingReject) {
+    return;
+  }
+
+
+  const {
+    depositId,
+    userId
+  } = pendingReject;
+
+
+  const reasonInput =
+    document.getElementById(
+      'rejectReason'
+    );
+
+
+  const reason =
+    reasonInput?.value.trim() ||
+    'Does not meet requirements';
+
+
+  // ===================================================
+  // 🔒 تعطيل الزر
+  // ===================================================
+
+  if (!button) {
+
+    button =
+      document.getElementById(
+        'confirmRejectBtn'
+      );
+  }
+
+
+  let originalText = '';
+
+  if (button) {
+
+    originalText =
+      button.textContent;
+
+    button.disabled =
+      true;
+
+    button.textContent =
+      '⏳ Processing...';
+  }
+
+
+  try {
+
+    // =================================================
+    // 📡 إرسال الرفض للسيرفر
+    // =================================================
+
+    const res =
+      await fetch(
+        `${API}/api/admin/deposits/${depositId}/reject`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+
+            admin_id:
+              REQUIRED_ADMIN_ID,
+
+            user_id:
+              userId,
+
+            reason:
+              reason
+
+          })
+        }
+      );
+
+
+    // =================================================
+    // 📥 قراءة الاستجابة
+    // =================================================
+
+    const data =
+      await res.json();
+
+
+    // =================================================
+    // ❌ HTTP Error
+    // =================================================
+
+    if (!res.ok) {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to reject deposit'
+        ),
+        'error'
+      );
+
+      return;
+    }
+
+
+    // =================================================
+    // ✅ نجاح
+    // =================================================
+
+    if (data.success) {
+
+      showAlert(
+        '❌ Deposit rejected',
+        'success'
+      );
+
+
+      // إغلاق المودال
+      closeRejectModal();
+
+
+      // تحديث قائمة الإيداعات
+      await loadDeposits();
+
+
+      // تحديث الإحصائيات
+      await loadDashboardStats();
+
+
+    } else {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to reject deposit'
+        ),
+        'error'
+      );
+    }
+
+
+  } catch (err) {
+
+    console.error(
+      '❌ confirmReject:',
+      err
+    );
+
+    showAlert(
+      '⚠️ Connection error. Please try again.',
+      'error'
+    );
+
+
+  } finally {
+
+    // =================================================
+    // 🔓 إعادة تفعيل الزر
+    // =================================================
+
+    if (button) {
+
+      button.disabled =
+        false;
+
+      button.textContent =
+        originalText ||
+        '❌ Confirm Rejection';
+    }
+  }
+}
+
+
+// =====================================================
+// ❌ فتح مودال الرفض من قائمة الإيداعات
+// =====================================================
+function rejectDeposit(
+  depositId,
+  userId
+) {
+
+  openRejectModal(
+    depositId,
+    userId
+  );
 }
 // ================= 📤 WITHDRAWALS =================
 
@@ -1776,96 +2534,516 @@ document.getElementById('replyMessageModal')?.addEventListener('click', function
   if (e.target === this) closeReplyMessageModal();
 });
 // ================= PENDING PROOFS =================
+
 async function loadPendingProofs() {
   const list = document.getElementById('pendingProofsList');
+  const count = document.getElementById('pendingProofsCount');
+
   if (!list) return;
+
   list.innerHTML = '<div class="loading">Loading pending proofs...</div>';
-  
+
   try {
-    // ✅ تم التغيير من user_id إلى admin_id
-    const res = await fetch(`${API}/api/admin/pending-proofs?admin_id=${REQUIRED_ADMIN_ID}`);
+    const res = await fetch(
+      `${API}/api/admin/pending-proofs?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`
+    );
+
     const data = await res.json();
-    
-    if (!data.success || !data.data?.length) {
-      list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No pending proofs to review</p>';
-      document.getElementById('pendingProofsCount').textContent = '0';
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || 'Failed to load pending proofs');
+    }
+
+    if (!data.data || !data.data.length) {
+      list.innerHTML = `
+        <p style="text-align:center;color:#94a3b8;padding:20px">
+          ✅ No pending proofs to review
+        </p>
+      `;
+
+      if (count) count.textContent = '0';
       return;
     }
-    
-    document.getElementById('pendingProofsCount').textContent = data.data.length;
-    
-    list.innerHTML = data.data.map(proof => `
-      <div class="proof-item">
-        <div class="proof-header">
-          <div>
-            <strong>📋 ${proof.task_title}</strong>
-            <span style="color:#94a3b8;font-size:12px;margin-left:10px">#${proof.task_id}</span>
+
+    if (count) {
+      count.textContent = data.data.length;
+    }
+
+    list.innerHTML = data.data.map(proof => {
+
+      const amount = parseFloat(proof.payment_amount || 0);
+      const formattedAmount = formatPrice(amount);
+
+      const taskTitle = escapeHtml(proof.task_title || 'Untitled Task');
+      const taskDescription = escapeHtml(
+        proof.task_description || ''
+      );
+
+      const executorUsername = escapeHtml(
+        proof.executor_username || String(proof.executor_id || '')
+      );
+
+      const proofText = escapeHtml(
+        proof.proof || 'No proof submitted'
+      );
+
+      const shortDescription =
+        taskDescription.length > 100
+          ? taskDescription.substring(0, 100) + '...'
+          : taskDescription;
+
+      return `
+        <div class="proof-item">
+
+          <div class="proof-header">
+
+            <div>
+              <strong>📋 ${taskTitle}</strong>
+
+              <span style="
+                color:#94a3b8;
+                font-size:12px;
+                margin-left:10px;
+              ">
+                #${proof.task_id}
+              </span>
+            </div>
+
+            <span class="status-badge status-pending">
+              ⏳ Pending
+            </span>
+
           </div>
-          <span class="status-badge status-pending">⏳ Pending</span>
+
+          <p style="
+            color:#94a3b8;
+            font-size:13px;
+            margin:5px 0;
+          ">
+            👤 Executor:
+            @${executorUsername}
+
+            &nbsp; | &nbsp;
+
+            📅 ${formatDate(proof.submitted_at)}
+          </p>
+
+          <p style="
+            color:#94a3b8;
+            font-size:13px;
+            margin:5px 0;
+          ">
+            💰 Payment:
+
+            <strong style="color:#22c55e">
+              ${formattedAmount}
+            </strong>
+          </p>
+
+          <p style="
+            color:#cbd5e1;
+            font-size:13px;
+            margin:5px 0;
+          ">
+            📝 Task:
+            ${shortDescription}
+          </p>
+
+          <div
+            class="proof-content"
+            style="margin:10px 0"
+          >
+            <strong>Executor's Proof:</strong>
+            <br>
+            ${proofText}
+          </div>
+
+          <div class="proof-actions">
+
+            <button
+              class="btn btn-success btn-sm"
+              onclick="openApproveProofModal(
+                ${proof.id},
+                '${escapeJs(formattedAmount)}'
+              )"
+            >
+              ✅ Approve & Pay ${formattedAmount}
+            </button>
+
+            <button
+              class="btn btn-danger btn-sm"
+              onclick="openRejectProofModal(${proof.id})"
+            >
+              ❌ Reject
+            </button>
+
+          </div>
+
         </div>
-        <p style="color:#94a3b8;font-size:13px;margin:5px 0">
-          👤 Executor: @${proof.executor_username || proof.executor_id} | 
-          📅 ${formatDate(proof.submitted_at)}
-        </p>
-        <p style="color:#94a3b8;font-size:13px;margin:5px 0">
-          💰 Payment: <strong style="color:#22c55e">${formatPrice(proof.payment_amount)}</strong>
-        </p>
-        <p style="color:#cbd5e1;font-size:13px;margin:5px 0">
-          📝 Task: ${proof.task_description?.substring(0, 100)}${proof.task_description?.length > 100 ? '...' : ''}
-        </p>
-        ${proof.proof ? `<div class="proof-content" style="margin:10px 0"><strong>Executor's Proof:</strong><br>${proof.proof}</div>` : ''}
-        <div class="proof-actions">
-          <button class="btn btn-success btn-sm" onclick="approveProof(${proof.task_id}, ${proof.id})">✅ Approve & Pay ${formatPrice(proof.payment_amount)}</button>
-          <button class="btn btn-danger btn-sm" onclick="rejectProof(${proof.task_id}, ${proof.id})">❌ Reject</button>
-        </div>
-      </div>
-    `).join('');
-  } catch (err) {
-    console.error(err);
-    list.innerHTML = '<p class="alert alert-error">Failed to load proofs</p>';
-  }
-}
+      `;
 
-async function approveProof(taskId, proofId) {
-  if (!confirm('✅ Confirm approving this proof and sending payment?')) return;
-  
-  try {
-    const res = await fetch(`${API}/api/tasks/${taskId}/proofs/${proofId}/approve`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ user_id: REQUIRED_ADMIN_ID })
-    });
-    const data = await res.json();
-    showAlert(data.success ? '✅ Approved and paid' : '❌ ' + data.message, data.success ? 'success' : 'error');
-    if (data.success) {
-      loadPendingProofs();
-      loadDashboardStats(); // ✅ تحديث الإحصائيات
+    }).join('');
+
+  } catch (err) {
+
+    console.error(
+      '❌ loadPendingProofs:',
+      err
+    );
+
+    list.innerHTML = `
+      <p class="alert alert-error">
+        ❌ Failed to load pending proofs:
+        ${escapeHtml(err.message)}
+      </p>
+    `;
+
+    if (count) {
+      count.textContent = '0';
     }
-  } catch (err) {
-    showAlert('⚠️ Connection error', 'error');
   }
 }
 
-async function rejectProof(taskId, proofId) {
-  const reason = prompt('Reason for rejection (optional):') || 'Does not meet requirements';
-  
+
+// =====================================================
+// 🛡️ SAFE HTML
+// =====================================================
+
+function escapeHtml(value) {
+
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+
+function escapeJs(value) {
+
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
+
+// =====================================================
+// 🟢 OPEN APPROVE PROOF MODAL
+// =====================================================
+
+function openApproveProofModal(proofId, amount) {
+
+  const modal = document.getElementById('approveProofModal');
+  const proofIdInput = document.getElementById('approveProofId');
+  const proofIdDisplay = document.getElementById('approveProofIdDisplay');
+  const amountElement = document.getElementById('approveProofAmount');
+
+  if (!modal || !proofIdInput || !amountElement) {
+    console.error('❌ Approve proof modal elements not found');
+    return;
+  }
+
+  proofIdInput.value = proofId;
+
+  if (proofIdDisplay) {
+    proofIdDisplay.textContent = `#${proofId}`;
+  }
+
+  amountElement.textContent = amount || '$0.00';
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+
+function openRejectProofModal(proofId) {
+
+  const modal = document.getElementById('rejectProofModal');
+  const proofIdInput = document.getElementById('rejectProofId');
+  const proofIdDisplay = document.getElementById('rejectProofIdDisplay');
+  const reason = document.getElementById('rejectProofReason');
+
+  if (!modal || !proofIdInput) {
+    console.error('❌ Reject proof modal elements not found');
+    return;
+  }
+
+  proofIdInput.value = proofId;
+
+  if (proofIdDisplay) {
+    proofIdDisplay.textContent = `#${proofId}`;
+  }
+
+  if (reason) {
+    reason.value = '';
+  }
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  setTimeout(() => {
+    reason?.focus();
+  }, 100);
+}
+
+
+// =====================================================
+// ❌ CLOSE APPROVE PROOF MODAL
+// =====================================================
+
+function closeApproveProofModal() {
+
+  const modal =
+    document.getElementById('approveProofModal');
+
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  document.body.style.overflow = '';
+}
+
+
+// =====================================================
+// ❌ CLOSE REJECT PROOF MODAL
+// =====================================================
+
+function closeRejectProofModal() {
+
+  const modal =
+    document.getElementById('rejectProofModal');
+
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  document.body.style.overflow = '';
+}
+
+
+// =====================================================
+// 🟢 CONFIRM APPROVE PROOF
+// =====================================================
+
+async function confirmApproveProof() {
+
+  const proofId =
+    document.getElementById('approveProofId')?.value;
+
+  const button =
+    document.getElementById('confirmApproveProofBtn');
+
+  if (!proofId) {
+    showAlert(
+      '❌ Proof ID is missing',
+      'error'
+    );
+    return;
+  }
+
+  if (!button) {
+    console.error(
+      '❌ confirmApproveProofBtn not found'
+    );
+    return;
+  }
+
+  const originalText =
+    button.textContent;
+
+  button.disabled = true;
+  button.textContent =
+    '⏳ Processing...';
+
   try {
-    const res = await fetch(`${API}/api/tasks/${taskId}/proofs/${proofId}/reject`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ user_id: REQUIRED_ADMIN_ID, reason })
-    });
+
+    const res = await fetch(
+      `${API}/api/admin/task-executions/${encodeURIComponent(proofId)}/approve?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
     const data = await res.json();
-    showAlert(data.success ? '❌ Proof rejected' : '❌ ' + data.message, data.success ? 'success' : 'error');
-    if (data.success) {
-      loadPendingProofs();
-      loadDashboardStats();
+
+    if (!res.ok || !data.success) {
+
+      showAlert(
+        '❌ ' +
+        (data.message || 'Failed to approve proof'),
+        'error'
+      );
+
+      return;
     }
+
+    closeApproveProofModal();
+
+    showAlert(
+      '✅ Proof approved and payment sent successfully',
+      'success'
+    );
+
+    await loadPendingProofs();
+
+    if (typeof loadDashboardStats === 'function') {
+      await loadDashboardStats();
+    }
+
   } catch (err) {
-    showAlert('⚠️ Connection error', 'error');
+
+    console.error(
+      '❌ confirmApproveProof:',
+      err
+    );
+
+    showAlert(
+      '⚠️ Connection error. Please try again.',
+      'error'
+    );
+
+  } finally {
+
+    button.disabled = false;
+    button.textContent = originalText;
+
   }
 }
 
+
+// =====================================================
+// 🔴 CONFIRM REJECT PROOF
+// =====================================================
+
+async function confirmRejectProof() {
+
+  const proofId =
+    document.getElementById('rejectProofId')?.value;
+
+  const reasonElement =
+    document.getElementById('rejectProofReason');
+
+  const button =
+    document.getElementById('confirmRejectProofBtn');
+
+  if (!proofId) {
+
+    showAlert(
+      '❌ Proof ID is missing',
+      'error'
+    );
+
+    return;
+  }
+
+  if (!reasonElement) {
+
+    showAlert(
+      '❌ Rejection reason field not found',
+      'error'
+    );
+
+    return;
+  }
+
+  const reason =
+    reasonElement.value.trim();
+
+  if (reason.length < 20) {
+
+    showAlert(
+      '❌ Rejection reason must be at least 20 characters',
+      'error'
+    );
+
+    reasonElement.focus();
+
+    return;
+  }
+
+  if (!button) {
+
+    console.error(
+      '❌ confirmRejectProofBtn not found'
+    );
+
+    return;
+  }
+
+  const originalText =
+    button.textContent;
+
+  button.disabled = true;
+  button.textContent =
+    '⏳ Processing...';
+
+  try {
+
+    const res = await fetch(
+      `${API}/api/admin/task-executions/${encodeURIComponent(proofId)}/reject?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+          reason: reason
+        })
+      }
+    );
+
+    const data =
+      await res.json();
+
+    if (!res.ok || !data.success) {
+
+      showAlert(
+        '❌ ' +
+        (data.message || 'Failed to reject proof'),
+        'error'
+      );
+
+      return;
+    }
+
+    closeRejectProofModal();
+
+    showAlert(
+      '❌ Proof rejected successfully',
+      'success'
+    );
+
+    await loadPendingProofs();
+
+    if (typeof loadDashboardStats === 'function') {
+      await loadDashboardStats();
+    }
+
+  } catch (err) {
+
+    console.error(
+      '❌ confirmRejectProof:',
+      err
+    );
+
+    showAlert(
+      '⚠️ Connection error. Please try again.',
+      'error'
+    );
+
+  } finally {
+
+    button.disabled = false;
+    button.textContent = originalText;
+
+  }
+}
 
 // ================= DISPUTES =================
 let currentDispute = null;
