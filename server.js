@@ -3829,16 +3829,26 @@ app.get('/api/admin/commission-stats', isAdminAuthenticated, async (c) => {
   }
 });
 
+// =======================
+// ⚖️ ADMIN - RESOLVE TASK DISPUTE
+// =======================
+
 app.post(
   '/api/admin/task-disputes/:id/resolve',
   verifyAdmin,
   async (c) => {
 
-    const client = await pool.connect();
+    let client;
 
     try {
 
-      const id = c.req.param('id');
+      // =========================
+      // 🔐 Get database client
+      // =========================
+
+      client = await pool.connect();
+
+      const disputeId = c.req.param('id');
 
       const body = await c.req.json().catch(() => ({}));
 
@@ -3847,14 +3857,27 @@ app.post(
         resolution = 'Resolved by admin'
       } = body;
 
-
-      // =================================================
-      // 🔐 معرف الأدمن من Middleware وليس من Body
-      // =================================================
       const adminId = c.get('adminId');
 
+      // =========================
+      // ✅ Validate dispute ID
+      // =========================
 
-      // التحقق من القرار
+      const id = Number(disputeId);
+
+      if (!Number.isInteger(id) || id <= 0) {
+
+        return c.json({
+          success: false,
+          message: '❌ Invalid dispute ID'
+        }, 400);
+
+      }
+
+      // =========================
+      // ✅ Validate payout decision
+      // =========================
+
       if (
         payout_to !== 'executor' &&
         payout_to !== 'creator'
@@ -3867,17 +3890,20 @@ app.post(
 
       }
 
+      // =========================
+      // 🔒 Start transaction
+      // =========================
 
       await client.query('BEGIN');
 
+      // =========================
+      // 🔎 Get dispute + execution + task
+      // =========================
 
-      // =================================================
-      // 🔒 جلب النزاع وقفل الصف
-      // =================================================
-      const dispute = await client.query(
+      const disputeResult = await client.query(
         `
         SELECT
-          td.id,
+          td.id AS dispute_id,
           td.execution_id,
           td.status AS dispute_status,
 
@@ -3885,8 +3911,11 @@ app.post(
           te.executor_id,
           te.payment_amount,
           te.commission_amount,
+          te.status AS execution_status,
 
-          t.creator_id
+          t.creator_id,
+          t.spent,
+          t.budget
 
         FROM task_disputes td
 
@@ -3896,16 +3925,19 @@ app.post(
         INNER JOIN tasks t
           ON te.task_id = t.id
 
-        WHERE td.id = $1::integer
-        AND td.status = 'open'
+        WHERE td.id = $1
+          AND td.status = 'open'
 
-        FOR UPDATE OF td, te
+        FOR UPDATE OF td, te, t
         `,
         [id]
       );
 
+      // =========================
+      // ❌ Dispute not found
+      // =========================
 
-      if (dispute.rows.length === 0) {
+      if (disputeResult.rows.length === 0) {
 
         await client.query('ROLLBACK');
 
@@ -3914,29 +3946,245 @@ app.post(
           message:
             '❌ Dispute not found or already resolved'
         }, 404);
+      }
+
+      const dispute = disputeResult.rows[0];
+
+      // =========================
+      // 💰 Amounts
+      // =========================
+
+      const paymentAmount =
+        Number(dispute.payment_amount || 0);
+
+      const commissionAmount =
+        Number(dispute.commission_amount || 0);
+
+      const totalCost =
+        paymentAmount + commissionAmount;
+
+      // =========================
+      // ❌ Validate amounts
+      // =========================
+
+      if (
+        !Number.isFinite(paymentAmount) ||
+        paymentAmount < 0 ||
+        !Number.isFinite(commissionAmount) ||
+        commissionAmount < 0
+      ) {
+
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Invalid payment or commission amount'
+        }, 400);
+      }
+
+      // =========================
+      // 🔐 Validate executor
+      // =========================
+
+      if (!dispute.executor_id) {
+
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Executor ID is missing'
+        }, 400);
+      }
+
+      // =========================
+      // 🔐 Validate creator
+      // =========================
+
+      if (!dispute.creator_id) {
+
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Creator ID is missing'
+        }, 400);
+      }
+
+      // =====================================================
+      // 👤 PAY EXECUTOR
+      // =====================================================
+
+      if (payout_to === 'executor') {
+
+        // =========================
+        // 💵 Add executor reward
+        // =========================
+
+        const executorUpdate = await client.query(
+          `
+          UPDATE users
+
+          SET
+            balance =
+              COALESCE(balance, 0) + $1
+
+          WHERE telegram_id = $2
+
+          RETURNING
+            telegram_id,
+            balance
+          `,
+          [
+            paymentAmount,
+            dispute.executor_id
+          ]
+        );
+
+        // =========================
+        // ❌ Executor not found
+        // =========================
+
+        if (executorUpdate.rowCount === 0) {
+
+          await client.query('ROLLBACK');
+
+          return c.json({
+            success: false,
+            message:
+              '❌ Executor not found'
+          }, 404);
+        }
+
+        // =========================
+        // ✅ Approve execution
+        // =========================
+
+        await client.query(
+          `
+          UPDATE task_executions
+
+          SET
+            status = 'approved',
+            reviewed_at = NOW(),
+            reviewed_by = $1,
+            rejection_reason = NULL
+
+          WHERE id = $2
+          `,
+          [
+            adminId,
+            dispute.execution_id
+          ]
+        );
+
+        // =========================
+        // 💰 Update task spent
+        // =========================
+        //
+        // payment_amount + commission_amount
+        // are counted as task cost.
+        //
+
+        await client.query(
+          `
+          UPDATE tasks
+
+          SET
+            spent =
+              COALESCE(spent, 0) + $1
+
+          WHERE id = $2
+          `,
+          [
+            totalCost,
+            dispute.task_id
+          ]
+        );
 
       }
 
+      // =====================================================
+      // 👤 PAY CREATOR
+      // =====================================================
 
-      const d = dispute.rows[0];
+      else if (payout_to === 'creator') {
 
+        // =========================
+        // 💰 Return task funds
+        // to creator
+        // =========================
+        //
+        // The task creator receives the total amount
+        // that was reserved for this execution.
+        //
 
-      const paymentAmount =
-        Number(d.payment_amount || 0);
+        const creatorUpdate = await client.query(
+          `
+          UPDATE users
 
+          SET
+            balance =
+              COALESCE(balance, 0) + $1
 
-      const adminCommission =
-        Number(d.commission_amount || 0);
+          WHERE telegram_id = $2
 
+          RETURNING
+            telegram_id,
+            balance
+          `,
+          [
+            totalCost,
+            dispute.creator_id
+          ]
+        );
 
-      const totalCost =
-        paymentAmount +
-        adminCommission;
+        // =========================
+        // ❌ Creator not found
+        // =========================
 
+        if (creatorUpdate.rowCount === 0) {
 
-      // =================================================
-      // تحديث النزاع
-      // =================================================
+          await client.query('ROLLBACK');
+
+          return c.json({
+            success: false,
+            message:
+              '❌ Creator not found'
+          }, 404);
+        }
+
+        // =========================
+        // ❌ Reject execution
+        // =========================
+
+        await client.query(
+          `
+          UPDATE task_executions
+
+          SET
+            status = 'rejected',
+            reviewed_at = NOW(),
+            reviewed_by = $1,
+            rejection_reason = $2
+
+          WHERE id = $3
+          `,
+          [
+            adminId,
+            resolution,
+            dispute.execution_id
+          ]
+        );
+
+      }
+
+      // =====================================================
+      // ⚖️ Resolve dispute
+      // =====================================================
+
       await client.query(
         `
         UPDATE task_disputes
@@ -3948,6 +4196,7 @@ app.post(
           resolution = $2
 
         WHERE id = $3
+          AND status = 'open'
         `,
         [
           adminId,
@@ -3956,114 +4205,56 @@ app.post(
         ]
       );
 
+      // =========================
+      // 🔎 Verify dispute resolved
+      // =========================
 
-      // =================================================
-      // في حالة قبول المنفذ
-      // =================================================
-      if (payout_to === 'executor') {
+      const verifyResolution = await client.query(
+        `
+        SELECT
+          id,
+          status,
+          resolved_at,
+          resolved_by,
+          resolution
 
-        // إضافة المكافأة للمنفذ
-        const userUpdate =
-          await client.query(
-            `
-            UPDATE users
+        FROM task_disputes
 
-            SET balance =
-              COALESCE(balance, 0) + $1
+        WHERE id = $1
+        `,
+        [id]
+      );
 
-            WHERE telegram_id = $2
+      if (
+        verifyResolution.rows.length === 0 ||
+        verifyResolution.rows[0].status !== 'resolved'
+      ) {
 
-            RETURNING telegram_id, balance
-            `,
-            [
-              paymentAmount,
-              d.executor_id
-            ]
-          );
+        await client.query('ROLLBACK');
 
-
-        if (userUpdate.rowCount === 0) {
-
-          await client.query('ROLLBACK');
-
-          return c.json({
-            success: false,
-            message: '❌ Executor not found'
-          }, 404);
-
-        }
-
-
-        // اعتماد تنفيذ المهمة
-        await client.query(
-          `
-          UPDATE task_executions
-
-          SET
-            status = 'approved',
-            reviewed_at = NOW(),
-            reviewed_by = $1
-
-          WHERE id = $2
-          `,
-          [
-            adminId,
-            d.execution_id
-          ]
-        );
-
-
-        // تحديث المبلغ المصروف في المهمة
-        await client.query(
-          `
-          UPDATE tasks
-
-          SET spent =
-            COALESCE(spent, 0) + $1
-
-          WHERE id = $2
-          `,
-          [
-            totalCost,
-            d.task_id
-          ]
-        );
-
-
+        return c.json({
+          success: false,
+          message:
+            '❌ Failed to resolve dispute'
+        }, 500);
       }
 
-
-      // =================================================
-      // في حالة رفض المنفذ
-      // =================================================
-      else {
-
-        await client.query(
-          `
-          UPDATE task_executions
-
-          SET
-            status = 'rejected',
-            reviewed_at = NOW(),
-            reviewed_by = $1
-
-          WHERE id = $2
-          `,
-          [
-            adminId,
-            d.execution_id
-          ]
-        );
-
-      }
-
+      // =========================
+      // ✅ Commit transaction
+      // =========================
 
       await client.query('COMMIT');
 
+      // =====================================================
+      // 👥 REFERRAL COMMISSION
+      // =====================================================
+      //
+      // Only executor payout generates referral commission.
+      //
+      // This is intentionally done AFTER COMMIT so a referral
+      // error cannot rollback the successful dispute resolution.
+      //
 
-      // =================================================
-      // 🎁 عمولة الإحالة بعد نجاح العملية
-      // =================================================
       if (
         payout_to === 'executor' &&
         paymentAmount > 0 &&
@@ -4073,7 +4264,7 @@ app.post(
         try {
 
           await distributeReferralCommission(
-            d.executor_id,
+            dispute.executor_id,
             paymentAmount
           );
 
@@ -4083,74 +4274,106 @@ app.post(
             '⚠️ Referral commission error:',
             commissionError.message
           );
-
         }
-
       }
 
+      // =========================
+      // 📝 Log
+      // =========================
 
       console.log(
-        `✅ Dispute ${id} resolved by admin ${adminId}`
+        `✅ Dispute ${id} resolved by admin ${adminId} | ` +
+        `payout_to=${payout_to} | ` +
+        `payment=${paymentAmount} | ` +
+        `commission=${commissionAmount}`
       );
 
+      // =========================
+      // ✅ Response
+      // =========================
 
       return c.json({
-
         success: true,
-
         message:
           '✅ Dispute resolved successfully',
 
         data: {
+          dispute_id: id,
 
-          dispute_id:
-            Number(id),
+          execution_id:
+            Number(dispute.execution_id),
+
+          task_id:
+            Number(dispute.task_id),
 
           payout_to,
+
+          executor_id:
+            dispute.executor_id,
+
+          creator_id:
+            dispute.creator_id,
 
           payment_amount:
             paymentAmount,
 
           commission_amount:
-            adminCommission
+            commissionAmount,
 
+          total_cost:
+            totalCost,
+
+          resolution
         }
-
       });
-
 
     } catch (err) {
 
-      try {
-        await client.query('ROLLBACK');
-      } catch (_) {}
+      // =========================
+      // 🔄 Rollback
+      // =========================
 
+      try {
+
+        if (client) {
+          await client.query('ROLLBACK');
+        }
+
+      } catch (rollbackError) {
+
+        console.error(
+          '❌ Rollback error:',
+          rollbackError.message
+        );
+      }
+
+      // =========================
+      // ❌ Error log
+      // =========================
 
       console.error(
         '❌ /api/admin/task-disputes/:id/resolve:',
         err
       );
 
-
       return c.json({
-
         success: false,
-
         message:
           'Failed to resolve dispute',
-
         error:
           err.message
-
       }, 500);
-
 
     } finally {
 
-      client.release();
+      // =========================
+      // 🔓 Release connection
+      // =========================
 
+      if (client) {
+        client.release();
+      }
     }
-
   }
 );
 
