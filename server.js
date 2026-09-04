@@ -4377,6 +4377,406 @@ app.post(
   }
 );
 
+// =====================================================
+// 🔐 ADMIN - APPROVE TASK EXECUTION
+// =====================================================
+app.post(
+  '/api/admin/task-executions/:id/approve',
+  verifyAdmin,
+  async (c) => {
+
+    const client = await pool.connect();
+
+    try {
+      const proofId = c.req.param('id');
+
+      const adminId = c.get('adminId');
+
+      // جلب التنفيذ المعلق
+      const exec = await client.query(
+        `
+        SELECT
+          id,
+          task_id,
+          executor_id,
+          payment_amount,
+          commission_amount,
+          status
+        FROM task_executions
+        WHERE id = $1
+          AND status = 'pending'
+        `,
+        [proofId]
+      );
+
+      if (exec.rows.length === 0) {
+        return c.json({
+          success: false,
+          message: '❌ Execution not found or already processed'
+        }, 404);
+      }
+
+      const execution = exec.rows[0];
+
+      const taskId = execution.task_id;
+      const executorId = execution.executor_id;
+
+      const paymentAmount =
+        parseFloat(execution.payment_amount || 0);
+
+      const adminCommission =
+        parseFloat(
+          execution.commission_amount ||
+          (paymentAmount * 0.25)
+        );
+
+      const totalCost =
+        paymentAmount + adminCommission;
+
+      if (
+        !Number.isFinite(paymentAmount) ||
+        paymentAmount <= 0
+      ) {
+        return c.json({
+          success: false,
+          message: '❌ Invalid payment amount'
+        }, 400);
+      }
+
+      await client.query('BEGIN');
+
+      // =================================================
+      // 💰 دفع المكافأة للمنفذ
+      // =================================================
+
+      const executorUpdate = await client.query(
+        `
+        UPDATE users
+        SET balance =
+          COALESCE(balance, 0) + $1
+        WHERE telegram_id = $2
+        RETURNING balance
+        `,
+        [
+          paymentAmount,
+          executorId
+        ]
+      );
+
+      if (executorUpdate.rowCount === 0) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: '❌ Executor not found'
+        }, 404);
+      }
+
+      // =================================================
+      // 💵 عمولة الأدمن
+      // =================================================
+
+      if (adminCommission > 0 && adminId) {
+
+        await client.query(
+          `
+          UPDATE users
+          SET balance =
+            COALESCE(balance, 0) + $1
+          WHERE telegram_id = $2
+          `,
+          [
+            adminCommission,
+            adminId
+          ]
+        );
+      }
+
+      // =================================================
+      // ✅ تحديث حالة التنفيذ
+      // =================================================
+
+      await client.query(
+        `
+        UPDATE task_executions
+        SET
+          status = 'approved',
+          reviewed_at = NOW(),
+          reviewed_by = $1
+        WHERE id = $2
+        `,
+        [
+          adminId,
+          proofId
+        ]
+      );
+
+      // =================================================
+      // 📊 تحديث spent
+      // =================================================
+
+      await client.query(
+        `
+        UPDATE tasks
+        SET spent =
+          COALESCE(spent, 0) + $1
+        WHERE id = $2
+        `,
+        [
+          totalCost,
+          taskId
+        ]
+      );
+
+      // =================================================
+      // 📝 تسجيل مكافأة المنفذ
+      // =================================================
+
+      await client.query(
+        `
+        INSERT INTO earnings
+        (
+          user_id,
+          source,
+          amount,
+          description,
+          video_id,
+          watched_seconds,
+          created_at
+        )
+        VALUES
+        (
+          $1,
+          'task_execution',
+          $2,
+          $3,
+          NULL,
+          NULL,
+          NOW()
+        )
+        `,
+        [
+          executorId,
+          paymentAmount,
+          `Task #${taskId} execution reward (100%)`
+        ]
+      );
+
+      // =================================================
+      // 📝 تسجيل عمولة الأدمن
+      // =================================================
+
+      if (adminCommission > 0 && adminId) {
+
+        await client.query(
+          `
+          INSERT INTO earnings
+          (
+            user_id,
+            source,
+            amount,
+            description,
+            video_id,
+            watched_seconds,
+            created_at
+          )
+          VALUES
+          (
+            $1,
+            'task_commission',
+            $2,
+            $3,
+            NULL,
+            NULL,
+            NOW()
+          )
+          `,
+          [
+            adminId,
+            adminCommission,
+            `Commission from task #${taskId} (20%)`
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // =================================================
+      // 👥 Referral Commission
+      // =================================================
+
+      try {
+        await distributeReferralCommission(
+          executorId,
+          paymentAmount
+        );
+      } catch (commissionError) {
+        console.error(
+          '⚠️ Referral commission error:',
+          commissionError.message
+        );
+      }
+
+      return c.json({
+        success: true,
+        message: '✅ Proof approved and payment sent',
+        payment_details: {
+          executor_received:
+            paymentAmount.toFixed(4),
+
+          admin_commission:
+            adminCommission.toFixed(4),
+
+          total_deducted:
+            totalCost.toFixed(4)
+        }
+      });
+
+    } catch (err) {
+
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+
+      console.error(
+        '❌ /api/admin/task-executions/:id/approve:',
+        err
+      );
+
+      return c.json({
+        success: false,
+        message:
+          'Failed to approve: ' + err.message
+      }, 500);
+
+    } finally {
+      client.release();
+    }
+  }
+);
+
+
+// =====================================================
+// 🔐 ADMIN - REJECT TASK EXECUTION
+// =====================================================
+app.post(
+  '/api/admin/task-executions/:id/reject',
+  verifyAdmin,
+  async (c) => {
+
+    const client = await pool.connect();
+
+    try {
+
+      const proofId =
+        c.req.param('id');
+
+      const body =
+        await c.req.json().catch(() => ({}));
+
+      const reason =
+        body.reason || '';
+
+      if (reason.length < 20) {
+        return c.json({
+          success: false,
+          message:
+            '❌ Rejection reason must be at least 20 characters'
+        }, 400);
+      }
+
+      const adminId =
+        c.get('adminId');
+
+      await client.query('BEGIN');
+
+      // =================================================
+      // 🔎 التأكد من وجود التنفيذ
+      // =================================================
+
+      const exec =
+        await client.query(
+          `
+          SELECT
+            id,
+            task_id,
+            executor_id,
+            status
+          FROM task_executions
+          WHERE id = $1
+            AND status = 'pending'
+          FOR UPDATE
+          `,
+          [proofId]
+        );
+
+      if (exec.rows.length === 0) {
+
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Execution not found or already processed'
+        }, 404);
+      }
+
+      // =================================================
+      // ❌ رفض التنفيذ
+      // =================================================
+
+      await client.query(
+        `
+        UPDATE task_executions
+        SET
+          status = 'rejected',
+          reviewed_at = NOW(),
+          reviewed_by = $1,
+          rejection_reason = $2
+        WHERE id = $3
+        `,
+        [
+          adminId,
+          reason,
+          proofId
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      return c.json({
+        success: true,
+        message:
+          '❌ Proof rejected successfully'
+      });
+
+    } catch (err) {
+
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+
+      console.error(
+        '❌ /api/admin/task-executions/:id/reject:',
+        err
+      );
+
+      return c.json({
+        success: false,
+        message:
+          'Failed to reject proof',
+        error:
+          err.message
+      }, 500);
+
+    } finally {
+      client.release();
+    }
+  }
+);
+
+
+
 // ======================= END TASKS SYSTEM API =======================
 
 /* =========================
