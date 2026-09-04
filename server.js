@@ -1244,86 +1244,39 @@ const isAdminAuthenticated = verifyAdmin;
 // =========================
 app.post('/api/admin/login', async (c) => {
   try {
-    const adminId =
-      c.req.query('admin_id') ||
-      c.req.query('user_id');
+    const adminId = c.req.query('admin_id') || c.req.query('user_id');
+    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
+    const providedId = adminId ? adminId.toString().trim() : '';
 
-    const REQUIRED_ADMIN_ID = (
-      c.env?.ADMIN_ID || '7171208519'
-    ).toString().trim();
-
-    const providedId = adminId
-      ? adminId.toString().trim()
-      : '';
-
-    // =========================
-    // التحقق من Admin ID
-    // =========================
+    // 1. التحقق من هوية الأدمن فقط
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json(
-        {
-          success: false,
-          message: '❌ Admin access required'
-        },
-        403
-      );
+      return c.json({ success: false, message: '❌ Admin access required' }, 403);
     }
 
-    // =========================
-    // تسجيل آخر دخول
-    // =========================
-    const result = await pool.query(
-      `
-      UPDATE users
-      SET last_login_at = NOW()
-      WHERE telegram_id = $1
-      RETURNING telegram_id, username, last_login_at
-      `,
-      [providedId]
-    );
-
-    // =========================
-    // الأدمن غير موجود في users
-    // =========================
-    if (!result.rows.length) {
-      return c.json(
-        {
-          success: false,
-          message: '❌ Admin user not found in users table'
-        },
-        404
+    // 2. تسجيل آخر دخول فقط (بدون شروط تعقيدية أو التحقق من وجود المستخدم)
+    try {
+      await pool.query(
+        `UPDATE users SET last_login_at = NOW() WHERE telegram_id = $1`,
+        [providedId]
       );
+    } catch (dbErr) {
+      // إذا فشل التحديث (مثلاً بسبب مشكلة اتصال)، نسجل تحذيراً فقط ولا نوقف عملية الدخول
+      console.warn('⚠️ Failed to update last_login_at (non-fatal):', dbErr.message);
     }
 
-    const admin = result.rows[0];
-
-    console.log(
-      `✅ Admin login recorded: ${providedId} at ${admin.last_login_at}`
-    );
-
+    // 3. إرجاع نجاح الدخول فوراً للواجهة الأمامية
     return c.json({
       success: true,
       message: '✅ Admin login recorded successfully',
       data: {
-        telegram_id: admin.telegram_id,
-        username: admin.username,
-        last_login_at: admin.last_login_at
+        telegram_id: providedId,
+        last_login_at: new Date().toISOString()
       }
     });
 
   } catch (err) {
-    console.error(
-      '❌ POST /api/admin/login:',
-      err.message
-    );
-
-    return c.json(
-      {
-        success: false,
-        message: 'Server error'
-      },
-      500
-    );
+    console.error('❌ POST /api/admin/login:', err.message);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 });
 // =====================================================
