@@ -848,156 +848,14 @@ const REQUIRED_ADMIN_ID = "7171208519";
 const BOT_USERNAME = "TasksRewardBot";
 
 
-// ================= 🔐 ACCESS CONTROL =================
-function checkAdminAccess() {
-
-  const url = window.location.href;
-  let adminIdFromUrl = null;
-
-  try {
-
-    const urlObj = new URL(url);
-
-    adminIdFromUrl =
-      urlObj.searchParams.get('admin_id');
-
-  } catch (e) {
-
-    const match =
-      url.match(/[?&]admin_id=([^&]+)/);
-
-    if (match && match[1]) {
-      adminIdFromUrl =
-        decodeURIComponent(match[1].trim());
-    }
-  }
-
-  const receivedId =
-    adminIdFromUrl
-      ? adminIdFromUrl.toString().trim()
-      : '';
-
-  const requiredId =
-    REQUIRED_ADMIN_ID.toString().trim();
-
-  console.log('🔐 URL:', url);
-  console.log('🔐 Received admin_id:', receivedId);
-  console.log('🔐 Required admin_id:', requiredId);
-
-  // ==========================================
-  // ❌ لا يوجد admin_id
-  // ==========================================
-  if (!receivedId) {
-
-    console.error(
-      '❌ Invalid or missing admin_id parameter'
-    );
-
-    const denied =
-      document.getElementById('accessDenied');
-
-    const content =
-      document.getElementById('adminContent');
-
-    if (denied) {
-      denied.style.display = 'flex';
-    }
-
-    if (content) {
-      content.classList.add('hidden');
-    }
-
-    return false;
-  }
-
-  // ==========================================
-  // ❌ admin_id غير صحيح
-  // ==========================================
-  if (receivedId !== requiredId) {
-
-    console.error(
-      '❌ Invalid admin_id:',
-      receivedId
-    );
-
-    const denied =
-      document.getElementById('accessDenied');
-
-    const content =
-      document.getElementById('adminContent');
-
-    if (denied) {
-      denied.style.display = 'flex';
-    }
-
-    if (content) {
-      content.classList.add('hidden');
-    }
-
-    return false;
-  }
-
-  // ==========================================
-  // ✅ الأدمن صحيح
-  // ==========================================
-  console.log('✅ Admin access granted');
-
-  const denied =
-    document.getElementById('accessDenied');
-
-  const content =
-    document.getElementById('adminContent');
-
-  if (denied) {
-    denied.style.display = 'none';
-  }
-
-  if (content) {
-    content.classList.remove('hidden');
-  }
-
-  localStorage.setItem(
-    'admin_verified',
-    'true'
-  );
-
-  localStorage.setItem(
-    'admin_id',
-    requiredId
-  );
-
-  return true;
-}
-
-
-// ================= 🔐 ADMIN LOGIN =================
+// =========================
+// 🔐 تسجيل دخول الأدمن
+// مرة واحدة عند فتح الصفحة
+// =========================
 async function adminLogin() {
-
   try {
-
-    const urlObj =
-      new URL(window.location.href);
-
-    const adminId =
-      urlObj.searchParams.get('admin_id');
-
-    if (
-      !adminId ||
-      adminId.trim() !== REQUIRED_ADMIN_ID
-    ) {
-      console.error(
-        '❌ Admin login blocked: invalid admin_id'
-      );
-
-      return false;
-    }
-
-    console.log(
-      '🔐 Recording admin login...'
-    );
-
-    const response = await fetch(
-      `${API}/api/admin/login?admin_id=${encodeURIComponent(adminId.trim())}`,
+    const res = await fetch(
+      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
       {
         method: 'POST',
         headers: {
@@ -1006,23 +864,23 @@ async function adminLogin() {
       }
     );
 
-    const data = await response.json();
+    const data = await res.json();
 
-    console.log(
-      '🔐 Login response:',
-      data
-    );
-
-    if (!response.ok || !data.success) {
-
+    if (!res.ok || !data.success) {
       console.error(
         '❌ Admin login failed:',
-        data.message
+        data.message || 'Unknown error'
       );
 
       return false;
     }
 
+    console.log(
+      '✅ Admin login recorded:',
+      data.data?.last_login_at
+    );
+
+    // حفظ حالة الأدمن
     localStorage.setItem(
       'admin_verified',
       'true'
@@ -1034,31 +892,23 @@ async function adminLogin() {
     );
 
     if (data.data?.last_login_at) {
-
       localStorage.setItem(
         'admin_last_login',
         data.data.last_login_at
       );
     }
 
-    console.log(
-      '✅ Admin login recorded at:',
-      data.data?.last_login_at
-    );
-
     return true;
 
-  } catch (error) {
-
+  } catch (err) {
     console.error(
       '❌ Admin login error:',
-      error
+      err
     );
 
     return false;
   }
 }
-
 
 // ================= دالة مساعدة للتأخير =================
 const delay = (ms) =>
@@ -1210,67 +1060,7 @@ function openInvestmentPanel() {
   const url = `${API}/admin-investment.html?admin_id=${REQUIRED_ADMIN_ID}`;
   window.open(url, '_blank', 'width=1200,height=800');
 }
-// =========================
-// 🔐 تسجيل دخول الأدمن
-// مرة واحدة عند فتح الصفحة
-// =========================
-async function adminLogin() {
-  try {
-    const res = await fetch(
-      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
 
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      console.error(
-        '❌ Admin login failed:',
-        data.message || 'Unknown error'
-      );
-
-      return false;
-    }
-
-    console.log(
-      '✅ Admin login recorded:',
-      data.data?.last_login_at
-    );
-
-    // حفظ حالة الأدمن
-    localStorage.setItem(
-      'admin_verified',
-      'true'
-    );
-
-    localStorage.setItem(
-      'admin_id',
-      REQUIRED_ADMIN_ID
-    );
-
-    if (data.data?.last_login_at) {
-      localStorage.setItem(
-        'admin_last_login',
-        data.data.last_login_at
-      );
-    }
-
-    return true;
-
-  } catch (err) {
-    console.error(
-      '❌ Admin login error:',
-      err
-    );
-
-    return false;
-  }
-}
 // ================= 🚀 TELEGRAM DEEP LINKS (Fallback) =================
 function openTelegramSection(command, hint) {
   const url = `https://t.me/${BOT_USERNAME}?start=admin`;
