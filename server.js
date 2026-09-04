@@ -1185,96 +1185,144 @@ app.get("/api/contact/history", async (c) => {
   }
 });
 
-// ==================== 🔐 4. Middleware: التحقق من الأدمن (مهم جداً) ====================
-async function verifyAdmin(req, res, next) {
+// =========================
+// 🔐 Middleware الأدمن
+// =========================
+const verifyAdmin = async (c, next) => {
   try {
-    // قراءة admin_id من الرابط (query) أو الجسم (body) مع التعامل مع القيم غير المعرفة
-    const queryId = req.query?.admin_id?.toString()?.trim();
-    const bodyId = req.body?.admin_id?.toString()?.trim();
-    const adminId = queryId || bodyId;
-    
-    // الحصول على الـ ID المطلوب من متغيرات البيئة أو القيمة الافتراضية
-    const REQUIRED_ADMIN_ID = process.env.ADMIN_ID || '7171208519';
-    
-    // التحقق من وجود admin_id ومطابقته للقيمة المطلوبة
-    if (!adminId || adminId !== String(REQUIRED_ADMIN_ID).trim()) {
-      console.warn(`❌ Access denied: received="${adminId}", required="${REQUIRED_ADMIN_ID}"`);
-      return res.status(403).json({ 
-        success: false, 
-        message: '❌ Access denied: Invalid admin_id' 
-      });
+    const adminId =
+      c.req.query('admin_id') ||
+      c.req.query('user_id');
+
+    const REQUIRED_ADMIN_ID = (
+      c.env?.ADMIN_ID || '7171208519'
+    ).toString().trim();
+
+    const providedId = adminId
+      ? adminId.toString().trim()
+      : '';
+
+    if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
+      return c.json(
+        {
+          success: false,
+          message: '❌ Access denied'
+        },
+        403
+      );
     }
 
-     // 🔥 تسجيل نشاط الأدمن داخل جدول users
-    const userQuery = await pool.query(
-  `UPDATE users 
-   SET last_login_at = now()
-   WHERE telegram_id = $1
-     AND last_login_at < now() - interval '24 hours'
-   RETURNING telegram_id, username, name, balance, payeer_wallet`,
-  [adminId]
-);
-    // ✅ تمرير الصلاحية للدالة التالية
-    req.admin_id = adminId;
-    next();
+    // ⚠️ مهم:
+    // لا يوجد هنا أي UPDATE لـ last_login_at.
+    // هذا Middleware للتحقق فقط.
     
+    await next();
+
   } catch (err) {
     console.error('❌ verifyAdmin error:', err);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Server error in admin verification' 
-    });
+
+    return c.json(
+      {
+        success: false,
+        message: 'Server error'
+      },
+      500
+    );
   }
-}
+};
+
 
 // =========================
 // 🔐 Admin Authentication
 // =========================
 // يستخدم نفس نظام التحقق بدون تسجيل دخول
 const isAdminAuthenticated = verifyAdmin;
-
 // =========================
-// 🔐 ADMIN LOGIN (مبسط ومضمون 100% - يتعامل مع الأدمن كمستخدم عادي ولا يفشل أبداً)
+// 🔐 ADMIN LOGIN
+// تسجيل دخول الأدمن وتحديث آخر دخول
 // =========================
 app.post('/api/admin/login', async (c) => {
   try {
-    const adminId = c.req.query('admin_id') || c.req.query('user_id');
-    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
-    const providedId = adminId ? adminId.toString().trim() : '';
+    const adminId =
+      c.req.query('admin_id') ||
+      c.req.query('user_id');
 
-    // 1. التحقق المبدئي من هوية الأدمن
+    const REQUIRED_ADMIN_ID = (
+      c.env?.ADMIN_ID || '7171208519'
+    ).toString().trim();
+
+    const providedId = adminId
+      ? adminId.toString().trim()
+      : '';
+
+    // =========================
+    // التحقق من Admin ID
+    // =========================
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json({ success: false, message: '❌ Admin access required' }, 403);
-    }
-
-    // 2. محاولة تحديث آخر دخول كأنه مستخدم عادي (مع عزل الخطأ تماماً)
-    try {
-      // هذا الاستعلام آمن تماماً: إذا كان المستخدم موجوداً سيتم التحديث، وإذا لم يكن موجوداً لن يحدث خطأ (يتأثر 0 صفوف)
-      await pool.query(
-        `UPDATE users SET last_login_at = NOW() WHERE telegram_id = $1`,
-        [providedId]
+      return c.json(
+        {
+          success: false,
+          message: '❌ Admin access required'
+        },
+        403
       );
-      console.log(`✅ Admin last_login_at updated for: ${providedId}`);
-    } catch (dbErr) {
-      // هنا نلتقط أي خطأ في قاعدة البيانات (مثل خطأ 530 من Cloudflare)
-      // ونمنعه من إيقاف الكود، بل نسجله كتحذير فقط ونكمل
-      console.warn('⚠️ DB Update skipped (Connection blocked or user not found):', dbErr.message);
     }
 
-    // 3. إرجاع نجاح الدخول فوراً للواجهة الأمامية (بغض النظر عن نتيجة قاعدة البيانات)
+    // =========================
+    // تسجيل آخر دخول
+    // =========================
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET last_login_at = NOW()
+      WHERE telegram_id = $1
+      RETURNING telegram_id, username, last_login_at
+      `,
+      [providedId]
+    );
+
+    // =========================
+    // الأدمن غير موجود في users
+    // =========================
+    if (!result.rows.length) {
+      return c.json(
+        {
+          success: false,
+          message: '❌ Admin user not found in users table'
+        },
+        404
+      );
+    }
+
+    const admin = result.rows[0];
+
+    console.log(
+      `✅ Admin login recorded: ${providedId} at ${admin.last_login_at}`
+    );
+
     return c.json({
       success: true,
-      message: '✅ Admin login successful',
+      message: '✅ Admin login recorded successfully',
       data: {
-        telegram_id: providedId,
-        last_login_at: new Date().toISOString()
+        telegram_id: admin.telegram_id,
+        username: admin.username,
+        last_login_at: admin.last_login_at
       }
     });
 
   } catch (err) {
-    // هذا الـ catch الخارجي للطوارئ القصوى فقط
-    console.error('❌ POST /api/admin/login Critical:', err.message);
-    return c.json({ success: false, message: 'Server error' }, 500);
+    console.error(
+      '❌ POST /api/admin/login:',
+      err.message
+    );
+
+    return c.json(
+      {
+        success: false,
+        message: 'Server error'
+      },
+      500
+    );
   }
 });
 // =====================================================
