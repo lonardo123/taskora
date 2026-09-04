@@ -1240,7 +1240,7 @@ const isAdminAuthenticated = verifyAdmin;
 
 // =========================
 // 🔐 ADMIN LOGIN
-// تسجيل دخول الأدمن وتحديث آخر دخول
+// التحقق من الأدمن عبر قاعدة البيانات كأنه مستخدم عادي
 // =========================
 app.post('/api/admin/login', async (c) => {
   try {
@@ -1248,29 +1248,55 @@ app.post('/api/admin/login', async (c) => {
     const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
     const providedId = adminId ? adminId.toString().trim() : '';
 
-    // 1. التحقق من هوية الأدمن فقط
-    if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json({ success: false, message: '❌ Admin access required' }, 403);
+    // 1. التحقق المبدئي من وجود المعرف
+    if (!providedId) {
+      return c.json({ success: false, message: '❌ Admin ID is required' }, 400);
     }
 
-    // 2. تسجيل آخر دخول فقط (بدون شروط تعقيدية أو التحقق من وجود المستخدم)
-    try {
-      await pool.query(
-        `UPDATE users SET last_login_at = NOW() WHERE telegram_id = $1`,
-        [providedId]
-      );
-    } catch (dbErr) {
-      // إذا فشل التحديث (مثلاً بسبب مشكلة اتصال)، نسجل تحذيراً فقط ولا نوقف عملية الدخول
-      console.warn('⚠️ Failed to update last_login_at (non-fatal):', dbErr.message);
+    // 2. التحقق من وجود الحساب في قاعدة البيانات كأنه مستخدم عادي أولاً
+    const userCheck = await pool.query(
+      `SELECT telegram_id, username, last_login_at FROM users WHERE telegram_id = $1`,
+      [providedId]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return c.json({ 
+        success: false, 
+        message: '❌ الحساب غير موجود في قاعدة البيانات' 
+      }, 404);
     }
 
-    // 3. إرجاع نجاح الدخول فوراً للواجهة الأمامية
+    // 3. التحقق من أن هذا المستخدم الموجود هو بالفعل الأدمن المحدد
+    if (providedId !== REQUIRED_ADMIN_ID) {
+      return c.json({ 
+        success: false, 
+        message: '❌ صلاحيات الأدمن مطلوبة لهذا الحساب' 
+      }, 403);
+    }
+
+    // 4. تحديث وقت آخر دخول (لأننا تأكدنا الآن من وجوده وهويته)
+    await pool.query(
+      `UPDATE users SET last_login_at = NOW() WHERE telegram_id = $1`,
+      [providedId]
+    );
+
+    // 5. جلب البيانات المحدثة لإرسالها في الرد
+    const updatedUser = await pool.query(
+      `SELECT telegram_id, username, last_login_at FROM users WHERE telegram_id = $1`,
+      [providedId]
+    );
+
+    const admin = updatedUser.rows[0];
+
+    console.log(`✅ Admin login recorded: ${providedId} at ${admin.last_login_at}`);
+
     return c.json({
       success: true,
-      message: '✅ Admin login recorded successfully',
+      message: '✅ تم تسجيل دخول الأدمن بنجاح',
       data: {
-        telegram_id: providedId,
-        last_login_at: new Date().toISOString()
+        telegram_id: admin.telegram_id,
+        username: admin.username,
+        last_login_at: admin.last_login_at
       }
     });
 
