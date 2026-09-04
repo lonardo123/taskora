@@ -1208,7 +1208,6 @@ const verifyAdmin = async (c, next) => {
   }
 };
 
-const isAdminAuthenticated = verifyAdmin;
 
 // =========================
 // 🔐 Admin Authentication
