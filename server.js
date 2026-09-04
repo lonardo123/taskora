@@ -1186,51 +1186,29 @@ app.get("/api/contact/history", async (c) => {
 });
 
 // =========================
-// 🔐 Middleware الأدمن
+// 🔐 Middleware الأدمن (مصحح لتمرير adminId)
 // =========================
 const verifyAdmin = async (c, next) => {
   try {
-    const adminId =
-      c.req.query('admin_id') ||
-      c.req.query('user_id');
-
-    const REQUIRED_ADMIN_ID = (
-      c.env?.ADMIN_ID || '7171208519'
-    ).toString().trim();
-
-    const providedId = adminId
-      ? adminId.toString().trim()
-      : '';
+    const adminId = c.req.query('admin_id') || c.req.query('user_id');
+    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
+    const providedId = adminId ? adminId.toString().trim() : '';
 
     if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json(
-        {
-          success: false,
-          message: '❌ Access denied'
-        },
-        403
-      );
+      return c.json({ success: false, message: '❌ Access denied' }, 403);
     }
 
-    // ⚠️ مهم:
-    // لا يوجد هنا أي UPDATE لـ last_login_at.
-    // هذا Middleware للتحقق فقط.
+    // ✅ تمرير معرف الأدمن للطلبات التالية (مهم جداً لمسارات الموافقة والرفض)
+    c.set('adminId', providedId);
     
     await next();
-
   } catch (err) {
     console.error('❌ verifyAdmin error:', err);
-
-    return c.json(
-      {
-        success: false,
-        message: 'Server error'
-      },
-      500
-    );
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 };
 
+const isAdminAuthenticated = verifyAdmin;
 
 // =========================
 // 🔐 Admin Authentication
