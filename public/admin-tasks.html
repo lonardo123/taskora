@@ -847,16 +847,20 @@ const API = "https://taskora.taskora.workers.dev";
 const REQUIRED_ADMIN_ID = "7171208519";
 const BOT_USERNAME = "TasksRewardBot";
 
+<script>
+
 // ================= 🔐 ACCESS CONTROL =================
 function checkAdminAccess() {
-  const url = window.location.href;
 
+  const url = window.location.href;
   let adminIdFromUrl = null;
 
   try {
     const urlObj = new URL(url);
     adminIdFromUrl = urlObj.searchParams.get("admin_id");
   } catch (e) {
+    console.error("❌ Failed to read URL:", e);
+
     const match = url.match(/[?&]admin_id=([^&]+)/);
 
     if (match && match[1]) {
@@ -872,7 +876,8 @@ function checkAdminAccess() {
     ? adminIdFromUrl.toString().trim()
     : "";
 
-  const requiredId = REQUIRED_ADMIN_ID.toString().trim();
+  const requiredId =
+    REQUIRED_ADMIN_ID.toString().trim();
 
   console.log("🔐 URL:", url);
   console.log("🔐 Received admin_id:", receivedId);
@@ -882,14 +887,18 @@ function checkAdminAccess() {
   // ==========================================
   // عناصر الصفحة
   // ==========================================
-  const denied = document.getElementById("accessDenied");
-  const content = document.getElementById("adminContent");
+  const denied =
+    document.getElementById("accessDenied");
+
+  const content =
+    document.getElementById("adminContent");
 
 
   // ==========================================
   // ❌ admin_id مفقود
   // ==========================================
   if (!receivedId) {
+
     console.error(
       "❌ Invalid or missing admin_id parameter"
     );
@@ -910,6 +919,7 @@ function checkAdminAccess() {
   // ❌ admin_id غير صحيح
   // ==========================================
   if (receivedId !== requiredId) {
+
     console.error(
       "❌ Invalid admin_id:",
       receivedId
@@ -962,9 +972,11 @@ const delay = (ms) =>
 // ================= 🔐 ADMIN LOGIN =================
 // يتم تسجيل الدخول مرة واحدة فقط عند فتح الصفحة
 async function adminLogin() {
+
   try {
 
-    const urlObj = new URL(window.location.href);
+    const urlObj =
+      new URL(window.location.href);
 
     const adminId =
       urlObj.searchParams.get("admin_id");
@@ -976,9 +988,10 @@ async function adminLogin() {
 
 
     // ==========================================
-    // ❌ التحقق من admin_id
+    // ❌ admin_id مفقود
     // ==========================================
     if (!providedId) {
+
       console.error(
         "❌ Admin login blocked: missing admin_id"
       );
@@ -987,7 +1000,11 @@ async function adminLogin() {
     }
 
 
+    // ==========================================
+    // ❌ admin_id غير صحيح
+    // ==========================================
     if (providedId !== REQUIRED_ADMIN_ID) {
+
       console.error(
         "❌ Admin login blocked: invalid admin_id"
       );
@@ -1002,7 +1019,7 @@ async function adminLogin() {
 
 
     // ==========================================
-    // 📡 إرسال تسجيل الدخول إلى Worker
+    // 📡 تسجيل دخول الأدمن في Worker
     // ==========================================
     const response = await fetch(
       `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
@@ -1016,13 +1033,16 @@ async function adminLogin() {
 
 
     // ==========================================
-    // قراءة الرد بأمان
+    // قراءة الرد
     // ==========================================
     let data = null;
 
     try {
+
       data = await response.json();
+
     } catch (jsonError) {
+
       console.error(
         "❌ Invalid JSON response from server"
       );
@@ -1043,18 +1063,19 @@ async function adminLogin() {
 
 
     // ==========================================
-    // ❌ فشل تسجيل الدخول
+    // ❌ تسجيل الدخول فشل
     // ==========================================
     if (!response.ok || !data.success) {
 
       console.error(
         "❌ Admin login failed:",
-        data?.message || "Unknown server error"
+        data?.message || "Unknown error"
       );
 
       if (data?.error) {
+
         console.error(
-          "❌ Server error details:",
+          "❌ Server error:",
           data.error
         );
       }
@@ -1087,10 +1108,9 @@ async function adminLogin() {
 
 
     console.log(
-      "✅ Admin login recorded at:",
+      "✅ Admin login recorded:",
       data.data?.last_login_at || "N/A"
     );
-
 
     return true;
 
@@ -1107,20 +1127,23 @@ async function adminLogin() {
 
 
 // ================= 🚀 INIT =================
-// تسجيل الدخول مرة واحدة ثم تحميل بيانات لوحة الأدمن
+// يتم التنفيذ مرة واحدة فقط عند فتح الصفحة
 window.addEventListener("load", async () => {
 
-  console.log("🚀 Admin panel initializing...");
+  console.log(
+    "🚀 Admin panel initializing..."
+  );
 
 
   // ==========================================
-  // 1️⃣ التحقق من admin_id في الرابط
+  // 1️⃣ التحقق من صلاحية admin_id
   // ==========================================
   const accessGranted =
     checkAdminAccess();
 
 
   if (!accessGranted) {
+
     console.error(
       "❌ Admin access denied"
     );
@@ -1145,76 +1168,157 @@ window.addEventListener("load", async () => {
     return;
   }
 
-  // ==========================================
-  // 📊 تحميل بيانات لوحة الأدمن
-  // ==========================================
-  // 2️⃣ تسجيل الدخول في قاعدة البيانات
-  const loggedIn =
-    await adminLogin();
 
-  if (!loggedIn) {
-    console.error(
-      '❌ Admin login failed'
+  // ==========================================
+  // 3️⃣ تحميل بيانات لوحة الأدمن
+  // ==========================================
+
+  try {
+
+    await loadDashboardStats();
+
+    await delay(50);
+
+    await loadTotalUsers();
+
+    await delay(70);
+
+    await loadDeposits();
+
+    await delay(90);
+
+    await loadWithdrawals();
+
+    await delay(110);
+
+    await loadMessages();
+
+    await delay(130);
+
+    await loadPendingProofs();
+
+    await delay(150);
+
+    await loadDisputes();
+
+    await delay(170);
+
+    await loadCommissionStats();
+
+
+    console.log(
+      "✅ Admin dashboard loaded successfully"
     );
 
-    return;
-  }
+  } catch (error) {
 
-  // 3️⃣ تحميل البيانات
-  await loadDashboardStats();
-
-  await delay(50);
-@@ -649,7 +841,6 @@ <h3>⚖️ Resolve Dispute #<span id="resolveDisputeId"></span></h3>
-  await delay(170);
-  await loadCommissionStats();
-});
-// ================= INIT =================
-window.addEventListener('load', async () => {
-
-  // 1️⃣ التحقق من الرابط
-  const accessGranted =
-    checkAdminAccess();
-
-  if (!accessGranted) {
-    return;
-  }
-
-  // 2️⃣ تسجيل الدخول في قاعدة البيانات
-  const loggedIn =
-    await adminLogin();
-
-  if (!loggedIn) {
     console.error(
-      '❌ Admin login failed'
+      "❌ Admin dashboard loading error:",
+      error
+    );
+  }
+
+});
+
+
+function switchTab(tab) {
+
+  document
+    .querySelectorAll(".tab")
+    .forEach(t => {
+
+      t.classList.remove("active");
+
+    });
+
+
+  const activeTab =
+    document.querySelector(
+      `.tab[data-tab="${tab}"]`
     );
 
+
+  if (activeTab) {
+
+    activeTab.classList.add("active");
+  }
+
+
+  const sections = [
+    "deposits",
+    "withdrawals",
+    "balance",
+    "messages",
+    "proofs",
+    "disputes",
+    "stats"
+  ];
+
+
+  sections.forEach(sectionName => {
+
+    const section =
+      document.getElementById(
+        sectionName + "Section"
+      );
+
+    if (section) {
+
+      section.classList.add("hidden");
+    }
+
+  });
+
+
+  const section =
+    document.getElementById(
+      tab + "Section"
+    );
+
+
+  if (!section) {
     return;
   }
 
-  // 3️⃣ تحميل البيانات
-  await loadDashboardStats();
 
-  await delay(50);
-  await loadTotalUsers();
+  section.classList.remove("hidden");
 
-  await delay(70);
-  await loadDeposits();
 
-  await delay(90);
-  await loadWithdrawals();
+  // ==========================================
+  // تحميل بيانات التبويب
+  // ==========================================
+  switch (tab) {
 
-  await delay(110);
-  await loadMessages();
+    case "deposits":
+      loadDeposits();
+      break;
 
-  await delay(130);
-  await loadPendingProofs();
+    case "withdrawals":
+      loadWithdrawals();
+      break;
 
-  await delay(150);
-  await loadDisputes();
+    case "messages":
+      loadMessages();
+      break;
 
-  await delay(170);
-  await loadCommissionStats();
-});
+    case "proofs":
+      loadPendingProofs();
+      break;
+
+    case "disputes":
+      loadDisputes();
+      break;
+
+    case "stats":
+      loadCommissionStats();
+      break;
+
+    case "balance":
+      // لا يوجد تحميل تلقائي
+      break;
+  }
+}
+
 // ================= UTILS =================
 function showAlert(msg, type) {
   const el = document.getElementById('alertBox');
