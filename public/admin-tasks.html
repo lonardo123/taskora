@@ -847,74 +847,327 @@ const API = "https://taskora.taskora.workers.dev";
 const REQUIRED_ADMIN_ID = "7171208519";
 const BOT_USERNAME = "TasksRewardBot";
 
+// ================= 🔐 ACCESS CONTROL =================
+function checkAdminAccess() {
+  const url = window.location.href;
 
-// =========================
-// 🔐 تسجيل دخول الأدمن
-// مرة واحدة عند فتح الصفحة
-// =========================
-async function adminLogin() {
+  let adminIdFromUrl = null;
+
   try {
-    const res = await fetch(
-      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+    const urlObj = new URL(url);
+    adminIdFromUrl = urlObj.searchParams.get("admin_id");
+  } catch (e) {
+    const match = url.match(/[?&]admin_id=([^&]+)/);
+
+    if (match && match[1]) {
+      try {
+        adminIdFromUrl = decodeURIComponent(match[1].trim());
+      } catch {
+        adminIdFromUrl = match[1].trim();
       }
+    }
+  }
+
+  const receivedId = adminIdFromUrl
+    ? adminIdFromUrl.toString().trim()
+    : "";
+
+  const requiredId = REQUIRED_ADMIN_ID.toString().trim();
+
+  console.log("🔐 URL:", url);
+  console.log("🔐 Received admin_id:", receivedId);
+  console.log("🔐 Required admin_id:", requiredId);
+
+
+  // ==========================================
+  // عناصر الصفحة
+  // ==========================================
+  const denied = document.getElementById("accessDenied");
+  const content = document.getElementById("adminContent");
+
+
+  // ==========================================
+  // ❌ admin_id مفقود
+  // ==========================================
+  if (!receivedId) {
+    console.error(
+      "❌ Invalid or missing admin_id parameter"
     );
 
-    const data = await res.json();
+    if (denied) {
+      denied.style.display = "flex";
+    }
 
-    if (!res.ok || !data.success) {
+    if (content) {
+      content.classList.add("hidden");
+    }
+
+    return false;
+  }
+
+
+  // ==========================================
+  // ❌ admin_id غير صحيح
+  // ==========================================
+  if (receivedId !== requiredId) {
+    console.error(
+      "❌ Invalid admin_id:",
+      receivedId
+    );
+
+    if (denied) {
+      denied.style.display = "flex";
+    }
+
+    if (content) {
+      content.classList.add("hidden");
+    }
+
+    return false;
+  }
+
+
+  // ==========================================
+  // ✅ الأدمن صحيح
+  // ==========================================
+  console.log("✅ Admin access granted");
+
+  if (denied) {
+    denied.style.display = "none";
+  }
+
+  if (content) {
+    content.classList.remove("hidden");
+  }
+
+  localStorage.setItem(
+    "admin_verified",
+    "true"
+  );
+
+  localStorage.setItem(
+    "admin_id",
+    requiredId
+  );
+
+  return true;
+}
+
+
+// ================= ⏳ DELAY =================
+const delay = (ms) =>
+  new Promise(resolve => setTimeout(resolve, ms));
+
+
+// ================= 🔐 ADMIN LOGIN =================
+// يتم تسجيل الدخول مرة واحدة فقط عند فتح الصفحة
+async function adminLogin() {
+  try {
+
+    const urlObj = new URL(window.location.href);
+
+    const adminId =
+      urlObj.searchParams.get("admin_id");
+
+    const providedId =
+      adminId
+        ? adminId.toString().trim()
+        : "";
+
+
+    // ==========================================
+    // ❌ التحقق من admin_id
+    // ==========================================
+    if (!providedId) {
       console.error(
-        '❌ Admin login failed:',
-        data.message || 'Unknown error'
+        "❌ Admin login blocked: missing admin_id"
       );
 
       return false;
     }
 
+
+    if (providedId !== REQUIRED_ADMIN_ID) {
+      console.error(
+        "❌ Admin login blocked: invalid admin_id"
+      );
+
+      return false;
+    }
+
+
     console.log(
-      '✅ Admin login recorded:',
-      data.data?.last_login_at
+      "🔐 Recording admin login..."
     );
 
-    // حفظ حالة الأدمن
+
+    // ==========================================
+    // 📡 إرسال تسجيل الدخول إلى Worker
+    // ==========================================
+    const response = await fetch(
+      `${API}/api/admin/login?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+
+    // ==========================================
+    // قراءة الرد بأمان
+    // ==========================================
+    let data = null;
+
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      console.error(
+        "❌ Invalid JSON response from server"
+      );
+
+      console.error(
+        "❌ HTTP status:",
+        response.status
+      );
+
+      return false;
+    }
+
+
+    console.log(
+      "🔐 Login response:",
+      data
+    );
+
+
+    // ==========================================
+    // ❌ فشل تسجيل الدخول
+    // ==========================================
+    if (!response.ok || !data.success) {
+
+      console.error(
+        "❌ Admin login failed:",
+        data?.message || "Unknown server error"
+      );
+
+      if (data?.error) {
+        console.error(
+          "❌ Server error details:",
+          data.error
+        );
+      }
+
+      return false;
+    }
+
+
+    // ==========================================
+    // ✅ تسجيل الدخول ناجح
+    // ==========================================
     localStorage.setItem(
-      'admin_verified',
-      'true'
+      "admin_verified",
+      "true"
     );
 
     localStorage.setItem(
-      'admin_id',
+      "admin_id",
       REQUIRED_ADMIN_ID
     );
 
+
     if (data.data?.last_login_at) {
+
       localStorage.setItem(
-        'admin_last_login',
+        "admin_last_login",
         data.data.last_login_at
       );
     }
 
+
+    console.log(
+      "✅ Admin login recorded at:",
+      data.data?.last_login_at || "N/A"
+    );
+
+
     return true;
 
-  } catch (err) {
+  } catch (error) {
+
     console.error(
-      '❌ Admin login error:',
-      err
+      "❌ Admin login error:",
+      error
     );
 
     return false;
   }
 }
 
-// ================= دالة مساعدة للتأخير =================
-const delay = (ms) =>
-  new Promise(resolve => setTimeout(resolve, ms));
+
+// ================= 🚀 INIT =================
+// تسجيل الدخول مرة واحدة ثم تحميل بيانات لوحة الأدمن
+window.addEventListener("load", async () => {
+
+  console.log("🚀 Admin panel initializing...");
 
 
+  // ==========================================
+  // 1️⃣ التحقق من admin_id في الرابط
+  // ==========================================
+  const accessGranted =
+    checkAdminAccess();
+
+
+  if (!accessGranted) {
+    console.error(
+      "❌ Admin access denied"
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // 2️⃣ تسجيل دخول الأدمن مرة واحدة
+  // ==========================================
+  const loggedIn =
+    await adminLogin();
+
+
+  if (!loggedIn) {
+
+    console.error(
+      "❌ Admin login failed"
+    );
+
+    return;
+  }
+
+  // ==========================================
+  // 📊 تحميل بيانات لوحة الأدمن
+  // ==========================================
+  // 2️⃣ تسجيل الدخول في قاعدة البيانات
+  const loggedIn =
+    await adminLogin();
+
+  if (!loggedIn) {
+    console.error(
+      '❌ Admin login failed'
+    );
+
+    return;
+  }
+
+  // 3️⃣ تحميل البيانات
+  await loadDashboardStats();
+
+  await delay(50);
+@@ -649,7 +841,6 @@ <h3>⚖️ Resolve Dispute #<span id="resolveDisputeId"></span></h3>
+  await delay(170);
+  await loadCommissionStats();
+});
 // ================= INIT =================
 window.addEventListener('load', async () => {
 
