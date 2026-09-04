@@ -1185,29 +1185,47 @@ app.get("/api/contact/history", async (c) => {
   }
 });
 
-// =========================
-// 🔐 Middleware الأدمن (مصحح لتمرير adminId)
-// =========================
-const verifyAdmin = async (c, next) => {
+// ==================== 🔐 4. Middleware: التحقق من الأدمن (مهم جداً) ====================
+async function verifyAdmin(req, res, next) {
   try {
-    const adminId = c.req.query('admin_id') || c.req.query('user_id');
-    const REQUIRED_ADMIN_ID = (c.env?.ADMIN_ID || '7171208519').toString().trim();
-    const providedId = adminId ? adminId.toString().trim() : '';
-
-    if (!providedId || providedId !== REQUIRED_ADMIN_ID) {
-      return c.json({ success: false, message: '❌ Access denied' }, 403);
+    // قراءة admin_id من الرابط (query) أو الجسم (body) مع التعامل مع القيم غير المعرفة
+    const queryId = req.query?.admin_id?.toString()?.trim();
+    const bodyId = req.body?.admin_id?.toString()?.trim();
+    const adminId = queryId || bodyId;
+    
+    // الحصول على الـ ID المطلوب من متغيرات البيئة أو القيمة الافتراضية
+    const REQUIRED_ADMIN_ID = process.env.ADMIN_ID || '7171208519';
+    
+    // التحقق من وجود admin_id ومطابقته للقيمة المطلوبة
+    if (!adminId || adminId !== String(REQUIRED_ADMIN_ID).trim()) {
+      console.warn(`❌ Access denied: received="${adminId}", required="${REQUIRED_ADMIN_ID}"`);
+      return res.status(403).json({ 
+        success: false, 
+        message: '❌ Access denied: Invalid admin_id' 
+      });
     }
 
-    // ✅ تمرير معرف الأدمن للطلبات التالية (مهم جداً لمسارات الموافقة والرفض)
-    c.set('adminId', providedId);
+     // 🔥 تسجيل نشاط الأدمن داخل جدول users
+    const userQuery = await pool.query(
+  `UPDATE users 
+   SET last_login_at = now()
+   WHERE telegram_id = $1
+     AND last_login_at < now() - interval '24 hours'
+   RETURNING telegram_id, username, name, balance, payeer_wallet`,
+  [adminId]
+);
+    // ✅ تمرير الصلاحية للدالة التالية
+    req.admin_id = adminId;
+    next();
     
-    await next();
   } catch (err) {
     console.error('❌ verifyAdmin error:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Server error in admin verification' 
+    });
   }
-};
-
+}
 
 // =========================
 // 🔐 Admin Authentication
