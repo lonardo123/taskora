@@ -919,31 +919,69 @@ tr:hover{background:#1e293b/50}
   </div>
 </div>
 
- <!-- Resolve Dispute Modal -->
+<!-- Resolve Dispute Modal -->
 <div id="resolveModal" class="modal">
   <div class="modal-content">
+
     <div class="modal-header">
-      <h3>⚖️ Resolve Dispute #<span id="resolveDisputeId"></span></h3>
-      <button class="modal-close" onclick="closeModal('resolveModal')">&times;</button>
+      <h3>
+        ⚖️ Resolve Dispute #
+        <span id="resolveDisputeId"></span>
+      </h3>
+
+      <button
+        class="modal-close"
+        onclick="closeModal('resolveModal')"
+      >
+        &times;
+      </button>
     </div>
-    <div class="alert alert-info">Review the proof and decide the outcome.</div>
-    
-    <!-- ✅ هذا العنصر مطلوب لعرض الإثبات -->
-    <div id="resolveProofContent" style="margin:15px 0"></div>
-    
+
+    <div class="alert alert-info">
+      Review the proof and decide the outcome.
+    </div>
+
+    <!-- ✅ عرض الإثبات -->
+    <div
+      id="resolveProofContent"
+      style="margin:15px 0"
+    ></div>
+
     <div class="input-group">
       <label>Decision:</label>
+
       <select id="resolveDecision">
-        <option value="executor">✅ Pay executor (full amount)</option>
-        <option value="none">❌ No payment (refund to creator)</option>
+
+        <!-- ✅ لصالح المنفذ -->
+        <option value="executor">
+          ✅ Pay executor (full amount)
+        </option>
+
+        <!-- ✅ لصالح صاحب المهمة -->
+        <option value="creator">
+          ❌ No payment (refund to creator)
+        </option>
+
       </select>
     </div>
+
     <div class="input-group">
       <label>Resolution Note:</label>
-      <textarea id="resolveNote" rows="3" placeholder="Add a note about this decision..."></textarea>
+
+      <textarea
+        id="resolveNote"
+        rows="3"
+        placeholder="Add a note about this decision..."
+      ></textarea>
     </div>
-    <!-- ✅ تأكد أن onclick يستدعي submitResolution() -->
-    <button class="btn btn-success" onclick="submitResolution()">✅ Submit Decision</button>
+
+    <button
+      class="btn btn-success"
+      onclick="submitResolution()"
+    >
+      ✅ Submit Decision
+    </button>
+
   </div>
 </div>
 
