@@ -908,117 +908,483 @@ if (pendingCount > 0) {
 // ================= MY EXECUTIONS =================
 async function loadMyExecutions() {
   const list = document.getElementById('executionsList');
+
   if (!list) {
     console.error('❌ executionsList element not found');
     return;
   }
-  
-  list.innerHTML = '<div class="loading">Loading your executions...</div>';
-  
+
+  list.innerHTML =
+    '<div class="loading">Loading your executions...</div>';
+
   try {
-    const res = await fetch(`${API}/api/tasks/user-executions?user_id=${currentUser}`);
+    const res = await fetch(
+      `${API}/api/tasks/user-executions?user_id=${currentUser}`
+    );
+
     const data = await res.json();
-    
+
     if (!data.success) {
-      list.innerHTML = `<p style="text-align:center;color:#ef4444;padding:20px">❌ ${data.message || 'Failed to load'}</p>`;
+      list.innerHTML = `
+        <p style="text-align:center;color:#ef4444;padding:20px">
+          ❌ ${data.message || 'Failed to load'}
+        </p>
+      `;
       return;
     }
-    
-    const executions = data.data || data.executionsWithDispute || [];
-    
+
+    const executions =
+      data.data ||
+      data.executionsWithDispute ||
+      [];
+
     if (executions.length === 0) {
-      list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">💡 You haven\'t executed any tasks yet</p>';
+      list.innerHTML = `
+        <p style="text-align:center;color:#94a3b8;padding:20px">
+          💡 You haven't executed any tasks yet
+        </p>
+      `;
       return;
     }
-    
+
     let html = '';
+
     for (const exec of executions) {
+
       try {
-        const status = exec.status || 'unknown';
-        const statusText = getStatusText(status);
-        const hasDispute = exec.has_dispute === true;
-        const canDispute = status === 'rejected' && !hasDispute;
-        
+
+        // ==========================================================
+        // 🔹 Basic execution data
+        // ==========================================================
+        const status =
+          exec.status || 'unknown';
+
+        const statusText =
+          getStatusText(status);
+
+        const hasDispute =
+          exec.has_dispute === true;
+
+        // ==========================================================
+        // ⚠️ DISPUTE AVAILABILITY
+        //
+        // Dispute is allowed only when:
+        //
+        // 1. status = rejected
+        // 2. no open dispute
+        // 3. rejected_at exists
+        // 4. less than 24 hours have passed
+        // ==========================================================
+        let canDispute = false;
+        let disputeDeadline = null;
+        let disputeExpired = false;
+
+        if (
+          status === 'rejected' &&
+          !hasDispute &&
+          exec.rejected_at
+        ) {
+
+          const rejectedAt =
+            new Date(exec.rejected_at);
+
+          if (!Number.isNaN(rejectedAt.getTime())) {
+
+            disputeDeadline =
+              new Date(
+                rejectedAt.getTime() +
+                (24 * 60 * 60 * 1000)
+              );
+
+            canDispute =
+              Date.now() < disputeDeadline.getTime();
+
+            disputeExpired =
+              !canDispute;
+          }
+        }
+
+        // ==========================================================
+        // 🧱 Execution card
+        // ==========================================================
         html += '<div class="proof-item">';
+
         html += '<div class="proof-header">';
-        html += '<div><strong>📋 ' + (exec.task_title || 'Unknown') + '</strong>';
-        html += '<span style="color:#94a3b8;font-size:12px;margin-left:10px">#' + (exec.task_id || '?') + '</span></div>';
-        html += '<span class="status-badge status-' + status + '">' + statusText + '</span>';
+
+        html += `
+          <div>
+            <strong>
+              📋 ${exec.task_title || 'Unknown'}
+            </strong>
+
+            <span
+              style="
+                color:#94a3b8;
+                font-size:12px;
+                margin-left:10px;
+              "
+            >
+              #${exec.task_id || '?'}
+            </span>
+          </div>
+        `;
+
+        html += `
+          <span
+            class="status-badge status-${status}"
+          >
+            ${statusText}
+          </span>
+        `;
+
         html += '</div>';
-        
-        html += '<p style="color:#94a3b8;font-size:13px;margin:5px 0">';
-        html += '📅 Submitted: ' + formatDate(exec.submitted_at) + ' | ';
-        html += '💰 Reward: <strong style="color:#22c55e">' + formatPrice(exec.payment_amount || 0) + '</strong>';
-        html += '</p>';
-        
+
+        // ==========================================================
+        // 📅 Submitted + reward
+        // ==========================================================
+        html += `
+          <p
+            style="
+              color:#94a3b8;
+              font-size:13px;
+              margin:5px 0;
+            "
+          >
+            📅 Submitted:
+            ${formatDate(exec.submitted_at)}
+            |
+            💰 Reward:
+            <strong style="color:#22c55e">
+              ${formatPrice(exec.payment_amount || 0)}
+            </strong>
+          </p>
+        `;
+
+        // ==========================================================
+        // 📄 Proof
+        // ==========================================================
         if (exec.proof) {
-          html += '<div class="proof-content" style="margin:10px 0"><strong>Your Proof:</strong><br>' + exec.proof + '</div>';
+
+          html += `
+            <div
+              class="proof-content"
+              style="margin:10px 0"
+            >
+              <strong>Your Proof:</strong>
+              <br>
+              ${exec.proof}
+            </div>
+          `;
         }
-        
-        // ✅ عرض الحالة مع رسالة الأدمن إذا وجدت
+
+        // ==========================================================
+        // 🚀 APPLIED
+        // ==========================================================
         if (status === 'applied') {
-          html += '<div class="proof-actions">';
-          html += '<button class="btn btn-primary btn-sm" onclick="openTaskDetailPage(' + exec.task_id + ')">🚀 View & Apply</button>';
-          html += '</div>';
-          html += '<small style="color:#facc15;font-size:12px;margin-top:5px;display:block">⏱️ Submit your proof before time expires</small>';
-        } else if (status === 'pending') {
-          html += '<div class="alert alert-info" style="margin-top:10px">⏳ Proof submitted - awaiting advertiser review<br><small style="color:#94a3b8;font-size:11px">ℹ️ If not reviewed within 24 hours, proof will be auto-approved and payment will be released</small></div>';
-        } else if (status === 'disputed') {
-          html += '<div class="alert alert-info" style="margin-top:10px">⚖️ Dispute under admin review</div>';
+
+          html += `
+            <div class="proof-actions">
+              <button
+                class="btn btn-primary btn-sm"
+                onclick="openTaskDetailPage(${exec.task_id})"
+              >
+                🚀 View & Apply
+              </button>
+            </div>
+
+            <small
+              style="
+                color:#facc15;
+                font-size:12px;
+                margin-top:5px;
+                display:block;
+              "
+            >
+              ⏱️ Submit your proof before time expires
+            </small>
+          `;
+        }
+
+        // ==========================================================
+        // ⏳ PENDING
+        // ==========================================================
+        else if (status === 'pending') {
+
+          html += `
+            <div
+              class="alert alert-info"
+              style="margin-top:10px"
+            >
+              ⏳ Proof submitted - awaiting advertiser review
+
+              <br>
+
+              <small
+                style="
+                  color:#94a3b8;
+                  font-size:11px;
+                "
+              >
+                ℹ️ If not reviewed within 24 hours,
+                proof will be auto-approved and payment
+                will be released.
+              </small>
+            </div>
+          `;
+        }
+
+        // ==========================================================
+        // ⚖️ DISPUTED
+        // ==========================================================
+        else if (status === 'disputed') {
+
+          html += `
+            <div
+              class="alert alert-info"
+              style="margin-top:10px"
+            >
+              ⚖️ Dispute under admin review
+            </div>
+          `;
+
           if (exec.admin_resolution) {
-            html += `<div class="alert" style="margin-top:10px;background:#8b5cf620;border:1px solid #8b5cf640;color:#a78bfa;font-size:13px"><strong>Admin Note:</strong> ${exec.admin_resolution}</div>`;
-          }
-        } else if (status === 'approved') {
-          html += '<div class="alert alert-success" style="margin-top:10px">✅ Payment received';
-          if (exec.admin_resolution) {
-            html += `<br><strong>Admin Note:</strong> ${exec.admin_resolution}`;
-          }
-          html += '</div>';
-       
-     } else if (status === 'rejected') {
-          html += '<div class="alert alert-error" style="margin-top:10px">❌ Rejected';
-          
-          // ✅ عرض سبب الرفض إذا وجد
-          if (exec.rejection_reason) {
-              html += `<br><strong>Reason:</strong> ${exec.rejection_reason}`;
-          }
-          
-          html += '</div>';
-          
-          if (canDispute) {
-              html += `<div class="proof-actions">
-                  <button class="btn btn-warning btn-sm" onclick="openDisputeModalForExecution(${exec.task_id}, ${exec.id})">⚠️ Create Dispute</button>
-              </div>`;
+
+            html += `
+              <div
+                class="alert"
+                style="
+                  margin-top:10px;
+                  background:#8b5cf620;
+                  border:1px solid #8b5cf640;
+                  color:#a78bfa;
+                  font-size:13px;
+                "
+              >
+                <strong>Admin Note:</strong>
+                ${exec.admin_resolution}
+              </div>
+            `;
           }
         }
-        
-        html += '</div>'; // ← إغلاق proof-item
-        
+
+        // ==========================================================
+        // ✅ APPROVED
+        // ==========================================================
+        else if (status === 'approved') {
+
+          html += `
+            <div
+              class="alert alert-success"
+              style="margin-top:10px"
+            >
+              ✅ Payment received
+          `;
+
+          if (exec.admin_resolution) {
+
+            html += `
+              <br>
+              <strong>Admin Note:</strong>
+              ${exec.admin_resolution}
+            `;
+          }
+
+          html += '</div>';
+        }
+
+        // ==========================================================
+        // ❌ REJECTED
+        // ==========================================================
+        else if (status === 'rejected') {
+
+          html += `
+            <div
+              class="alert alert-error"
+              style="margin-top:10px"
+            >
+              ❌ Rejected
+          `;
+
+          // ========================================================
+          // 📝 Rejection reason
+          // ========================================================
+          if (exec.rejection_reason) {
+
+            html += `
+              <br>
+              <strong>Reason:</strong>
+              ${exec.rejection_reason}
+            `;
+          }
+
+          // ========================================================
+          // ⚠️ Dispute still available
+          // ========================================================
+          if (canDispute) {
+
+            html += `
+              <br>
+              <small
+                style="
+                  color:#facc15;
+                  font-size:12px;
+                "
+              >
+                ⚠️ You can submit a dispute within 24 hours
+                of the rejection.
+              </small>
+            `;
+
+            if (disputeDeadline) {
+
+              html += `
+                <br>
+                <small
+                  style="
+                    color:#94a3b8;
+                    font-size:11px;
+                  "
+                >
+                  ⏰ Dispute deadline:
+                  ${formatDate(disputeDeadline)}
+                </small>
+              `;
+            }
+          }
+
+          // ========================================================
+          // 🔒 Dispute period expired
+          // ========================================================
+          else if (
+            disputeExpired ||
+            !exec.rejected_at
+          ) {
+
+            html += `
+              <br>
+              <small
+                style="
+                  color:#94a3b8;
+                  font-size:12px;
+                "
+              >
+                🔒 Rejection is final.
+                The dispute period has expired.
+              </small>
+            `;
+          }
+
+          html += '</div>';
+
+          // ========================================================
+          // ⚠️ CREATE DISPUTE BUTTON
+          // ========================================================
+          if (canDispute) {
+
+            html += `
+              <div class="proof-actions">
+
+                <button
+                  class="btn btn-warning btn-sm"
+                  onclick="
+                    openDisputeModalForExecution(
+                      ${exec.task_id},
+                      ${exec.id}
+                    )
+                  "
+                >
+                  ⚠️ Create Dispute
+                </button>
+
+              </div>
+            `;
+          }
+        }
+
+        // ==========================================================
+        // 🔚 Close execution item
+        // ==========================================================
+        html += '</div>';
+
       } catch (itemErr) {
-        console.error('❌ Error rendering execution:', itemErr, exec);
+
+        console.error(
+          '❌ Error rendering execution:',
+          itemErr,
+          exec
+        );
       }
     }
-    
+
+    // ============================================================
+    // 📌 Render
+    // ============================================================
     list.innerHTML = html;
-    
+
   } catch (err) {
-    console.error('❌ loadMyExecutions error:', err);
-    list.innerHTML = '<p class="alert alert-error">Failed to load executions. Check console for details.</p>';
+
+    console.error(
+      '❌ loadMyExecutions error:',
+      err
+    );
+
+    list.innerHTML = `
+      <p class="alert alert-error">
+        Failed to load executions.
+        Check console for details.
+      </p>
+    `;
   }
 }
-// ✅ دالة جديدة لعرض سبب قفل زر الحذف (محدثة لإضافة appliedCount)
-function showDeleteBlocked(pendingCount, disputedCount, appliedCount) {
-    if (appliedCount > 0) {
-        showAlert(`⚠️ Cannot delete: ${appliedCount} applied execution(s) must be completed or expired first`, 'error');
-    } else if (pendingCount > 0 && disputedCount > 0) {
-        showAlert(`⚠️ Cannot delete: ${pendingCount} pending + ${disputedCount} disputed execution(s)`, 'error');
-    } else if (pendingCount > 0) {
-        showAlert(`⚠️ Cannot delete: ${pendingCount} pending execution(s) must be reviewed first`, 'error');
-    } else if (disputedCount > 0) {
-        showAlert(`⚠️ Cannot delete: ${disputedCount} disputed execution(s) under admin review`, 'error');
-    } else {
-        showAlert('⚠️ Cannot delete: there are active executions', 'error');
-    }
+
+
+// ============================================================
+// ✅ SHOW DELETE BLOCK REASON
+// ============================================================
+function showDeleteBlocked(
+  pendingCount,
+  disputedCount,
+  appliedCount
+) {
+
+  if (appliedCount > 0) {
+
+    showAlert(
+      `⚠️ Cannot delete: ${appliedCount} applied execution(s) must be completed or expired first`,
+      'error'
+    );
+
+  } else if (
+    pendingCount > 0 &&
+    disputedCount > 0
+  ) {
+
+    showAlert(
+      `⚠️ Cannot delete: ${pendingCount} pending + ${disputedCount} disputed execution(s)`,
+      'error'
+    );
+
+  } else if (pendingCount > 0) {
+
+    showAlert(
+      `⚠️ Cannot delete: ${pendingCount} pending execution(s) must be reviewed first`,
+      'error'
+    );
+
+  } else if (disputedCount > 0) {
+
+    showAlert(
+      `⚠️ Cannot delete: ${disputedCount} disputed execution(s) under admin review`,
+      'error'
+    );
+
+  } else {
+
+    showAlert(
+      '⚠️ Cannot delete: there are active executions',
+      'error'
+    );
+  }
 }
 // ================= ADD FUNDS =================
 function openAddFundsModal(taskId) {
