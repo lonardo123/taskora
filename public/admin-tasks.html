@@ -363,26 +363,135 @@ tr:hover{background:#1e293b/50}
 </div>
     
     <!-- ✅ Modal للرفض داخل الصفحة -->
-<div id="rejectModal" class="modal">
-  <div class="modal-content" style="max-width:500px">
-    <div class="modal-header">
-      <h3>❌ Reject Deposit #<span id="rejectDepositId"></span></h3>
-      <button class="modal-close" onclick="closeModal('rejectModal')">&times;</button>
+
+<div id="rejectDepositModal"
+     style="
+       display:none;
+       position:fixed;
+       inset:0;
+       background:rgba(0,0,0,0.65);
+       z-index:9999;
+       align-items:center;
+       justify-content:center;
+       padding:20px;
+     ">
+
+  <div style="
+       width:100%;
+       max-width:500px;
+       background:#ffffff;
+       border-radius:12px;
+       padding:24px;
+       box-shadow:0 20px 50px rgba(0,0,0,0.3);
+     ">
+
+    <!-- العنوان -->
+    <div style="
+         display:flex;
+         align-items:center;
+         justify-content:space-between;
+         margin-bottom:20px;
+       ">
+
+      <h3 style="
+          margin:0;
+          color:#dc2626;
+          font-size:20px;
+        ">
+        ❌ Reject Deposit
+      </h3>
+
+      <button type="button"
+              onclick="closeRejectModal()"
+              style="
+                border:none;
+                background:none;
+                font-size:24px;
+                cursor:pointer;
+                color:#64748b;
+              ">
+        ×
+      </button>
+
     </div>
-    <p style="color:#94a3b8;margin-bottom:15px">
-      User ID: <strong id="rejectUserId"></strong><br>
-      Reason is optional. Leave empty for default reason.
-    </p>
-    <div class="input-group">
-      <label>Reason for rejection (optional):</label>
-      <textarea id="rejectReason" rows="3" placeholder="e.g., Invalid TxID, Not received, etc."></textarea>
+
+
+    <!-- سبب الرفض -->
+    <div style="margin-bottom:20px;">
+
+      <label for="rejectReason"
+             style="
+               display:block;
+               margin-bottom:8px;
+               font-weight:600;
+               color:#334155;
+             ">
+        Rejection Reason
+      </label>
+
+      <textarea
+        id="rejectReason"
+        rows="4"
+        placeholder="Enter the reason for rejecting this deposit..."
+        style="
+          width:100%;
+          box-sizing:border-box;
+          padding:12px;
+          border:1px solid #cbd5e1;
+          border-radius:8px;
+          resize:vertical;
+          font-family:inherit;
+          font-size:14px;
+          outline:none;
+        "></textarea>
+
     </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-secondary" onclick="closeModal('rejectModal')">Cancel</button>
-      <button class="btn btn-danger" onclick="confirmReject()">❌ Confirm Reject</button>
+
+
+    <!-- الأزرار -->
+    <div style="
+         display:flex;
+         gap:10px;
+         justify-content:flex-end;
+       ">
+
+      <!-- إلغاء -->
+      <button type="button"
+              onclick="closeRejectModal()"
+              style="
+                padding:10px 18px;
+                background:#e2e8f0;
+                color:#334155;
+                border:none;
+                border-radius:7px;
+                cursor:pointer;
+                font-weight:600;
+              ">
+        Cancel
+      </button>
+
+
+      <!-- تأكيد الرفض -->
+      <button type="button"
+              onclick="confirmReject()"
+              style="
+                padding:10px 18px;
+                background:#dc2626;
+                color:#ffffff;
+                border:none;
+                border-radius:7px;
+                cursor:pointer;
+                font-weight:600;
+              ">
+        ❌ Confirm Reject
+      </button>
+
     </div>
+
   </div>
+
 </div>
+
     <!-- 📤 Withdrawals Section -->
     <div id="withdrawalsSection" class="card hidden">
       <div class="section-title">
@@ -1654,6 +1763,25 @@ function rejectDeposit(
     );
   }
 } 
+
+// =====================================================
+// ❌ إغلاق مودال رفض الإيداع
+// =====================================================
+function closeRejectModal() {
+
+  const modal =
+    document.getElementById(
+      'rejectDepositModal'
+    );
+
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  pendingRejectData = null;
+}
+
+ 
 // =====================================================
 // ❌ تأكيد رفض الإيداع
 // =====================================================
