@@ -1359,7 +1359,7 @@ let pendingApproveData = null;
 
 
 // =====================================================
-// 🔓 فتح مودال إدخال مبلغ الموافقة
+// 🔓 فتح نافذة الموافقة على الإيداع
 // =====================================================
 function openApproveModal(btn) {
 
@@ -1374,7 +1374,6 @@ function openApproveModal(btn) {
 
   const requestedAmount =
     parseFloat(btn.dataset.amount) || 0;
-
 
   // ===================================================
   // 📝 تعبئة بيانات المودال
@@ -1392,7 +1391,6 @@ function openApproveModal(btn) {
   const modalFinalAmount =
     document.getElementById('modalFinalAmount');
 
-
   if (modalUserId) {
     modalUserId.textContent =
       userId || 'N/A';
@@ -1408,29 +1406,36 @@ function openApproveModal(btn) {
       requestedAmount.toFixed(2);
   }
 
+  // ===================================================
+  // 💰 المبلغ الذي سيضيفه الأدمن
+  // ===================================================
+
   if (modalFinalAmount) {
     modalFinalAmount.value =
       requestedAmount.toFixed(2);
+
+    modalFinalAmount.focus();
+    modalFinalAmount.select();
   }
 
-
   // ===================================================
-  // 💾 تخزين البيانات مؤقتًا
+  // 💾 حفظ بيانات الإيداع
   // ===================================================
 
   pendingApproveData = {
-    depositId,
-    userId,
-    requestedAmount
+    depositId: depositId,
+    userId: userId,
+    requestedAmount: requestedAmount
   };
 
-
   // ===================================================
-  // 🔓 إظهار المودال
+  // 🔓 إظهار نافذة الموافقة داخل الصفحة
   // ===================================================
 
   const modal =
-    document.getElementById('approveDepositModal');
+    document.getElementById(
+      'approveDepositModal'
+    );
 
   if (modal) {
     modal.style.display = 'flex';
@@ -1455,133 +1460,306 @@ function closeApproveModal() {
 
 
 // =====================================================
-// ✅ تأكيد الموافقة على الإيداع
+// ✅ تأكيد وإضافة مبلغ الإيداع
 // =====================================================
 async function confirmApproveDeposit() {
-  if (!pendingApproveData) return;
 
-  const depositId = pendingApproveData.depositId;
-  const userId = pendingApproveData.userId;
-  const requestedAmount = pendingApproveData.requestedAmount;
-
-  const amountInput = document.getElementById('approveAmount');
-  const finalAmount = parseFloat(
-    amountInput?.value || requestedAmount
-  );
-
-  if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
-    alert('Please enter a valid amount.');
+  if (!pendingApproveData) {
+    showAlert(
+      '❌ No deposit selected',
+      'error'
+    );
     return;
   }
 
-  try {
-    const response = await fetch(
-      `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/approve?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          admin_id: REQUIRED_ADMIN_ID,
-          user_id: userId,
-          final_amount: finalAmount
-        })
-      }
+  const depositId =
+    pendingApproveData.depositId;
+
+  const userId =
+    pendingApproveData.userId;
+
+  const requestedAmount =
+    pendingApproveData.requestedAmount;
+
+  // ===================================================
+  // 💰 قراءة المبلغ الذي أدخله الأدمن
+  // ===================================================
+
+  const amountInput =
+    document.getElementById(
+      'modalFinalAmount'
     );
 
-    const data = await response.json();
+  const finalAmount =
+    parseFloat(
+      amountInput?.value || requestedAmount
+    );
 
-    if (!response.ok || !data.success) {
+  if (
+    !Number.isFinite(finalAmount) ||
+    finalAmount <= 0
+  ) {
+    showAlert(
+      '❌ Please enter a valid amount.',
+      'error'
+    );
+
+    amountInput?.focus();
+
+    return;
+  }
+
+  // ===================================================
+  // 🔐 إرسال طلب الموافقة للسيرفر
+  // ===================================================
+
+  try {
+
+    const response =
+      await fetch(
+        `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/approve?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type': 'application/json'
+          },
+
+          body: JSON.stringify({
+
+            // موجود أيضًا في body
+            // للحفاظ على الموديل الحالي
+            admin_id:
+              REQUIRED_ADMIN_ID,
+
+            user_id:
+              userId,
+
+            // المبلغ الذي حدده الأدمن
+            final_amount:
+              finalAmount
+
+          })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    // =================================================
+    // ❌ فشل العملية
+    // =================================================
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
       throw new Error(
-        data.message || 'Failed to approve deposit'
+        data.message ||
+        'Failed to approve deposit'
       );
     }
 
+    // =================================================
+    // ✅ نجاح الموافقة
+    // السيرفر هو الذي يسجل الإيداع
+    // ويضيف المبلغ لرصيد المستخدم
+    // =================================================
+
     closeApproveModal();
 
+    pendingApproveData = null;
+
     await loadDeposits();
+
     await loadDashboardStats();
 
-    alert(
+    showAlert(
       data.message ||
-      'Deposit approved successfully.'
+      `✅ Deposit approved and $${finalAmount.toFixed(2)} added successfully.`,
+      'success'
     );
 
   } catch (error) {
+
     console.error(
       '❌ confirmApproveDeposit:',
       error
     );
 
-    alert(
+    showAlert(
       error.message ||
-      'Failed to approve deposit.'
+      '❌ Failed to approve deposit.',
+      'error'
     );
   }
-}
+} 
+ // =====================================================
+// ❌ فتح نافذة رفض الإيداع
 // =====================================================
-// ✅ تأكيد الرفض على الإيداع
-// =====================================================
-async function confirmReject() {
-  if (!pendingRejectData) return;
+let pendingRejectData = null;
 
-  const depositId = pendingRejectData.depositId;
-  const userId = pendingRejectData.userId;
+function rejectDeposit(
+  depositId,
+  userId
+) {
+
+  // ===================================================
+  // 💾 حفظ بيانات الإيداع المراد رفضه
+  // ===================================================
+
+  pendingRejectData = {
+    depositId: depositId,
+    userId: userId
+  };
+
+  // ===================================================
+  // 📝 تنظيف مربع سبب الرفض
+  // ===================================================
 
   const reasonInput =
-    document.getElementById('rejectReason');
+    document.getElementById(
+      'rejectReason'
+    );
+
+  if (reasonInput) {
+    reasonInput.value = '';
+  }
+
+  // ===================================================
+  // 🔓 فتح نافذة الرفض داخل الصفحة
+  // ===================================================
+
+  const modal =
+    document.getElementById(
+      'rejectDepositModal'
+    );
+
+  if (modal) {
+
+    modal.style.display =
+      'flex';
+
+    reasonInput?.focus();
+
+  } else {
+
+    console.error(
+      '❌ rejectDepositModal not found'
+    );
+
+    showAlert(
+      '❌ Reject modal not found',
+      'error'
+    );
+  }
+} 
+// =====================================================
+// ❌ تأكيد رفض الإيداع
+// =====================================================
+async function confirmReject() {
+
+  if (!pendingRejectData) {
+
+    showAlert(
+      '❌ No deposit selected',
+      'error'
+    );
+
+    return;
+  }
+
+  const depositId =
+    pendingRejectData.depositId;
+
+  const userId =
+    pendingRejectData.userId;
+
+  const reasonInput =
+    document.getElementById(
+      'rejectReason'
+    );
 
   const reason =
     reasonInput?.value?.trim() ||
     'Rejected by admin';
 
   try {
-    const response = await fetch(
-      `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/reject?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          admin_id: REQUIRED_ADMIN_ID,
-          user_id: userId,
-          reason: reason
-        })
-      }
-    );
 
-    const data = await response.json();
+    const response =
+      await fetch(
+        `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/reject?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+        {
+          method: 'POST',
 
-    if (!response.ok || !data.success) {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+
+          body: JSON.stringify({
+
+            admin_id:
+              REQUIRED_ADMIN_ID,
+
+            user_id:
+              userId,
+
+            reason:
+              reason
+
+          })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
       throw new Error(
-        data.message || 'Failed to reject deposit'
+        data.message ||
+        'Failed to reject deposit'
       );
     }
 
+    // =================================================
+    // ✅ إغلاق نافذة الرفض
+    // =================================================
+
     closeRejectModal();
 
+    pendingRejectData = null;
+
+    // =================================================
+    // 🔄 تحديث الإيداعات والإحصائيات
+    // =================================================
+
     await loadDeposits();
+
     await loadDashboardStats();
 
-    alert(
+    showAlert(
       data.message ||
-      'Deposit rejected successfully.'
+      '❌ Deposit rejected successfully.',
+      'success'
     );
 
   } catch (error) {
+
     console.error(
       '❌ confirmReject:',
       error
     );
 
-    alert(
+    showAlert(
       error.message ||
-      'Failed to reject deposit.'
+      '❌ Failed to reject deposit.',
+      'error'
     );
   }
-}  
+}
   
 // ================= 📤 WITHDRAWALS =================
 
