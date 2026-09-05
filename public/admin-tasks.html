@@ -285,10 +285,7 @@ tr:hover{background:#1e293b/50}
         <span class="icon">📬</span>
         <span class="label">User Messages</span>
       </button>
-      <button class="quick-btn investment" onclick="openInvestmentPanel()">
-        <span class="icon">📈</span>
-        <span class="label">Investment Admin</span>
-      </button>
+      
     </div>
 
     <!-- Stats Dashboard -->
@@ -2509,83 +2506,199 @@ function openReplyMessageModal(msgId, username, originalMsg) {
   const replyEl = document.getElementById('rModalReply');
   const modal = document.getElementById('replyMessageModal');
   
-  if(uidEl) uidEl.textContent = msgId;
-  if(unameEl) unameEl.textContent = '@' + username;
-  if(origEl) origEl.textContent = originalMsg || 'No content';
-  if(replyEl) replyEl.value = '';
+  if (uidEl) uidEl.textContent = msgId;
+  if (unameEl) unameEl.textContent = '@' + username;
+  if (origEl) origEl.textContent = originalMsg || 'No content';
+  if (replyEl) replyEl.value = '';
   
-  if(modal) modal.classList.add('active');
+  if (modal) modal.classList.add('active');
 }
 
 function closeReplyMessageModal() {
   const modal = document.getElementById('replyMessageModal');
-  if(modal) modal.classList.remove('active');
+  if (modal) modal.classList.remove('active');
   pendingReplyMsg = null;
 }
 
 async function confirmSendReply() {
-  if (!pendingReplyMsg) return showAlert('⚠️ No message selected', 'error');
+  if (!pendingReplyMsg) {
+    return showAlert('⚠️ No message selected', 'error');
+  }
 
   // ✅ حفظ msgId لتجنب null بعد إغلاق المودال
   const msgId = pendingReplyMsg.msgId;
 
-  const reply = document.getElementById('rModalReply')?.value?.trim();
-  const btn = document.querySelector('#replyMessageModal .btn-primary');
+  const reply =
+    document.getElementById('rModalReply')?.value?.trim();
 
-  if (!reply) return showAlert('❌ Please enter a reply message', 'error');
+  const btn =
+    document.querySelector(
+      '#replyMessageModal .btn-primary'
+    );
 
-  const originalText = btn ? btn.textContent : '📤 Send Reply';
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sending...'; }
+  if (!reply) {
+    return showAlert(
+      '❌ Please enter a reply message',
+      'error'
+    );
+  }
+
+  const originalText =
+    btn ? btn.textContent : '📤 Send Reply';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Sending...';
+  }
 
   try {
-    const res = await fetch(`${API}/api/admin/messages/${msgId}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_id: REQUIRED_ADMIN_ID, reply })
-    });
 
-    // ✅ التأكد من أن الرد ناجح
+    // =====================================================
+    // 🔐 إرسال admin_id في Query Parameter
+    // لأن verifyAdmin يقرأ admin_id من الرابط
+    // =====================================================
+    const res = await fetch(
+      `${API}/api/admin/messages/${msgId}/reply?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+          reply
+        })
+      }
+    );
+
+
+    // =====================================================
+    // ❌ التحقق من HTTP status
+    // =====================================================
     if (!res.ok) {
-      throw new Error('Server error');
-    }
 
-    // ✅ قراءة JSON بشكل صحيح
-    const data = await res.json();
+      let errorMessage = 'Server error';
 
-    // ✅ نجاح العملية
-    if (data.success) {
-      showAlert('✅ Reply sent successfully', 'success');
+      try {
+        const errorData = await res.json();
 
-      // إزالة الرسالة من القائمة
-      const item = document.getElementById(`msg-item-${msgId}`);
-      if (item) item.remove();
+        if (errorData?.message) {
+          errorMessage = errorData.message;
+        }
 
-      // تحديث العداد
-      const countEl = document.getElementById('unreadMessagesCount');
-      if (countEl) {
-        countEl.textContent = Math.max(0, (parseInt(countEl.textContent) || 0) - 1);
+      } catch (_) {
+        // تجاهل خطأ قراءة JSON
       }
 
-      closeReplyMessageModal();
-      loadDashboardStats();
-
-    } else {
-      showAlert('❌ ' + (data.message || 'Failed to send reply'), 'error');
+      throw new Error(errorMessage);
     }
 
+
+    // =====================================================
+    // 📥 قراءة JSON
+    // =====================================================
+    const data =
+      await res.json();
+
+
+    // =====================================================
+    // ✅ نجاح العملية
+    // =====================================================
+    if (data.success) {
+
+      showAlert(
+        '✅ Reply sent successfully',
+        'success'
+      );
+
+
+      // إزالة الرسالة من القائمة
+      const item =
+        document.getElementById(
+          `msg-item-${msgId}`
+        );
+
+      if (item) {
+        item.remove();
+      }
+
+
+      // تحديث العداد
+      const countEl =
+        document.getElementById(
+          'unreadMessagesCount'
+        );
+
+      if (countEl) {
+
+        countEl.textContent =
+          Math.max(
+            0,
+            (parseInt(countEl.textContent) || 0) - 1
+          );
+
+      }
+
+
+      closeReplyMessageModal();
+
+      loadDashboardStats();
+
+
+    } else {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to send reply'
+        ),
+        'error'
+      );
+
+    }
+
+
   } catch (err) {
-    console.error('❌ Reply Error:', err);
-    showAlert('⚠️ ' + (err.message || 'Connection error'), 'error');
+
+    console.error(
+      '❌ Reply Error:',
+      err
+    );
+
+    showAlert(
+      '⚠️ ' +
+      (
+        err.message ||
+        'Connection error'
+      ),
+      'error'
+    );
+
+
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+
   }
-}  
+
+}
 
 
 // إغلاق المودال عند النقر خارجه
-document.getElementById('replyMessageModal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeReplyMessageModal();
-});
+document
+  .getElementById('replyMessageModal')
+  ?.addEventListener('click', function(e) {
+
+    if (e.target === this) {
+      closeReplyMessageModal();
+    }
+
+  });
 // ================= PENDING PROOFS =================
 
 async function loadPendingProofs() {
