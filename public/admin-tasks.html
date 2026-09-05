@@ -3129,177 +3129,474 @@ async function confirmRejectProof() {
 }
 
 // ================= DISPUTES =================
+
 let currentDispute = null;
 
 async function loadDisputes() {
   const list = document.getElementById('disputesList');
+
   if (!list) return;
-  list.innerHTML = '<div class="loading">Loading disputes...</div>';
-  
+
+  list.innerHTML =
+    '<div class="loading">Loading disputes...</div>';
+
   try {
-    // ✅ التغيير هنا: استبدلنا user_id بـ admin_id ليتوافق مع السيرفر
-    const res = await fetch(`${API}/api/admin/disputes?admin_id=${REQUIRED_ADMIN_ID}`);
-    
-    if (!res.ok) throw new Error('Network response was not ok');
+
+    const res = await fetch(
+      `${API}/api/admin/disputes?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `HTTP ${res.status}`
+      );
+    }
+
     const data = await res.json();
-    
-    const count = data.success && data.data ? data.data.length : 0;
-    document.getElementById('openDisputesCount').textContent = count;
-    
-    if (!data.success || !data.data?.length) {
-      list.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No open disputes</p>';
+
+    const disputes =
+      data.success && Array.isArray(data.data)
+        ? data.data
+        : [];
+
+    const countEl =
+      document.getElementById('openDisputesCount');
+
+    if (countEl) {
+      countEl.textContent = disputes.length;
+    }
+
+    if (!data.success || disputes.length === 0) {
+
+      list.innerHTML =
+        '<p style="text-align:center;color:#94a3b8;padding:20px">✅ No open disputes</p>';
+
       return;
     }
-    
-    list.innerHTML = data.data.map(d => `
-      <div class="proof-item" style="border-left:4px solid #8b5cf6">
-        <div class="proof-header" style="border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:15px">
-          <strong>⚠️ Dispute #${d.dispute_id}</strong>
-          <span class="status-badge status-disputed">Open</span>
+
+    list.innerHTML = disputes.map(d => `
+
+      <div
+        class="proof-item"
+        style="border-left:4px solid #8b5cf6"
+      >
+
+        <div
+          class="proof-header"
+          style="border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:15px"
+        >
+
+          <strong>
+            ⚠️ Dispute #${d.dispute_id}
+          </strong>
+
+          <span class="status-badge status-disputed">
+            Open
+          </span>
+
         </div>
-        
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px">
-          <div style="background:#0f172a;padding:12px;border-radius:8px">
-            <h4 style="color:#60a5fa;font-size:14px;margin-bottom:10px">📋 Task Details</h4>
-            <p style="font-size:13px"><strong>Title:</strong> ${d.task_title} <span style="color:#94a3b8">#${d.task_id}</span></p>
-            <p style="font-size:13px"><strong>Creator:</strong> @${d.creator_username || d.creator_telegram}</p>
-            <p style="font-size:13px"><strong>Reward:</strong> <span style="color:#22c55e">${formatPrice(d.executor_reward)}</span></p>
-            ${d.target_url ? `<p style="font-size:13px"><strong>URL:</strong> <a href="${d.target_url}" target="_blank" style="color:#60a5fa">Open Link ↗</a></p>` : ''}
+
+        <div
+          style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px"
+        >
+
+          <div
+            style="background:#0f172a;padding:12px;border-radius:8px"
+          >
+
+            <h4
+              style="color:#60a5fa;font-size:14px;margin-bottom:10px"
+            >
+              📋 Task Details
+            </h4>
+
+            <p style="font-size:13px">
+              <strong>Title:</strong>
+              ${d.task_title || 'N/A'}
+              <span style="color:#94a3b8">
+                #${d.task_id || ''}
+              </span>
+            </p>
+
+            <p style="font-size:13px">
+              <strong>Creator:</strong>
+              @${d.creator_username || d.creator_telegram || 'N/A'}
+            </p>
+
+            <p style="font-size:13px">
+              <strong>Reward:</strong>
+              <span style="color:#22c55e">
+                ${formatPrice(d.executor_reward || d.payment_amount || 0)}
+              </span>
+            </p>
+
+            ${
+              d.target_url
+                ? `
+                  <p style="font-size:13px">
+                    <strong>URL:</strong>
+                    <a
+                      href="${d.target_url}"
+                      target="_blank"
+                      style="color:#60a5fa"
+                    >
+                      Open Link ↗
+                    </a>
+                  </p>
+                `
+                : ''
+            }
+
           </div>
-          
-          <div style="background:#0f172a;padding:12px;border-radius:8px">
-            <h4 style="color:#60a5fa;font-size:14px;margin-bottom:10px">👤 Executor Details</h4>
-            <p style="font-size:13px"><strong>Executor:</strong> @${d.executor_username || d.executor_telegram}</p>
-            <p style="font-size:13px"><strong>Submitted:</strong> ${formatDate(d.proof_submitted_at)}</p>
-            <p style="font-size:13px"><strong>Amount:</strong> <span style="color:#22c55e">${formatPrice(d.payment_amount)}</span></p>
+
+          <div
+            style="background:#0f172a;padding:12px;border-radius:8px"
+          >
+
+            <h4
+              style="color:#60a5fa;font-size:14px;margin-bottom:10px"
+            >
+              👤 Executor Details
+            </h4>
+
+            <p style="font-size:13px">
+              <strong>Executor:</strong>
+              @${d.executor_username || d.executor_telegram || 'N/A'}
+            </p>
+
+            <p style="font-size:13px">
+              <strong>Submitted:</strong>
+              ${d.proof_submitted_at
+                ? formatDate(d.proof_submitted_at)
+                : 'N/A'}
+            </p>
+
+            <p style="font-size:13px">
+              <strong>Amount:</strong>
+              <span style="color:#22c55e">
+                ${formatPrice(d.payment_amount || 0)}
+              </span>
+            </p>
+
           </div>
+
         </div>
-        
+
         <div style="margin-bottom:15px">
-          <h4 style="color:#94a3b8;font-size:13px;margin-bottom:5px">📄 Task Description:</h4>
-          <div style="background:#0f172a;padding:12px;border-radius:6px;color:#cbd5e1;font-size:13px;white-space:pre-wrap">${d.task_description || 'No description'}</div>
+
+          <h4
+            style="color:#94a3b8;font-size:13px;margin-bottom:5px"
+          >
+            📄 Task Description:
+          </h4>
+
+          <div
+            style="background:#0f172a;padding:12px;border-radius:6px;color:#cbd5e1;font-size:13px;white-space:pre-wrap"
+          >
+            ${d.task_description || 'No description'}
+          </div>
+
         </div>
-        
+
         <div style="margin-bottom:15px">
-          <h4 style="color:#94a3b8;font-size:13px;margin-bottom:5px">📤 Executor's Proof:</h4>
-          <div class="proof-content" style="margin:0;background:#0f172a;border:1px solid #475569">${d.executor_proof || '<span style="color:#ef4444">No proof</span>'}</div>
+
+          <h4
+            style="color:#94a3b8;font-size:13px;margin-bottom:5px"
+          >
+            📤 Executor's Proof:
+          </h4>
+
+          <div
+            class="proof-content"
+            style="margin:0;background:#0f172a;border:1px solid #475569"
+          >
+            ${d.executor_proof || '<span style="color:#ef4444">No proof</span>'}
+          </div>
+
         </div>
-        
+
         <div style="margin-bottom:15px">
-          <h4 style="color:#facc15;font-size:13px;margin-bottom:5px">⚠️ Dispute Reason:</h4>
-          <div style="background:#fef3c720;padding:12px;border-radius:6px;color:#facc15;font-size:13px;white-space:pre-wrap;border:1px solid #facc1540">${d.reason}</div>
+
+          <h4
+            style="color:#facc15;font-size:13px;margin-bottom:5px"
+          >
+            ⚠️ Dispute Reason:
+          </h4>
+
+          <div
+            style="background:#fef3c720;padding:12px;border-radius:6px;color:#facc15;font-size:13px;white-space:pre-wrap;border:1px solid #facc1540"
+          >
+            ${d.reason || 'No reason provided'}
+          </div>
+
         </div>
-        
-        <div class="proof-actions" style="border-top:1px solid #334155;padding-top:15px">
-          <button class="btn btn-primary btn-sm" onclick="openResolveModal(${d.dispute_id}, ${d.execution_id}, '${d.executor_proof?.replace(/'/g, "\\'") || ''}')">⚖️ Review & Resolve</button>
+
+        <div
+          class="proof-actions"
+          style="border-top:1px solid #334155;padding-top:15px"
+        >
+
+          <button
+            class="btn btn-primary btn-sm"
+            onclick="openResolveModal(
+              ${Number(d.dispute_id)},
+              ${Number(d.execution_id)},
+              '${(d.executor_proof || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/\r?\n/g, '\\n')}'
+            )"
+          >
+            ⚖️ Review & Resolve
+          </button>
+
         </div>
+
       </div>
+
     `).join('');
-    
+
   } catch (err) {
-    console.error('❌ loadDisputes:', err);
-    list.innerHTML = '<p class="alert alert-error">Failed to load disputes. Please refresh.</p>';
+
+    console.error(
+      '❌ loadDisputes:',
+      err
+    );
+
+    list.innerHTML =
+      '<p class="alert alert-error">Failed to load disputes. Please refresh.</p>';
   }
 }
 
-function openResolveModal(disputeId, executionId, proof = '') {
-  currentDispute = { id: disputeId, executionId, proof };
-  
-  document.getElementById('resolveDisputeId').textContent = disputeId;
-  document.getElementById('resolveDecision').value = 'executor';
-  document.getElementById('resolveNote').value = '';
-  
-  const proofContent = document.getElementById('resolveProofContent');
-  if (proofContent) {
-    if (proof && proof.trim()) {
-      proofContent.innerHTML = `
-        <div style="background:#0f172a;padding:12px;border-radius:6px;margin-bottom:15px">
-          <strong style="color:#94a3b8;font-size:13px">📤 Executor's Proof:</strong>
-          <p style="color:#cbd5e1;font-size:13px;white-space:pre-wrap;margin-top:5px">${proof}</p>
-        </div>
-      `;
-    } else {
-      proofContent.innerHTML = '<p style="color:#ef4444">⚠️ No proof available</p>';
-    }
-  }
-  
-  openModal('resolveModal');
-}
-
-async function submitResolution() {
-  const payout = document.getElementById('resolveDecision').value;
-  const resolution = document.getElementById('resolveNote').value || 'Resolved by admin';
-  
-  if (!currentDispute) {
-    showAlert('⚠️ No dispute selected', 'error');
-    return;
-  }
-  
-  try {
-    const res = await fetch(
-  `${API}/api/admin/task-disputes/${currentDispute.id}/resolve?admin_id=${REQUIRED_ADMIN_ID}`,
-  {
-    method: 'POST',
-
-    headers: {
-      'Content-Type': 'application/json'
-    },
-
-    body: JSON.stringify({
-
-      payout_to: payout,
-
-      resolution: resolution
-
-    })
-
-  }
-);
-    const data = await res.json();
-    
-    if (data.success) {
-      showAlert('✅ Dispute resolved', 'success');
-      closeModal('resolveModal');
-      loadDisputes();
-      loadDashboardStats();
-    } else {
-      showAlert('❌ ' + data.message, 'error');
-    }
-  } catch (err) {
-    showAlert('⚠️ Connection error', 'error');
-    console.error('❌ submitResolution:', err);
-  }
-}
-// ✅ دالة مساعدة لعرض تفاصيل المهمة الكاملة
-function viewTaskDetail(taskId) {
-  window.open(`/tasks.html?user_id=${REQUIRED_ADMIN_ID}#task-${taskId}`, '_blank');
-}
 
 // ================= RESOLVE MODAL =================
 
-function openResolveModal(disputeId, executionId, proof = '') {
-  currentDispute = { id: disputeId, executionId, proof };
-  
-  document.getElementById('resolveDisputeId').textContent = disputeId;
-  document.getElementById('resolveDecision').value = 'executor';
-  document.getElementById('resolveNote').value = '';
-  
-  // ✅ عرض الإثبات داخل المودال
-  const proofContent = document.getElementById('resolveProofContent');
+function openResolveModal(
+  disputeId,
+  executionId,
+  proof = ''
+) {
+
+  currentDispute = {
+    id: Number(disputeId),
+    executionId: Number(executionId),
+    proof: proof
+  };
+
+  const disputeIdEl =
+    document.getElementById('resolveDisputeId');
+
+  if (disputeIdEl) {
+    disputeIdEl.textContent =
+      disputeId;
+  }
+
+  const decisionEl =
+    document.getElementById('resolveDecision');
+
+  if (decisionEl) {
+    decisionEl.value = 'executor';
+  }
+
+  const noteEl =
+    document.getElementById('resolveNote');
+
+  if (noteEl) {
+    noteEl.value = '';
+  }
+
+  const proofContent =
+    document.getElementById('resolveProofContent');
+
   if (proofContent) {
+
     if (proof && proof.trim()) {
+
       proofContent.innerHTML = `
-        <div style="background:#0f172a;padding:12px;border-radius:6px;margin-bottom:15px">
-          <strong style="color:#94a3b8;font-size:13px">📤 Executor's Proof:</strong>
-          <p style="color:#cbd5e1;font-size:13px;white-space:pre-wrap;margin-top:5px">${proof}</p>
+
+        <div
+          style="background:#0f172a;padding:12px;border-radius:6px;margin-bottom:15px"
+        >
+
+          <strong
+            style="color:#94a3b8;font-size:13px"
+          >
+            📤 Executor's Proof:
+          </strong>
+
+          <p
+            style="color:#cbd5e1;font-size:13px;white-space:pre-wrap;margin-top:5px"
+          >
+            ${proof}
+          </p>
+
         </div>
+
       `;
+
     } else {
-      proofContent.innerHTML = '<p style="color:#ef4444">⚠️ No proof available</p>';
+
+      proofContent.innerHTML =
+        '<p style="color:#ef4444">⚠️ No proof available</p>';
+
     }
   }
-  
+
   openModal('resolveModal');
+}
+
+
+// ================= SUBMIT RESOLUTION =================
+
+async function submitResolution() {
+
+  const decisionEl =
+    document.getElementById('resolveDecision');
+
+  const noteEl =
+    document.getElementById('resolveNote');
+
+  const payout =
+    decisionEl
+      ? decisionEl.value
+      : '';
+
+  const resolution =
+    noteEl && noteEl.value.trim()
+      ? noteEl.value.trim()
+      : 'Resolved by admin';
+
+  if (!currentDispute) {
+
+    showAlert(
+      '⚠️ No dispute selected',
+      'error'
+    );
+
+    return;
+  }
+
+  if (
+    payout !== 'executor' &&
+    payout !== 'creator'
+  ) {
+
+    showAlert(
+      '❌ Invalid resolution decision',
+      'error'
+    );
+
+    return;
+  }
+
+  try {
+
+    const res = await fetch(
+
+      `${API}/api/admin/task-disputes/${encodeURIComponent(
+        currentDispute.id
+      )}/resolve?admin_id=${encodeURIComponent(
+        REQUIRED_ADMIN_ID
+      )}`,
+
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+
+          // إرسال admin_id أيضًا داخل body
+          // حتى يكون متوافقًا مع أي تحقق موجود في السيرفر
+          admin_id: REQUIRED_ADMIN_ID,
+
+          payout_to: payout,
+
+          resolution: resolution
+
+        })
+      }
+
+    );
+
+    const data =
+      await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+
+      console.error(
+        '❌ Resolve HTTP error:',
+        res.status,
+        data
+      );
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          `Request failed (${res.status})`
+        ),
+        'error'
+      );
+
+      return;
+    }
+
+    if (data.success) {
+
+      showAlert(
+        '✅ Dispute resolved',
+        'success'
+      );
+
+      closeModal('resolveModal');
+
+      currentDispute = null;
+
+      await loadDisputes();
+
+      await loadDashboardStats();
+
+    } else {
+
+      showAlert(
+        '❌ ' +
+        (
+          data.message ||
+          'Failed to resolve dispute'
+        ),
+        'error'
+      );
+
+    }
+
+  } catch (err) {
+
+    console.error(
+      '❌ submitResolution:',
+      err
+    );
+
+    showAlert(
+      '⚠️ Connection error',
+      'error'
+    );
+  }
+}
+
+
+// ================= VIEW TASK DETAIL =================
+
+function viewTaskDetail(taskId) {
+
+  window.open(
+    `/tasks.html?user_id=${encodeURIComponent(
+      REQUIRED_ADMIN_ID
+    )}#task-${encodeURIComponent(taskId)}`,
+    '_blank'
+  );
 }
 // ================= COMMISSION STATS =================
 async function loadCommissionStats() {
