@@ -3938,12 +3938,12 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
       }, 403);
     }
 
-    if (execution.status !== 'pending') {
+    if (execution.status !== 'rejected') {
       await client.query('ROLLBACK');
 
       return c.json({
         success: false,
-        message: "Only pending executions can be disputed"
+        message: "Only rejected executions can be disputed"
       }, 400);
     }
 
