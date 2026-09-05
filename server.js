@@ -3664,6 +3664,9 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
 
     const { user_id, reason } = await c.req.json();
 
+    // ==========================================
+    // 🔐 Validate user
+    // ==========================================
     if (!user_id || !/^\d+$/.test(user_id.toString())) {
       return c.json({
         success: false,
@@ -3671,6 +3674,9 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
       }, 400);
     }
 
+    // ==========================================
+    // 📝 Validate rejection reason
+    // ==========================================
     if (!reason || reason.trim().length < 20) {
       return c.json({
         success: false,
@@ -3707,8 +3713,14 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
       }, 404);
     }
 
+    const taskRow = task.rows[0];
+
+    // ==========================================
+    // 👤 Verify task creator
+    // ==========================================
     if (
-      task.rows[0].creator_id?.toString() !== user_id.toString()
+      taskRow.creator_id?.toString() !==
+      user_id.toString()
     ) {
       await client.query('ROLLBACK');
 
@@ -3729,11 +3741,11 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
         executor_id,
         payment_amount,
         commission_amount,
-        status
+        status,
+        rejected_at
       FROM task_executions
       WHERE id = $1::integer
         AND task_id = $2::integer
-        AND status = 'pending'
       FOR UPDATE
       `,
       [proofId, taskId]
@@ -3744,27 +3756,46 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
 
       return c.json({
         success: false,
-        message: "Execution not found or already processed"
+        message: "Execution not found"
       }, 404);
     }
 
+    const execution = exec.rows[0];
+
+    // ==========================================
+    // ✅ Only pending can be rejected
+    // ==========================================
+    if (execution.status !== 'pending') {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Only pending executions can be rejected"
+      }, 400);
+    }
+
+    // ==========================================
+    // 💰 Validate execution payment data
+    // ==========================================
     const paymentAmount = parseFloat(
-      exec.rows[0].payment_amount || 0
+      execution.payment_amount || 0
     );
 
     const adminCommission = parseFloat(
-      exec.rows[0].commission_amount ??
+      execution.commission_amount ??
       (paymentAmount * 0.25)
     );
 
-    const totalCost = paymentAmount + adminCommission;
+    const totalCost =
+      paymentAmount + adminCommission;
 
     if (
       !Number.isFinite(paymentAmount) ||
       paymentAmount <= 0 ||
       !Number.isFinite(adminCommission) ||
       adminCommission < 0 ||
-      !Number.isFinite(totalCost)
+      !Number.isFinite(totalCost) ||
+      totalCost <= 0
     ) {
       await client.query('ROLLBACK');
 
@@ -3775,19 +3806,46 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
     }
 
     // ==========================================
+    // 💰 Verify reservation still exists
+    //
+    // spent already contains this reservation.
+    // DO NOT release it on rejection.
+    // ==========================================
+    if (
+      !Number.isFinite(parseFloat(taskRow.spent || 0)) ||
+      parseFloat(taskRow.spent || 0) < totalCost
+    ) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Reserved task funds are insufficient"
+      }, 500);
+    }
+
+    // ==========================================
     // ❌ Reject execution
+    //
+    // IMPORTANT:
+    // - Keep the reservation
+    // - Record rejected_at
+    // - Give executor 24 hours to dispute
     // ==========================================
     const rejected = await client.query(
       `
       UPDATE task_executions
       SET
         status = 'rejected',
+        rejected_at = NOW(),
         reviewed_at = NOW(),
         reviewed_by = $1::bigint,
         rejection_reason = $2
       WHERE id = $3::integer
         AND status = 'pending'
-      RETURNING id
+      RETURNING
+        id,
+        status,
+        rejected_at
       `,
       [
         user_id,
@@ -3806,43 +3864,25 @@ app.post('/api/tasks/:id/proofs/:proofId/reject', async (c) => {
     }
 
     // ==========================================
-    // 🔓 Release reserved funds
+    // 🔒 IMPORTANT
     //
-    // We reduce spent because spent contains
-    // the reservation.
+    // DO NOT modify tasks.spent here.
+    //
+    // The reserved amount remains locked for
+    // the 24-hour dispute period.
     // ==========================================
-    const released = await client.query(
-      `
-      UPDATE tasks
-      SET spent = GREATEST(
-        0,
-        COALESCE(spent, 0) - $1
-      )
-      WHERE id = $2::integer
-        AND COALESCE(spent, 0) >= $1
-      RETURNING budget, spent
-      `,
-      [
-        totalCost,
-        taskId
-      ]
-    );
-
-    if (released.rows.length === 0) {
-      await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: "Unable to release reserved task funds"
-      }, 500);
-    }
 
     await client.query('COMMIT');
 
     return c.json({
       success: true,
-      message: "Proof rejected and reserved funds released",
-      released_amount: totalCost.toFixed(6)
+      message: "Proof rejected. Reserved funds remain locked for 24 hours for possible dispute.",
+      status: "rejected",
+      rejected_at: rejected.rows[0].rejected_at,
+      dispute_deadline: new Date(
+        new Date(rejected.rows[0].rejected_at).getTime() +
+        24 * 60 * 60 * 1000
+      ).toISOString()
     });
 
   } catch (err) {
@@ -3876,6 +3916,9 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
 
     const { user_id, reason } = await c.req.json();
 
+    // ==========================================
+    // 🔐 Validate user
+    // ==========================================
     if (
       !user_id ||
       !/^\d+$/.test(user_id.toString())
@@ -3886,7 +3929,13 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
       }, 400);
     }
 
-    if (!reason || reason.trim().length < 20) {
+    // ==========================================
+    // 📝 Validate dispute reason
+    // ==========================================
+    if (
+      !reason ||
+      reason.trim().length < 20
+    ) {
       return c.json({
         success: false,
         message: "Please provide a detailed reason (min 20 characters)"
@@ -3894,6 +3943,32 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     }
 
     await client.query('BEGIN');
+
+    // ==========================================
+    // 🔒 Lock task
+    // ==========================================
+    const task = await client.query(
+      `
+      SELECT
+        id,
+        budget,
+        spent
+      FROM tasks
+      WHERE id = $1::integer
+        AND deleted_at IS NULL
+      FOR UPDATE
+      `,
+      [taskId]
+    );
+
+    if (task.rows.length === 0) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Task not found"
+      }, 404);
+    }
 
     // ==========================================
     // 🔒 Lock execution
@@ -3906,7 +3981,8 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
         executor_id,
         payment_amount,
         commission_amount,
-        status
+        status,
+        rejected_at
       FROM task_executions
       WHERE id = $1::integer
         AND task_id = $2::integer
@@ -3926,6 +4002,9 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
 
     const execution = exec.rows[0];
 
+    // ==========================================
+    // 👤 Verify executor
+    // ==========================================
     if (
       execution.executor_id?.toString() !==
       user_id.toString()
@@ -3938,6 +4017,9 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
       }, 403);
     }
 
+    // ==========================================
+    // ⚠️ Only rejected executions can be disputed
+    // ==========================================
     if (execution.status !== 'rejected') {
       await client.query('ROLLBACK');
 
@@ -3948,11 +4030,129 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     }
 
     // ==========================================
+    // ⏰ rejected_at must exist
+    // ==========================================
+    if (!execution.rejected_at) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Dispute deadline information is unavailable"
+      }, 500);
+    }
+
+    // ==========================================
+    // ⏰ 24-hour dispute window
+    // ==========================================
+    const rejectedAt = new Date(execution.rejected_at);
+    const now = new Date();
+
+    const disputeDeadline =
+      new Date(
+        rejectedAt.getTime() +
+        24 * 60 * 60 * 1000
+      );
+
+    // ==========================================
+    // ⏰ Dispute period expired
+    // ==========================================
+    if (now >= disputeDeadline) {
+
+      // ==========================================
+      // 💰 Calculate reserved amount
+      // ==========================================
+      const paymentAmount = parseFloat(
+        execution.payment_amount || 0
+      );
+
+      const adminCommission = parseFloat(
+        execution.commission_amount ??
+        (paymentAmount * 0.25)
+      );
+
+      const totalCost =
+        paymentAmount + adminCommission;
+
+      if (
+        !Number.isFinite(paymentAmount) ||
+        paymentAmount <= 0 ||
+        !Number.isFinite(adminCommission) ||
+        adminCommission < 0 ||
+        !Number.isFinite(totalCost) ||
+        totalCost <= 0
+      ) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: "Invalid execution payment data"
+        }, 500);
+      }
+
+      // ==========================================
+      // 🔓 Final rejection → release reservation
+      // ==========================================
+      const released = await client.query(
+        `
+        UPDATE tasks
+        SET spent = GREATEST(
+          0,
+          COALESCE(spent, 0) - $1
+        )
+        WHERE id = $2::integer
+          AND COALESCE(spent, 0) >= $1
+        RETURNING
+          budget,
+          spent
+        `,
+        [
+          totalCost,
+          taskId
+        ]
+      );
+
+      if (released.rows.length === 0) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: "Unable to release reserved task funds"
+        }, 500);
+      }
+
+      // ==========================================
+      // ✅ Keep execution rejected
+      // ==========================================
+      await client.query(
+        `
+        UPDATE task_executions
+        SET
+          status = 'rejected',
+          reviewed_at = COALESCE(reviewed_at, NOW())
+        WHERE id = $1::integer
+          AND status = 'rejected'
+        `,
+        [proofId]
+      );
+
+      await client.query('COMMIT');
+
+      return c.json({
+        success: false,
+        message: "The 24-hour dispute period has expired. The rejection is now final.",
+        status: "rejected",
+        final: true
+      }, 400);
+    }
+
+    // ==========================================
     // 🚫 Prevent duplicate open dispute
     // ==========================================
     const existingDispute = await client.query(
       `
-      SELECT id
+      SELECT
+        id,
+        status
       FROM task_disputes
       WHERE execution_id = $1
         AND status = 'open'
@@ -3971,10 +4171,60 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     }
 
     // ==========================================
+    // 💰 Verify reservation is still present
+    //
+    // We DO NOT add to spent here.
+    // It was already reserved at Apply.
+    // ==========================================
+    const paymentAmount = parseFloat(
+      execution.payment_amount || 0
+    );
+
+    const adminCommission = parseFloat(
+      execution.commission_amount ??
+      (paymentAmount * 0.25)
+    );
+
+    const totalCost =
+      paymentAmount + adminCommission;
+
+    if (
+      !Number.isFinite(paymentAmount) ||
+      paymentAmount <= 0 ||
+      !Number.isFinite(adminCommission) ||
+      adminCommission < 0 ||
+      !Number.isFinite(totalCost) ||
+      totalCost <= 0
+    ) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Invalid execution payment data"
+      }, 500);
+    }
+
+    const currentSpent =
+      parseFloat(task.rows[0].spent || 0);
+
+    if (
+      !Number.isFinite(currentSpent) ||
+      currentSpent < totalCost
+    ) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Reserved task funds are insufficient for this dispute"
+      }, 500);
+    }
+
+    // ==========================================
     // ⚠️ Create dispute
     //
-    // Funds are already reserved in tasks.spent.
-    // Do NOT change budget/spent here.
+    // IMPORTANT:
+    // Funds remain reserved.
+    // Do NOT change tasks.spent.
     // ==========================================
     const dispute = await client.query(
       `
@@ -4001,14 +4251,25 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     // ==========================================
     // 🔄 Mark execution as disputed
     // ==========================================
-    await client.query(
+    const updatedExecution = await client.query(
       `
       UPDATE task_executions
       SET status = 'disputed'
       WHERE id = $1::integer
+        AND status = 'rejected'
+      RETURNING id, status
       `,
       [proofId]
     );
+
+    if (updatedExecution.rows.length === 0) {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: "Execution status changed before dispute could be created"
+      }, 409);
+    }
 
     await client.query('COMMIT');
 
@@ -4040,8 +4301,10 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
 
     return c.json({
       success: true,
-      message: "Dispute created - funds remain reserved for admin review",
-      dispute_id: dispute.rows[0].id
+      message: "Dispute created successfully. Funds remain reserved for admin review.",
+      status: "disputed",
+      dispute_id: dispute.rows[0].id,
+      dispute_deadline: disputeDeadline.toISOString()
     });
 
   } catch (err) {
@@ -4050,7 +4313,10 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
       await client.query('ROLLBACK');
     } catch (_) {}
 
-    console.error('❌ Create dispute:', err);
+    console.error(
+      '❌ /api/tasks/:id/proofs/:proofId/dispute:',
+      err
+    );
 
     return c.json({
       success: false,
@@ -4061,7 +4327,6 @@ app.post('/api/tasks/:id/proofs/:proofId/dispute', async (c) => {
     client.release();
   }
 });
-
 // ======================= 💰 FUND & WITHDRAW =======================
 app.post('/api/tasks/:id/fund', async (c) => {
   const client = await pool.connect();
@@ -4398,6 +4663,9 @@ app.post(
 
       const adminId = c.get('adminId');
 
+      // ==========================================
+      // 🔐 Validate dispute ID
+      // ==========================================
       const id = Number(disputeId);
 
       if (
@@ -4410,6 +4678,9 @@ app.post(
         }, 400);
       }
 
+      // ==========================================
+      // ⚖️ Validate admin decision
+      // ==========================================
       if (
         payout_to !== 'executor' &&
         payout_to !== 'creator'
@@ -4418,6 +4689,19 @@ app.post(
           success: false,
           message: '❌ Invalid payout decision'
         }, 400);
+      }
+
+      // ==========================================
+      // 🔐 Validate admin ID
+      // ==========================================
+      if (
+        !adminId ||
+        !/^\d+$/.test(adminId.toString())
+      ) {
+        return c.json({
+          success: false,
+          message: '❌ Invalid admin ID'
+        }, 403);
       }
 
       await client.query('BEGIN');
@@ -4437,6 +4721,7 @@ app.post(
           te.payment_amount,
           te.commission_amount,
           te.status AS execution_status,
+          te.rejected_at,
 
           t.creator_id,
           t.budget,
@@ -4450,7 +4735,7 @@ app.post(
         INNER JOIN tasks t
           ON te.task_id = t.id
 
-        WHERE td.id = $1
+        WHERE td.id = $1::integer
           AND td.status = 'open'
 
         FOR UPDATE OF td, te, t
@@ -4468,8 +4753,7 @@ app.post(
         }, 404);
       }
 
-      const dispute =
-        disputeResult.rows[0];
+      const dispute = disputeResult.rows[0];
 
       // ==========================================
       // 🔒 Validate execution state
@@ -4494,8 +4778,6 @@ app.post(
         dispute.payment_amount || 0
       );
 
-      // Same commission logic as task creation:
-      // stored commission first, otherwise 25%.
       const commissionAmount = parseFloat(
         dispute.commission_amount ??
         (paymentAmount * 0.25)
@@ -4504,6 +4786,9 @@ app.post(
       const totalCost =
         paymentAmount + commissionAmount;
 
+      // ==========================================
+      // 🔐 Validate payment data
+      // ==========================================
       if (
         !Number.isFinite(paymentAmount) ||
         paymentAmount <= 0 ||
@@ -4522,12 +4807,19 @@ app.post(
       }
 
       // ==========================================
-      // 🔒 Verify reserved funds
+      // 💰 Verify reservation
       //
-      // Apply already added totalCost to spent.
+      // The reservation was created at APPLY.
+      // It remained reserved through:
+      //
+      // applied → pending → rejected → disputed
+      //
+      // Therefore spent must still contain
+      // this execution's totalCost.
       // ==========================================
-      const currentSpent =
-        parseFloat(dispute.spent || 0);
+      const currentSpent = parseFloat(
+        dispute.spent || 0
+      );
 
       if (
         !Number.isFinite(currentSpent) ||
@@ -4544,7 +4836,7 @@ app.post(
       }
 
       // =================================================
-      // 👤 DECISION 1: PAY EXECUTOR
+      // 🟢 DECISION 1: PAY EXECUTOR
       // =================================================
       if (payout_to === 'executor') {
 
@@ -4578,10 +4870,7 @@ app.post(
         // ==========================================
         // 💰 Pay admin commission
         // ==========================================
-        if (
-          commissionAmount > 0 &&
-          adminId
-        ) {
+        if (commissionAmount > 0) {
 
           const adminUser =
             await client.query(
@@ -4611,6 +4900,9 @@ app.post(
 
         // ==========================================
         // ✅ Approve execution
+        //
+        // Reservation is consumed.
+        // DO NOT change tasks.spent.
         // ==========================================
         const approved =
           await client.query(
@@ -4623,7 +4915,7 @@ app.post(
               rejection_reason = NULL
             WHERE id = $2::integer
               AND status = 'disputed'
-            RETURNING id
+            RETURNING id, status
             `,
             [
               adminId,
@@ -4675,10 +4967,7 @@ app.post(
         // ==========================================
         // 📒 Admin commission earning
         // ==========================================
-        if (
-          commissionAmount > 0 &&
-          adminId
-        ) {
+        if (commissionAmount > 0) {
 
           await client.query(
             `
@@ -4710,21 +4999,25 @@ app.post(
         }
 
         // ==========================================
-        // ⚠️ DO NOT CHANGE tasks.spent
+        // 💰 IMPORTANT
         //
-        // The money was already reserved.
-        // The reservation is now consumed.
+        // DO NOT subtract from tasks.spent.
+        //
+        // The reserved amount is now consumed
+        // by the approved execution.
         // ==========================================
 
       }
 
       // =================================================
-      // 👤 DECISION 2: RETURN FUNDS TO TASK / CREATOR
+      // 🔴 DECISION 2: FAVOR CREATOR
       // =================================================
       else if (payout_to === 'creator') {
 
         // ==========================================
-        // ❌ Reject execution
+        // ❌ Final rejection
+        //
+        // The dispute is resolved against executor.
         // ==========================================
         const rejected =
           await client.query(
@@ -4732,12 +5025,13 @@ app.post(
             UPDATE task_executions
             SET
               status = 'rejected',
+              rejected_at = NULL,
               reviewed_at = NOW(),
               reviewed_by = $1::bigint,
               rejection_reason = $2
             WHERE id = $3::integer
               AND status = 'disputed'
-            RETURNING id
+            RETURNING id, status
             `,
             [
               adminId,
@@ -4757,29 +5051,25 @@ app.post(
         }
 
         // ==========================================
-        // 🔓 RELEASE RESERVED FUNDS
+        // 🔓 Release reservation back to task
         //
         // IMPORTANT:
-        // Do NOT:
-        // users.balance += totalCost
+        // DO NOT add money to creator users.balance.
         //
-        // Instead:
-        // tasks.spent -= totalCost
-        //
-        // This returns the money to the task's
+        // The amount returns to the task's
         // available budget.
         // ==========================================
         const released =
           await client.query(
             `
             UPDATE tasks
-            SET spent = GREATEST(
-              0,
+            SET spent =
               COALESCE(spent, 0) - $1
-            )
             WHERE id = $2::integer
               AND COALESCE(spent, 0) >= $1
-            RETURNING budget, spent
+            RETURNING
+              budget,
+              spent
             `,
             [
               totalCost,
@@ -4798,9 +5088,6 @@ app.post(
           }, 500);
         }
 
-        // ==========================================
-        // ❗ No users.balance update here
-        // ==========================================
       }
 
       // ==========================================
@@ -4836,13 +5123,16 @@ app.post(
         }, 409);
       }
 
+      // ==========================================
+      // ✅ Commit all database changes
+      // ==========================================
       await client.query('COMMIT');
 
       // ==========================================
       // 🤝 Referral commission
       //
-      // Keep your existing function.
-      // It handles the 3% referral.
+      // Keep the existing function.
+      // It contains your 3% referral logic.
       // ==========================================
       if (
         payout_to === 'executor' &&
@@ -4866,8 +5156,12 @@ app.post(
         }
       }
 
+      // ==========================================
+      // ✅ Success response
+      // ==========================================
       return c.json({
         success: true,
+
         message:
           payout_to === 'executor'
             ? '✅ Dispute resolved in favor of executor'
@@ -4877,10 +5171,13 @@ app.post(
           dispute_id: id,
           execution_id: dispute.execution_id,
           payout_to,
+
           payment_amount:
             paymentAmount.toFixed(6),
+
           commission_amount:
             commissionAmount.toFixed(6),
+
           total_cost:
             totalCost.toFixed(6)
         }
@@ -5459,9 +5756,161 @@ async function distributeReferralCommission(telegramId, earningAmount) {
     console.error("distributeReferralCommission error:", err);
   }
 }
+// =====================================================
+// ⏰ CLEANUP EXPIRED TASK REJECTIONS
+// Releases reserved funds after 24 hours when no dispute
+// was opened.
+// =====================================================
+async function cleanupExpiredTaskRejections() {
+  const client = await pool.connect();
 
+  try {
+    await client.query('BEGIN');
+
+    // ==================================================
+    // 🔒 Lock expired rejected executions together
+    // with their tasks
+    // ==================================================
+    const expired = await client.query(
+      `
+      SELECT
+        te.id,
+        te.task_id,
+        te.payment_amount,
+        te.commission_amount,
+        te.rejected_at,
+        t.spent
+      FROM task_executions te
+      INNER JOIN tasks t
+        ON t.id = te.task_id
+      WHERE te.status = 'rejected'
+        AND te.rejected_at IS NOT NULL
+        AND te.rejected_at <= NOW() - INTERVAL '24 hours'
+      FOR UPDATE OF te, t
+      `
+    );
+
+    let releasedCount = 0;
+    let releasedTotal = 0;
+
+    for (const execution of expired.rows) {
+
+      // ==============================================
+      // 💰 Calculate payment + commission
+      // ==============================================
+      const paymentAmount = parseFloat(
+        execution.payment_amount || 0
+      );
+
+      const commissionAmount = parseFloat(
+        execution.commission_amount ??
+        (paymentAmount * 0.25)
+      );
+
+      const totalCost =
+        paymentAmount + commissionAmount;
+
+      // ==============================================
+      // 🔐 Validate amounts
+      // ==============================================
+      if (
+        !Number.isFinite(paymentAmount) ||
+        paymentAmount <= 0 ||
+        !Number.isFinite(commissionAmount) ||
+        commissionAmount < 0 ||
+        !Number.isFinite(totalCost) ||
+        totalCost <= 0
+      ) {
+        console.error(
+          `❌ Invalid payment data for expired execution #${execution.id}`
+        );
+
+        continue;
+      }
+
+      // ==============================================
+      // 💰 Release reserved task funds
+      // ==============================================
+      const released = await client.query(
+        `
+        UPDATE tasks
+        SET spent =
+          COALESCE(spent, 0) - $1
+        WHERE id = $2::integer
+          AND COALESCE(spent, 0) >= $1
+        RETURNING spent
+        `,
+        [
+          totalCost,
+          execution.task_id
+        ]
+      );
+
+      if (released.rows.length === 0) {
+        console.error(
+          `❌ Could not release reservation for execution #${execution.id}`
+        );
+
+        continue;
+      }
+
+      releasedCount++;
+      releasedTotal += totalCost;
+
+      // ==============================================
+      // ✅ Mark rejection as finalized
+      //
+      // We keep status = rejected.
+      // Clearing rejected_at prevents the frontend
+      // from considering it inside the dispute window.
+      // ==============================================
+      await client.query(
+        `
+        UPDATE task_executions
+        SET
+          rejected_at = NULL
+        WHERE id = $1::integer
+          AND status = 'rejected'
+        `,
+        [execution.id]
+      );
+
+      console.log(
+        `✅ Expired rejection finalized: execution #${execution.id}, released ${totalCost}`
+      );
+    }
+
+    await client.query('COMMIT');
+
+    console.log(
+      `⏰ Cleanup completed: ${releasedCount} executions finalized, total released = ${releasedTotal.toFixed(6)}`
+    );
+
+    return {
+      success: true,
+      released_count: releasedCount,
+      released_total: releasedTotal
+    };
+
+  } catch (err) {
+
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+
+    console.error(
+      '❌ cleanupExpiredTaskRejections:',
+      err
+    );
+
+    throw err;
+
+  } finally {
+    client.release();
+  }
+}
 // =====================================================================
-// === نهاية ملف server.js (النسخة النهائية والمضمونة) ===
+// === نهاية ملف server.js ===
 // =====================================================================
 export default {
   fetch: async (request, env, ctx) => {
@@ -5469,123 +5918,730 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
+
     console.log(
-      "⏰ تشغيل مهمة الموافقة التلقائية على الإثباتات (Cron)..."
+      "⏰ تشغيل Cron: معالجة pending + rejected..."
     );
 
+    // ================================================================
+    // 🔐 Initialize database
+    // ================================================================
     try {
       initDb(env);
+    } catch (err) {
+      console.error(
+        "❌ Database initialization failed:",
+        err
+      );
+      return;
+    }
 
-      const client = await pool.connect();
+    // ================================================================
+    // 👤 System reviewer ID
+    //
+    // reviewed_by is BIGINT in task_executions.
+    // Therefore "auto" cannot be stored there.
+    //
+    // We use ADMIN_ID when available.
+    // Fallback = 0 because reviewed_by has no FK constraint.
+    // ================================================================
+    const configuredAdminId =
+      env?.ADMIN_ID?.toString().trim();
 
-      try {
-        const now = new Date();
+    const systemReviewerId =
+      configuredAdminId &&
+      /^\d+$/.test(configuredAdminId)
+        ? configuredAdminId
+        : "0";
 
-        const twentyFourHoursAgo = new Date(
-          now.getTime() - (24 * 60 * 60 * 1000)
-        );
+    const client = await pool.connect();
 
-        const { rows } = await client.query(`
+    try {
+
+      // ================================================================
+      // ⏰ Time reference
+      // ================================================================
+      const now = new Date();
+
+      const twentyFourHoursAgo = new Date(
+        now.getTime() -
+        (24 * 60 * 60 * 1000)
+      );
+
+      // ================================================================
+      // ================================================================
+      // 1️⃣ AUTO-APPROVE PENDING EXECUTIONS AFTER 24 HOURS
+      // ================================================================
+      // ================================================================
+
+      const { rows: pendingExecutions } =
+        await client.query(
+          `
           SELECT
             te.id,
             te.task_id,
             te.executor_id,
             te.payment_amount,
             te.commission_amount,
-            t.creator_id,
-            t.title AS task_title
+            te.status,
+            te.proof,
+            te.submitted_at,
+
+            t.budget,
+            t.spent,
+            t.deleted_at
+
           FROM task_executions te
-          JOIN tasks t ON t.id = te.task_id
+
+          INNER JOIN tasks t
+            ON t.id = te.task_id
+
           WHERE te.status = 'pending'
             AND te.proof IS NOT NULL
-            AND te.submitted_at < $1
+            AND te.submitted_at <= $1
             AND t.deleted_at IS NULL
-        `, [twentyFourHoursAgo]);
+          `,
+          [twentyFourHoursAgo]
+        );
 
-        for (const exec of rows) {
-          try {
-            await client.query('BEGIN');
+      let autoApprovedCount = 0;
 
-            await client.query(
-              `
-              UPDATE users
-              SET balance = COALESCE(balance, 0) + $1
-              WHERE telegram_id = $2
-              `,
-              [
-                exec.payment_amount,
-                exec.executor_id
-              ]
-            );
+      for (const exec of pendingExecutions) {
 
-            const totalCost =
-              parseFloat(exec.payment_amount) +
-              parseFloat(exec.commission_amount || 0);
+        try {
 
-            await client.query(
-              `
-              UPDATE tasks
-              SET spent = COALESCE(spent, 0) + $1
-              WHERE id = $2
-              `,
-              [
-                totalCost,
-                exec.task_id
-              ]
-            );
+          await client.query('BEGIN');
 
-            await client.query(
-              `
-              UPDATE task_executions
-              SET
-                status = 'approved',
-                reviewed_at = NOW(),
-                reviewed_by = 'auto'
-              WHERE id = $1
-              `,
-              [exec.id]
-            );
+          // ============================================================
+          // 🔒 Lock execution + task again
+          // ============================================================
+          const locked = await client.query(
+            `
+            SELECT
+              te.id,
+              te.task_id,
+              te.executor_id,
+              te.payment_amount,
+              te.commission_amount,
+              te.status,
+              te.proof,
+              te.submitted_at,
 
-            await client.query('COMMIT');
+              t.budget,
+              t.spent
 
-            console.log(
-              `✅ Auto-approved execution ${exec.id} for task ${exec.task_id}`
-            );
+            FROM task_executions te
 
-            if (typeof distributeReferralCommission === 'function') {
-              await distributeReferralCommission(
-                exec.executor_id,
-                exec.payment_amount
-              );
-            }
+            INNER JOIN tasks t
+              ON t.id = te.task_id
 
-          } catch (err) {
-            try {
-              await client.query('ROLLBACK');
-            } catch {}
+            WHERE te.id = $1::integer
+              AND t.deleted_at IS NULL
+
+            FOR UPDATE OF te, t
+            `,
+            [exec.id]
+          );
+
+          if (locked.rows.length === 0) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+
+          const execution = locked.rows[0];
+
+          // ============================================================
+          // 🔐 Verify status again after locking
+          // ============================================================
+          if (
+            execution.status !== 'pending' ||
+            !execution.proof
+          ) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+
+          // ============================================================
+          // 💰 Payment calculation
+          // ============================================================
+          const paymentAmount = parseFloat(
+            execution.payment_amount || 0
+          );
+
+          const commissionAmount = parseFloat(
+            execution.commission_amount ??
+            (paymentAmount * 0.25)
+          );
+
+          const totalCost =
+            paymentAmount +
+            commissionAmount;
+
+          // ============================================================
+          // 🔐 Validate financial values
+          // ============================================================
+          if (
+            !Number.isFinite(paymentAmount) ||
+            paymentAmount <= 0 ||
+            !Number.isFinite(commissionAmount) ||
+            commissionAmount < 0 ||
+            !Number.isFinite(totalCost) ||
+            totalCost <= 0
+          ) {
+
+            await client.query('ROLLBACK');
 
             console.error(
-              `❌ Auto-approve failed for execution ${exec.id}:`,
-              err.message
+              `❌ Invalid payment data for execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 💰 Verify reservation
+          //
+          // IMPORTANT:
+          //
+          // APPLY already reserved totalCost by increasing tasks.spent.
+          //
+          // Therefore AUTO-APPROVE must NOT do:
+          //
+          // spent = spent + totalCost
+          //
+          // because that would double-count the reservation.
+          // ============================================================
+          const currentSpent = parseFloat(
+            execution.spent || 0
+          );
+
+          if (
+            !Number.isFinite(currentSpent) ||
+            currentSpent < totalCost
+          ) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Insufficient reserved funds for auto-approval ` +
+              `execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 👤 Pay executor
+          // ============================================================
+          const executor = await client.query(
+            `
+            UPDATE users
+            SET balance =
+              COALESCE(balance, 0) + $1
+            WHERE telegram_id = $2::bigint
+            RETURNING balance
+            `,
+            [
+              paymentAmount,
+              execution.executor_id
+            ]
+          );
+
+          if (executor.rows.length === 0) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Executor user not found for execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 💰 Pay admin commission
+          // ============================================================
+          if (commissionAmount > 0) {
+
+            const adminUser = await client.query(
+              `
+              UPDATE users
+              SET balance =
+                COALESCE(balance, 0) + $1
+              WHERE telegram_id = $2::bigint
+              RETURNING balance
+              `,
+              [
+                commissionAmount,
+                systemReviewerId
+              ]
+            );
+
+            if (adminUser.rows.length === 0) {
+
+              await client.query('ROLLBACK');
+
+              console.error(
+                `❌ Admin user not found for auto-approval ` +
+                `execution #${execution.id} ` +
+                `(admin_id=${systemReviewerId})`
+              );
+
+              continue;
+            }
+          }
+
+          // ============================================================
+          // ✅ Approve execution
+          // ============================================================
+          const approved = await client.query(
+            `
+            UPDATE task_executions
+            SET
+              status = 'approved',
+              reviewed_at = NOW(),
+              reviewed_by = $1::bigint,
+              rejection_reason = NULL
+            WHERE id = $2::integer
+              AND status = 'pending'
+            RETURNING id, status
+            `,
+            [
+              systemReviewerId,
+              execution.id
+            ]
+          );
+
+          if (approved.rows.length === 0) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Execution #${execution.id} changed before auto-approval`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 📒 Executor earning
+          // ============================================================
+          await client.query(
+            `
+            INSERT INTO earnings (
+              user_id,
+              source,
+              amount,
+              description,
+              video_id,
+              watched_seconds,
+              created_at
+            )
+            VALUES (
+              $1,
+              'task_execution',
+              $2,
+              $3,
+              NULL,
+              NULL,
+              NOW()
+            )
+            `,
+            [
+              execution.executor_id,
+              paymentAmount,
+              `Task #${execution.task_id} execution reward (100%)`
+            ]
+          );
+
+          // ============================================================
+          // 📒 Admin commission earning
+          // ============================================================
+          if (commissionAmount > 0) {
+
+            await client.query(
+              `
+              INSERT INTO earnings (
+                user_id,
+                source,
+                amount,
+                description,
+                video_id,
+                watched_seconds,
+                created_at
+              )
+              VALUES (
+                $1,
+                'task_commission',
+                $2,
+                $3,
+                NULL,
+                NULL,
+                NOW()
+              )
+              `,
+              [
+                systemReviewerId,
+                commissionAmount,
+                `Commission from task #${execution.task_id} (25%)`
+              ]
             );
           }
-        }
 
-        if (rows.length > 0) {
+          // ============================================================
+          // ✅ IMPORTANT:
+          //
+          // DO NOT UPDATE tasks.spent.
+          //
+          // The reservation already exists.
+          // It is now consumed by the approved execution.
+          // ============================================================
+
+          await client.query('COMMIT');
+
+          autoApprovedCount++;
+
           console.log(
-            `✅ Auto-approved ${rows.length} pending proof(s) after 24 hours`
+            `✅ Auto-approved execution #${execution.id} ` +
+            `for task #${execution.task_id} | ` +
+            `reward=${paymentAmount.toFixed(6)} | ` +
+            `commission=${commissionAmount.toFixed(6)}`
+          );
+
+          // ============================================================
+          // 🤝 Referral commission 3%
+          //
+          // Keep your existing function.
+          // ============================================================
+          if (
+            typeof distributeReferralCommission === 'function'
+          ) {
+
+            try {
+
+              await distributeReferralCommission(
+                execution.executor_id,
+                paymentAmount
+              );
+
+            } catch (refErr) {
+
+              console.error(
+                `⚠️ Referral commission failed for auto-approved ` +
+                `execution #${execution.id}:`,
+                refErr.message
+              );
+            }
+          }
+
+        } catch (err) {
+
+          try {
+            await client.query('ROLLBACK');
+          } catch (_) {}
+
+          console.error(
+            `❌ Auto-approve failed for execution #${exec.id}:`,
+            err.message
           );
         }
-
-      } finally {
-        client.release();
       }
 
+      // ================================================================
+      // ================================================================
+      // 2️⃣ FINALIZE REJECTED EXECUTIONS AFTER 24 HOURS
+      // ================================================================
+      // ================================================================
+      //
+      // rejected + rejected_at older than 24h
+      //
+      // means executor did NOT open a dispute.
+      //
+      // Therefore:
+      //
+      // 1. Release reservation from tasks.spent
+      // 2. Keep execution status = rejected
+      // 3. Clear rejected_at so frontend treats it as final
+      //
+      // ================================================================
+
+      const { rows: expiredRejected } =
+        await client.query(
+          `
+          SELECT
+            te.id,
+            te.task_id,
+            te.executor_id,
+            te.payment_amount,
+            te.commission_amount,
+            te.status,
+            te.rejected_at,
+
+            t.budget,
+            t.spent
+
+          FROM task_executions te
+
+          INNER JOIN tasks t
+            ON t.id = te.task_id
+
+          WHERE te.status = 'rejected'
+            AND te.rejected_at IS NOT NULL
+            AND te.rejected_at <= NOW() - INTERVAL '24 hours'
+            AND t.deleted_at IS NULL
+          `
+        );
+
+      let finalizedRejectedCount = 0;
+      let releasedTotal = 0;
+
+      for (const exec of expiredRejected) {
+
+        try {
+
+          await client.query('BEGIN');
+
+          // ============================================================
+          // 🔒 Lock execution + task
+          // ============================================================
+          const locked = await client.query(
+            `
+            SELECT
+              te.id,
+              te.task_id,
+              te.payment_amount,
+              te.commission_amount,
+              te.status,
+              te.rejected_at,
+
+              t.budget,
+              t.spent
+
+            FROM task_executions te
+
+            INNER JOIN tasks t
+              ON t.id = te.task_id
+
+            WHERE te.id = $1::integer
+
+            FOR UPDATE OF te, t
+            `,
+            [exec.id]
+          );
+
+          if (locked.rows.length === 0) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+
+          const execution = locked.rows[0];
+
+          // ============================================================
+          // 🔐 Verify rejection is still eligible
+          // ============================================================
+          if (
+            execution.status !== 'rejected' ||
+            !execution.rejected_at
+          ) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+
+          // ============================================================
+          // ⏰ Verify 24 hours again
+          // ============================================================
+          const rejectedAt = new Date(
+            execution.rejected_at
+          );
+
+          const deadline = new Date(
+            rejectedAt.getTime() +
+            (24 * 60 * 60 * 1000)
+          );
+
+          if (new Date() < deadline) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+
+          // ============================================================
+          // 💰 Calculate reserved amount
+          // ============================================================
+          const paymentAmount = parseFloat(
+            execution.payment_amount || 0
+          );
+
+          const commissionAmount = parseFloat(
+            execution.commission_amount ??
+            (paymentAmount * 0.25)
+          );
+
+          const totalCost =
+            paymentAmount +
+            commissionAmount;
+
+          if (
+            !Number.isFinite(paymentAmount) ||
+            paymentAmount <= 0 ||
+            !Number.isFinite(commissionAmount) ||
+            commissionAmount < 0 ||
+            !Number.isFinite(totalCost) ||
+            totalCost <= 0
+          ) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Invalid reserved amount for expired ` +
+              `rejected execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 🔐 Verify reservation exists
+          // ============================================================
+          const currentSpent = parseFloat(
+            execution.spent || 0
+          );
+
+          if (
+            !Number.isFinite(currentSpent) ||
+            currentSpent < totalCost
+          ) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Reserved funds insufficient for expired ` +
+              `rejected execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // 🔓 Release reservation
+          //
+          // IMPORTANT:
+          // The money returns to TASK AVAILABLE BUDGET.
+          //
+          // We do NOT:
+          //
+          // users.balance += totalCost
+          //
+          // ============================================================
+          const released = await client.query(
+            `
+            UPDATE tasks
+            SET spent =
+              COALESCE(spent, 0) - $1
+            WHERE id = $2::integer
+              AND COALESCE(spent, 0) >= $1
+            RETURNING
+              id,
+              budget,
+              spent
+            `,
+            [
+              totalCost,
+              execution.task_id
+            ]
+          );
+
+          if (released.rows.length === 0) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Failed to release reservation for ` +
+              `execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          // ============================================================
+          // ✅ Make rejection FINAL
+          //
+          // Keep:
+          // status = rejected
+          //
+          // Clear:
+          // rejected_at
+          //
+          // This tells frontend that the 24-hour dispute
+          // window has ended.
+          // ============================================================
+          const finalized = await client.query(
+            `
+            UPDATE task_executions
+            SET
+              rejected_at = NULL
+            WHERE id = $1::integer
+              AND status = 'rejected'
+            RETURNING
+              id,
+              status
+            `,
+            [execution.id]
+          );
+
+          if (finalized.rows.length === 0) {
+
+            await client.query('ROLLBACK');
+
+            console.error(
+              `❌ Failed to finalize rejected execution #${execution.id}`
+            );
+
+            continue;
+          }
+
+          await client.query('COMMIT');
+
+          finalizedRejectedCount++;
+          releasedTotal += totalCost;
+
+          console.log(
+            `✅ Final rejected execution #${execution.id} | ` +
+            `task #${execution.task_id} | ` +
+            `released=${totalCost.toFixed(6)}`
+          );
+
+        } catch (err) {
+
+          try {
+            await client.query('ROLLBACK');
+          } catch (_) {}
+
+          console.error(
+            `❌ Rejected cleanup failed for execution #${exec.id}:`,
+            err.message
+          );
+        }
+      }
+
+      // ================================================================
+      // 📊 Final Cron summary
+      // ================================================================
+      console.log(
+        `⏰ Cron completed | ` +
+        `autoApproved=${autoApprovedCount} | ` +
+        `finalizedRejected=${finalizedRejectedCount} | ` +
+        `released=${releasedTotal.toFixed(6)}`
+      );
+
     } catch (err) {
+
       console.error(
-        '❌ Auto-approve cron error:',
+        '❌ Scheduled task error:',
         err.message
       );
+
+    } finally {
+      client.release();
     }
   }
 };
