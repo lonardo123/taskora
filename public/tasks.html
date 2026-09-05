@@ -515,7 +515,7 @@ function calculateTotalCost() {
     const reward = parseFloat(document.getElementById('formReward').value) || 0.01;
     const budget = parseFloat(document.getElementById('formBudget').value) || 1.00;
     const executorReward = reward;
-    const adminCommission = reward * 0.20;
+    const adminCommission = reward * 0.25;
     const totalCostPerExecution = executorReward + adminCommission;
     document.getElementById('executorRewardDisplay').textContent = '$' + executorReward.toFixed(4);
     document.getElementById('adminCommissionDisplay').textContent = '$' + adminCommission.toFixed(4);
