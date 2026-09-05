@@ -1202,11 +1202,6 @@ async function copyToClipboard(text) {
   }
 }
 
-// ================= 📈 INVESTMENT PANEL =================
-function openInvestmentPanel() {
-  const url = `${API}/admin-investment.html?admin_id=${REQUIRED_ADMIN_ID}`;
-  window.open(url, '_blank', 'width=1200,height=800');
-}
 
 // ================= 🚀 TELEGRAM DEEP LINKS (Fallback) =================
 function openTelegramSection(command, hint) {
@@ -1462,516 +1457,132 @@ function closeApproveModal() {
 // =====================================================
 // ✅ تأكيد الموافقة على الإيداع
 // =====================================================
-async function confirmApproveDeposit(button) {
+async function confirmApproveDeposit() {
+  if (!pendingApproveData) return;
 
-  if (!pendingApproveData) {
+  const depositId = pendingApproveData.depositId;
+  const userId = pendingApproveData.userId;
+  const requestedAmount = pendingApproveData.requestedAmount;
+
+  const amountInput = document.getElementById('approveAmount');
+  const finalAmount = parseFloat(
+    amountInput?.value || requestedAmount
+  );
+
+  if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+    alert('Please enter a valid amount.');
     return;
   }
-
-
-  // ===================================================
-  // 💰 قراءة المبلغ النهائي
-  // ===================================================
-
-  const amountInput =
-    document.getElementById('modalFinalAmount');
-
-  const finalAmount =
-    parseFloat(
-      amountInput?.value
-    );
-
-
-  if (
-    !Number.isFinite(finalAmount) ||
-    finalAmount <= 0
-  ) {
-
-    showAlert(
-      '⚠️ يرجى إدخال مبلغ صحيح أكبر من 0',
-      'error'
-    );
-
-    return;
-  }
-
-
-  // ===================================================
-  // 🔒 تعطيل الزر أثناء المعالجة
-  // ===================================================
-
-  if (!button) {
-    button =
-      document.getElementById(
-        'confirmApproveDepositBtn'
-      );
-  }
-
-  let originalText = '';
-
-  if (button) {
-
-    originalText =
-      button.textContent;
-
-    button.disabled = true;
-
-    button.textContent =
-      '⏳ Processing...';
-  }
-
 
   try {
+    const response = await fetch(
+      `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/approve?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          admin_id: REQUIRED_ADMIN_ID,
+          user_id: userId,
+          final_amount: finalAmount
+        })
+      }
+    );
 
-    // =================================================
-    // 📡 إرسال الطلب للسيرفر
-    // =================================================
+    const data = await response.json();
 
-    const response =
-      await fetch(
-        `${API}/api/admin/deposits/${pendingApproveData.depositId}/approve`,
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-
-          body: JSON.stringify({
-
-            admin_id:
-              REQUIRED_ADMIN_ID,
-
-            user_id:
-              pendingApproveData.userId,
-
-            final_amount:
-              finalAmount
-
-          })
-        }
-      );
-
-
-    // =================================================
-    // 📥 قراءة الاستجابة
-    // =================================================
-
-    const data =
-      await response.json();
-
-
-    // =================================================
-    // ❌ HTTP Error
-    // =================================================
-
-    if (!response.ok) {
-
-      showAlert(
-        '❌ ' +
-        (
-          data.message ||
-          'Failed to approve deposit'
-        ),
-        'error'
-      );
-
-      return;
-    }
-
-
-    // =================================================
-    // ✅ نجاح
-    // =================================================
-
-    if (data.success) {
-
-      showAlert(
-        '✅ ' +
-        (
-          data.message ||
-          'Deposit approved successfully'
-        ),
-        'success'
-      );
-
-
-      // إغلاق المودال
-      closeApproveModal();
-
-
-      // تحديث الإيداعات
-      await loadDeposits();
-
-
-      // تحديث الإحصائيات
-      await loadDashboardStats();
-
-
-    } else {
-
-      showAlert(
-        '❌ ' +
-        (
-          data.message ||
-          'Failed to approve deposit'
-        ),
-        'error'
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message || 'Failed to approve deposit'
       );
     }
 
+    closeApproveModal();
 
-  } catch (err) {
+    await loadDeposits();
+    await loadDashboardStats();
 
+    alert(
+      data.message ||
+      'Deposit approved successfully.'
+    );
+
+  } catch (error) {
     console.error(
       '❌ confirmApproveDeposit:',
-      err
+      error
     );
 
-    showAlert(
-      '⚠️ Connection error. Please try again.',
-      'error'
+    alert(
+      error.message ||
+      'Failed to approve deposit.'
     );
-
-
-  } finally {
-
-    // =================================================
-    // 🔓 إعادة تفعيل الزر
-    // =================================================
-
-    if (button) {
-
-      button.disabled =
-        false;
-
-      button.textContent =
-        originalText ||
-        '✅ Confirm Approval';
-    }
   }
 }
-
-
 // =====================================================
-// 📦 متغير عالمي لبيانات الرفض
+// ✅ تأكيد الرفض على الإيداع
 // =====================================================
-let pendingReject = null;
+async function confirmReject() {
+  if (!pendingRejectData) return;
 
-
-// =====================================================
-// 🔓 فتح مودال رفض الإيداع
-// =====================================================
-function openRejectModal(
-  depositId,
-  userId
-) {
-
-  pendingReject = {
-    depositId,
-    userId
-  };
-
-
-  // ===================================================
-  // 📝 تعبئة بيانات المودال
-  // ===================================================
-
-  const rejectDepositId =
-    document.getElementById(
-      'rejectDepositId'
-    );
-
-  const rejectUserId =
-    document.getElementById(
-      'rejectUserId'
-    );
-
-  const rejectReason =
-    document.getElementById(
-      'rejectReason'
-    );
-
-
-  if (rejectDepositId) {
-
-    rejectDepositId.textContent =
-      depositId;
-  }
-
-
-  if (rejectUserId) {
-
-    rejectUserId.textContent =
-      userId || 'N/A';
-  }
-
-
-  if (rejectReason) {
-
-    rejectReason.value =
-      '';
-  }
-
-
-  // ===================================================
-  // 🔓 فتح المودال
-  // ===================================================
-
-  if (typeof openModal === 'function') {
-
-    openModal('rejectModal');
-
-  } else {
-
-    const modal =
-      document.getElementById(
-        'rejectModal'
-      );
-
-    if (modal) {
-      modal.style.display =
-        'flex';
-    }
-  }
-}
-
-
-// =====================================================
-// ❌ إغلاق مودال الرفض
-// =====================================================
-function closeRejectModal() {
-
-  if (typeof closeModal === 'function') {
-
-    closeModal('rejectModal');
-
-  } else {
-
-    const modal =
-      document.getElementById(
-        'rejectModal'
-      );
-
-    if (modal) {
-      modal.style.display =
-        'none';
-    }
-  }
-
-
-  pendingReject = null;
-
-
-  const reason =
-    document.getElementById(
-      'rejectReason'
-    );
-
-  if (reason) {
-    reason.value = '';
-  }
-}
-
-
-// =====================================================
-// ❌ تأكيد رفض الإيداع
-// =====================================================
-async function confirmReject(button) {
-
-  if (!pendingReject) {
-    return;
-  }
-
-
-  const {
-    depositId,
-    userId
-  } = pendingReject;
-
+  const depositId = pendingRejectData.depositId;
+  const userId = pendingRejectData.userId;
 
   const reasonInput =
-    document.getElementById(
-      'rejectReason'
-    );
-
+    document.getElementById('rejectReason');
 
   const reason =
-    reasonInput?.value.trim() ||
-    'Does not meet requirements';
-
-
-  // ===================================================
-  // 🔒 تعطيل الزر
-  // ===================================================
-
-  if (!button) {
-
-    button =
-      document.getElementById(
-        'confirmRejectBtn'
-      );
-  }
-
-
-  let originalText = '';
-
-  if (button) {
-
-    originalText =
-      button.textContent;
-
-    button.disabled =
-      true;
-
-    button.textContent =
-      '⏳ Processing...';
-  }
-
+    reasonInput?.value?.trim() ||
+    'Rejected by admin';
 
   try {
+    const response = await fetch(
+      `${API}/api/admin/deposits/${encodeURIComponent(depositId)}/reject?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          admin_id: REQUIRED_ADMIN_ID,
+          user_id: userId,
+          reason: reason
+        })
+      }
+    );
 
-    // =================================================
-    // 📡 إرسال الرفض للسيرفر
-    // =================================================
+    const data = await response.json();
 
-    const res =
-      await fetch(
-        `${API}/api/admin/deposits/${depositId}/reject`,
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-
-          body: JSON.stringify({
-
-            admin_id:
-              REQUIRED_ADMIN_ID,
-
-            user_id:
-              userId,
-
-            reason:
-              reason
-
-          })
-        }
-      );
-
-
-    // =================================================
-    // 📥 قراءة الاستجابة
-    // =================================================
-
-    const data =
-      await res.json();
-
-
-    // =================================================
-    // ❌ HTTP Error
-    // =================================================
-
-    if (!res.ok) {
-
-      showAlert(
-        '❌ ' +
-        (
-          data.message ||
-          'Failed to reject deposit'
-        ),
-        'error'
-      );
-
-      return;
-    }
-
-
-    // =================================================
-    // ✅ نجاح
-    // =================================================
-
-    if (data.success) {
-
-      showAlert(
-        '❌ Deposit rejected',
-        'success'
-      );
-
-
-      // إغلاق المودال
-      closeRejectModal();
-
-
-      // تحديث قائمة الإيداعات
-      await loadDeposits();
-
-
-      // تحديث الإحصائيات
-      await loadDashboardStats();
-
-
-    } else {
-
-      showAlert(
-        '❌ ' +
-        (
-          data.message ||
-          'Failed to reject deposit'
-        ),
-        'error'
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message || 'Failed to reject deposit'
       );
     }
 
+    closeRejectModal();
 
-  } catch (err) {
+    await loadDeposits();
+    await loadDashboardStats();
 
+    alert(
+      data.message ||
+      'Deposit rejected successfully.'
+    );
+
+  } catch (error) {
     console.error(
       '❌ confirmReject:',
-      err
+      error
     );
 
-    showAlert(
-      '⚠️ Connection error. Please try again.',
-      'error'
+    alert(
+      error.message ||
+      'Failed to reject deposit.'
     );
-
-
-  } finally {
-
-    // =================================================
-    // 🔓 إعادة تفعيل الزر
-    // =================================================
-
-    if (button) {
-
-      button.disabled =
-        false;
-
-      button.textContent =
-        originalText ||
-        '❌ Confirm Rejection';
-    }
   }
-}
-
-
-// =====================================================
-// ❌ فتح مودال الرفض من قائمة الإيداعات
-// =====================================================
-function rejectDeposit(
-  depositId,
-  userId
-) {
-
-  openRejectModal(
-    depositId,
-    userId
-  );
-}
+}  
+  
 // ================= 📤 WITHDRAWALS =================
 
 let currentWithdrawalId = null;  
