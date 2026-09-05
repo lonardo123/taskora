@@ -4719,7 +4719,9 @@ app.post(
         resolution = 'Resolved by admin'
       } = body;
 
-      const adminId = c.get('adminId');
+      const adminId =
+  c.req.query('admin_id') ||
+  c.req.query('user_id');
 
       // ==========================================
       // 🔐 Validate dispute ID
