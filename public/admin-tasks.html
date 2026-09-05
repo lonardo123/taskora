@@ -2272,56 +2272,169 @@ function closeBalanceModal() {
 
 async function confirmBalanceAction() {
   if (!pendingBalanceAction) return;
-  
+
   const { type, userId, amount } = pendingBalanceAction;
-  const reason = document.getElementById('bModalReason').value.trim();
-  const btn = document.getElementById('bModalBtn');
-  
- // ✅ الجديد (أكثر وضوحاً للمستخدم)
-if (type === 'deduct' && (!reason || reason.trim().length < 1)) {
-  showAlert('❌ Reason is required (min 1 character)', 'error');
-  return;
-}
-  
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Processing...';
-  
-  try {
-    const endpoint = type === 'add' ? '/api/admin/balance/add' : '/api/admin/balance/deduct';
-    const res = await fetch(`${API}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        admin_id: REQUIRED_ADMIN_ID, 
-        user_id: userId,
-        amount: parseFloat(amount),
-        reason: reason || (type === 'add' ? 'Manual credit' : ''),
-        source: 'admin_panel'
-      })
-    });
-    
-    const data = await res.json();
-    
-    if (data.success) {
-      showAlert(data.message, 'success');
-      closeBalanceModal();
-      // تفريغ الحقول
-      ['addBalanceUserId','addBalanceAmount','addBalanceReason','deductBalanceUserId','deductBalanceAmount','deductBalanceReason'].forEach(id => {
-        const el = document.getElementById(id); if(el) el.value = '';
-      });
-      loadDashboardStats();
-    } else {
-      showAlert(data.message || 'Failed', 'error');
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
-  } catch (err) {
-    console.error('❌ balance action:', err);
-    showAlert('⚠️ Connection error', 'error');
-    btn.disabled = false;
-    btn.textContent = originalText;
+
+  const reason =
+    document.getElementById('bModalReason').value.trim();
+
+  const btn =
+    document.getElementById('bModalBtn');
+
+
+  // التحقق من السبب عند الخصم
+  if (
+    type === 'deduct' &&
+    (!reason || reason.trim().length < 1)
+  ) {
+    showAlert(
+      '❌ Reason is required (min 1 character)',
+      'error'
+    );
+    return;
   }
+
+
+  const originalText =
+    btn.textContent;
+
+  btn.disabled = true;
+
+  btn.textContent =
+    '⏳ Processing...';
+
+
+  try {
+
+    const endpoint =
+      type === 'add'
+        ? '/api/admin/balance/add'
+        : '/api/admin/balance/deduct';
+
+
+    // =====================================================
+    // 🔐 إرسال admin_id في الرابط
+    // لأن verifyAdmin يقرأ Query Parameter
+    // =====================================================
+
+    const res = await fetch(
+
+      `${API}${endpoint}?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`,
+
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+
+          // المستخدم المطلوب تعديل رصيده
+          user_id: userId,
+
+          // قيمة الإضافة أو الخصم
+          amount: parseFloat(amount),
+
+          // سبب العملية
+          reason:
+            reason ||
+            (
+              type === 'add'
+                ? 'Manual credit'
+                : ''
+            ),
+
+          // مصدر العملية
+          source: 'admin_panel'
+
+        })
+
+      }
+
+    );
+
+
+    const data =
+      await res.json();
+
+
+    if (data.success) {
+
+      showAlert(
+        data.message,
+        'success'
+      );
+
+
+      closeBalanceModal();
+
+
+      // ==========================================
+      // تنظيف الحقول بعد نجاح العملية
+      // ==========================================
+
+      [
+        'addBalanceUserId',
+        'addBalanceAmount',
+        'addBalanceReason',
+
+        'deductBalanceUserId',
+        'deductBalanceAmount',
+        'deductBalanceReason'
+
+      ].forEach(id => {
+
+        const el =
+          document.getElementById(id);
+
+        if (el) {
+          el.value = '';
+        }
+
+      });
+
+
+      // تحديث إحصائيات لوحة الأدمن
+      loadDashboardStats();
+
+
+    } else {
+
+      showAlert(
+        data.message || 'Failed',
+        'error'
+      );
+
+      btn.disabled = false;
+
+      btn.textContent =
+        originalText;
+
+    }
+
+
+  } catch (err) {
+
+    console.error(
+      '❌ balance action:',
+      err
+    );
+
+
+    showAlert(
+      '⚠️ Connection error',
+      'error'
+    );
+
+
+    btn.disabled = false;
+
+    btn.textContent =
+      originalText;
+
+  }
+
 }
 
 // إغلاق المودال عند النقر خارجه
