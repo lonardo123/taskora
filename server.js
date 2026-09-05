@@ -2595,20 +2595,46 @@ app.post(
 
     try {
 
+      // =================================================
+      // 🆔 الحصول على رقم الرسالة
+      // =================================================
       const messageId =
         c.req.param('id');
 
+      const numericMessageId =
+        Number(messageId);
 
+
+      if (
+        !Number.isInteger(numericMessageId) ||
+        numericMessageId <= 0
+      ) {
+
+        return c.json({
+          success: false,
+          message:
+            '❌ Invalid message ID'
+        }, 400);
+
+      }
+
+
+      // =================================================
+      // 📝 قراءة الرد
+      // =================================================
       const {
         reply
       } =
         await c.req.json();
 
 
-      if (
-        !reply ||
-        !reply.trim()
-      ) {
+      const cleanReply =
+        typeof reply === 'string'
+          ? reply.trim()
+          : '';
+
+
+      if (!cleanReply) {
 
         return c.json({
           success: false,
@@ -2619,24 +2645,43 @@ app.post(
       }
 
 
+      // =================================================
+      // 💾 حفظ رد الأدمن
+      // جدول: admin_messages
+      //
+      // id           -> رقم الرسالة
+      // admin_reply  -> رد الأدمن
+      // replied      -> تم الرد
+      // replied_at   -> وقت الرد
+      // =================================================
       const result =
         await pool.query(
           `
           UPDATE admin_messages
           SET
             admin_reply = $1,
-            replied = true,
+            replied = TRUE,
             replied_at = NOW()
           WHERE id = $2
-          RETURNING *
+          RETURNING
+            id,
+            user_id,
+            message,
+            admin_reply,
+            replied,
+            created_at,
+            replied_at
           `,
           [
-            reply.trim(),
-            messageId
+            cleanReply,
+            numericMessageId
           ]
         );
 
 
+      // =================================================
+      // ❌ الرسالة غير موجودة
+      // =================================================
       if (result.rowCount === 0) {
 
         return c.json({
@@ -2648,6 +2693,9 @@ app.post(
       }
 
 
+      // =================================================
+      // ✅ نجاح
+      // =================================================
       return c.json({
 
         success: true,
@@ -2670,7 +2718,8 @@ app.post(
 
       return c.json({
         success: false,
-        message: 'Server error'
+        message:
+          'Server error'
       }, 500);
 
     }
