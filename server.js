@@ -2955,40 +2955,98 @@ app.get(
 app.get('/api/tasks/user-executions', async (c) => {
   try {
     const user_id = c.req.query('user_id');
-    
-    if (!user_id || !/^\d+$/.test(user_id.toString())) {
-      return c.json({ success: false, message: "Valid user_id required" }, 400);
+
+    // ==========================================
+    // 🔐 Validate user_id
+    // ==========================================
+    if (
+      !user_id ||
+      !/^\d+$/.test(user_id.toString())
+    ) {
+      return c.json({
+        success: false,
+        message: "Valid user_id required"
+      }, 400);
     }
-    
-    const executions = await pool.query(`
-      SELECT 
-        te.id, te.task_id, te.executor_id, te.proof, te.status, te.submitted_at, 
-        te.reviewed_at, te.reviewed_by, te.payment_amount, te.rejection_reason,
-        t.title as task_title, t.description as task_description, t.executor_reward,
-        td.resolution as admin_resolution
+
+    // ==========================================
+    // 📋 Get user's task executions
+    // ==========================================
+    const executions = await pool.query(
+      `
+      SELECT
+        te.id,
+        te.task_id,
+        te.executor_id,
+        te.proof,
+        te.status,
+        te.submitted_at,
+        te.reviewed_at,
+        te.reviewed_by,
+        te.payment_amount,
+        te.commission_amount,
+        te.rejection_reason,
+        te.rejected_at,
+
+        t.title AS task_title,
+        t.description AS task_description,
+        t.executor_reward,
+
+        (
+          SELECT td.resolution
+          FROM task_disputes td
+          WHERE td.execution_id = te.id
+          ORDER BY td.created_at DESC
+          LIMIT 1
+        ) AS admin_resolution,
+
+        EXISTS (
+          SELECT 1
+          FROM task_disputes td2
+          WHERE td2.execution_id = te.id
+        ) AS has_dispute
+
       FROM task_executions te
-      JOIN tasks t ON t.id = te.task_id
-      LEFT JOIN task_disputes td ON te.id = td.execution_id
+
+      INNER JOIN tasks t
+        ON t.id = te.task_id
+
       WHERE te.executor_id = $1::bigint
+
       AND NOT (
-          te.status = 'applied' 
-          AND te.submitted_at + (t.duration_seconds || ' seconds')::interval < NOW()
-        )
-      ORDER BY te.submitted_at DESC
-    `, [user_id]);
-    
-    const executionsWithDispute = await Promise.all(
-      executions.rows.map(async (exec) => {
-        const dispute = await pool.query('SELECT id FROM task_disputes WHERE execution_id = $1', [exec.id]);
-        return { ...exec, has_dispute: dispute.rows.length > 0 };
-      })
+        te.status = 'applied'
+        AND te.submitted_at IS NOT NULL
+        AND t.duration_seconds IS NOT NULL
+        AND te.submitted_at +
+            (t.duration_seconds || ' seconds')::interval
+            < NOW()
+      )
+
+      ORDER BY te.submitted_at DESC NULLS LAST
+      `,
+      [user_id]
     );
-    
-    return c.json({ success: true, data: executionsWithDispute });
-    
+
+    // ==========================================
+    // ✅ Return executions
+    // ==========================================
+    return c.json({
+      success: true,
+      data: executions.rows
+    });
+
   } catch (err) {
-    console.error('❌ /api/tasks/user-executions:', err);
-    return c.json({ success: false, message: "Failed to load executions", error: err.message }, 500);
+
+    console.error(
+      '❌ /api/tasks/user-executions:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: "Failed to load executions",
+      error: err.message
+    }, 500);
   }
 });
 
