@@ -6880,6 +6880,460 @@ const totalCost =
         }
       }
 
+            // ============================================================
+      // 🧹 TASKORA SAFE DATABASE CLEANUP
+      // إضافة مستقلة - لا تعدل نظام الموافقة التلقائية الحالي
+      // ============================================================
+
+      try {
+        await client.query('BEGIN');
+
+        // ============================================================
+        // 1️⃣ إنشاء قائمة مؤقتة للمستخدمين الآمن حذفهم
+        //
+        // الشروط:
+        // - غير نشط لمدة 60 يومًا
+        // - الرصيد = صفر
+        // - لا يوجد سحب pending
+        // - لا يوجد إيداع pending
+        // - لا يوجد بيع pending
+        // - لا توجد أسهم نشطة
+        // - لا توجد holdings غير مسوّاة
+        // - لا توجد task execution pending
+        // - لا يوجد open dispute
+        // ============================================================
+
+        await client.query(`
+          CREATE TEMP TABLE cleanup_users (
+            telegram_id BIGINT PRIMARY KEY
+          ) ON COMMIT DROP
+        `);
+
+        await client.query(`
+          INSERT INTO cleanup_users (telegram_id)
+          SELECT u.telegram_id
+          FROM users u
+          WHERE u.telegram_id IS NOT NULL
+            AND u.last_login_at < NOW() - INTERVAL '60 days'
+            AND COALESCE(u.balance, 0) <= 0
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM withdrawals w
+              WHERE w.user_id = u.telegram_id
+                AND LOWER(COALESCE(w.status, '')) = 'pending'
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM deposit_requests d
+              WHERE d.user_id = u.telegram_id
+                AND LOWER(COALESCE(d.status, '')) = 'pending'
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pending_sales ps
+              WHERE ps.user_id = u.telegram_id
+                AND ps.status = 'pending'
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM user_stocks us
+              WHERE us.telegram_id = u.telegram_id
+                AND COALESCE(us.stocks, 0) > 0
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM stock_holdings sh
+              WHERE sh.telegram_id = u.telegram_id
+                AND COALESCE(sh.quantity, 0) > COALESCE(sh.sold, 0)
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_executions te
+              WHERE te.executor_id = u.telegram_id
+                AND LOWER(COALESCE(te.status, '')) = 'pending'
+            )
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_disputes td
+              JOIN task_executions te
+                ON te.id = td.execution_id
+              WHERE te.executor_id = u.telegram_id
+                AND LOWER(COALESCE(td.status, '')) = 'open'
+            )
+        `);
+
+        const cleanupUserCount = await client.query(`
+          SELECT COUNT(*)::int AS count
+          FROM cleanup_users
+        `);
+
+        // ============================================================
+        // 2️⃣ حذف task_disputes أولًا
+        // مهم بسبب:
+        // task_disputes.execution_id -> task_executions.id
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM task_disputes td
+          USING task_executions te, cleanup_users cu
+          WHERE td.execution_id = te.id
+            AND te.executor_id = cu.telegram_id
+        `);
+
+        // ============================================================
+        // 3️⃣ حذف task_executions
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM task_executions te
+          USING cleanup_users cu
+          WHERE te.executor_id = cu.telegram_id
+        `);
+
+        // ============================================================
+        // 4️⃣ حذف بيانات المستخدم المرتبطة
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM task_proofs tp
+          USING cleanup_users cu
+          WHERE tp.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM user_tasks ut
+          USING cleanup_users cu
+          WHERE ut.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM user_videos uv
+          USING cleanup_users cu
+          WHERE uv.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM watched_videos wv
+          USING cleanup_users cu
+          WHERE wv.user_id::text = cu.telegram_id::text
+        `);
+
+        await client.query(`
+          DELETE FROM daily_rewards dr
+          USING cleanup_users cu
+          WHERE dr.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM new_user_bonuses nb
+          USING cleanup_users cu
+          WHERE nb.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM earnings e
+          USING cleanup_users cu
+          WHERE e.user_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM admin_messages am
+          USING cleanup_users cu
+          WHERE am.user_id = cu.telegram_id
+        `);
+
+        // ============================================================
+        // referrals
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM referral_earnings re
+          USING cleanup_users cu
+          WHERE re.referrer_id = cu.telegram_id
+             OR re.referee_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM referrals r
+          USING cleanup_users cu
+          WHERE r.referrer_id = cu.telegram_id
+             OR r.referee_id = cu.telegram_id
+        `);
+
+        // ============================================================
+        // لا يتم حذف pending_sales
+        // لأن المستخدم المؤهل للحذف تم التأكد مسبقًا أنه لا يملك pending
+        //
+        // أي سجل قديم غير pending سيتم الاحتفاظ به هنا
+        // حتى لا نحذف عملية مالية دون سياسة مستقلة.
+        // ============================================================
+
+        // ============================================================
+        // stock
+        // المستخدم المؤهل لا يملك holdings نشطة أو stocks نشطة
+        // لكن يتم حذف سجلاته بعد التأكد من التسوية.
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM stock_holdings sh
+          USING cleanup_users cu
+          WHERE sh.telegram_id = cu.telegram_id
+            AND COALESCE(sh.quantity, 0) <= COALESCE(sh.sold, 0)
+        `);
+
+        await client.query(`
+          DELETE FROM stock_transactions st
+          USING cleanup_users cu
+          WHERE st.telegram_id = cu.telegram_id
+        `);
+
+        await client.query(`
+          DELETE FROM user_stocks us
+          USING cleanup_users cu
+          WHERE us.telegram_id = cu.telegram_id
+            AND COALESCE(us.stocks, 0) <= 0
+        `);
+
+        // ============================================================
+        // withdrawals / deposits
+        //
+        // لا يمكن وجود pending بسبب شرط المستخدم أعلاه.
+        // لكن سنحذف فقط السجلات القديمة أكثر من 6 أشهر.
+        // ============================================================
+
+        await client.query(`
+          DELETE FROM withdrawals w
+          USING cleanup_users cu
+          WHERE w.user_id = cu.telegram_id
+            AND w.requested_at < NOW() - INTERVAL '6 months'
+            AND LOWER(COALESCE(w.status, '')) <> 'pending'
+        `);
+
+        await client.query(`
+          DELETE FROM deposit_requests d
+          USING cleanup_users cu
+          WHERE d.user_id = cu.telegram_id
+            AND d.created_at < NOW() - INTERVAL '6 months'
+            AND LOWER(COALESCE(d.status, '')) <> 'pending'
+        `);
+
+        // ============================================================
+        // 5️⃣ حذف المستخدم نفسه
+        // ============================================================
+
+        const deletedUsers = await client.query(`
+          DELETE FROM users u
+          USING cleanup_users cu
+          WHERE u.telegram_id = cu.telegram_id
+        `);
+
+        // ============================================================
+        // 6️⃣ تنظيف watched_videos
+        // الاحتفاظ لمدة 60 يومًا
+        // ============================================================
+
+        const deletedWatchedVideos = await client.query(`
+          DELETE FROM watched_videos
+          WHERE watched_at < NOW() - INTERVAL '60 days'
+        `);
+
+        // ============================================================
+        // 7️⃣ تنظيف daily_rewards
+        // الاحتفاظ لمدة 60 يومًا
+        // ============================================================
+
+        const deletedDailyRewards = await client.query(`
+          DELETE FROM daily_rewards
+          WHERE created_at < NOW() - INTERVAL '60 days'
+        `);
+
+        // ============================================================
+        // 8️⃣ تنظيف earnings
+        // الاحتفاظ لمدة 60 يومًا
+        //
+        // الرصيد الفعلي محفوظ في users.balance
+        // ============================================================
+
+        const deletedEarnings = await client.query(`
+          DELETE FROM earnings
+          WHERE created_at < NOW() - INTERVAL '60 days'
+        `);
+
+        // ============================================================
+        // 9️⃣ تنظيف deposits
+        // بعد 6 أشهر
+        // pending لا يُحذف
+        // ============================================================
+
+        const deletedDeposits = await client.query(`
+          DELETE FROM deposit_requests
+          WHERE created_at < NOW() - INTERVAL '6 months'
+            AND LOWER(COALESCE(status, '')) <> 'pending'
+        `);
+
+        // ============================================================
+        // 🔟 تنظيف withdrawals
+        // بعد 6 أشهر
+        // pending لا يُحذف
+        // ============================================================
+
+        const deletedWithdrawals = await client.query(`
+          DELETE FROM withdrawals
+          WHERE requested_at < NOW() - INTERVAL '6 months'
+            AND LOWER(COALESCE(status, '')) <> 'pending'
+        `);
+
+        // ============================================================
+        // 1️⃣1️⃣ تنظيف stock_transactions
+        // بعد 12 شهرًا
+        // ============================================================
+
+        const deletedStockTransactions = await client.query(`
+          DELETE FROM stock_transactions
+          WHERE created_at < NOW() - INTERVAL '12 months'
+        `);
+
+        // ============================================================
+        // 1️⃣2️⃣ تنظيف بيانات المهام المحذوفة
+        //
+        // task_disputes أولًا بسبب FK
+        // لا نحذف open disputes
+        // ============================================================
+
+        const deletedOldDisputes = await client.query(`
+          DELETE FROM task_disputes td
+          USING task_executions te, tasks t
+          WHERE td.execution_id = te.id
+            AND te.task_id = t.id
+            AND t.deleted_at IS NOT NULL
+            AND t.deleted_at < NOW() - INTERVAL '60 days'
+            AND LOWER(COALESCE(td.status, '')) <> 'open'
+        `);
+
+        // ============================================================
+        // task_executions
+        // لا نحذف pending
+        // ولا نحذف execution لديها open dispute
+        // ============================================================
+
+        const deletedOldExecutions = await client.query(`
+          DELETE FROM task_executions te
+          USING tasks t
+          WHERE te.task_id = t.id
+            AND t.deleted_at IS NOT NULL
+            AND t.deleted_at < NOW() - INTERVAL '60 days'
+            AND LOWER(COALESCE(te.status, '')) <> 'pending'
+
+            AND NOT EXISTS (
+              SELECT 1
+              FROM task_disputes td
+              WHERE td.execution_id = te.id
+                AND LOWER(COALESCE(td.status, '')) = 'open'
+            )
+        `);
+
+        // ============================================================
+        // task_proofs للمهام المحذوفة
+        // ============================================================
+
+        const deletedOldProofs = await client.query(`
+          DELETE FROM task_proofs tp
+          USING tasks t
+          WHERE tp.task_id = t.id
+            AND t.deleted_at IS NOT NULL
+            AND t.deleted_at < NOW() - INTERVAL '60 days'
+        `);
+
+        // ============================================================
+        // user_tasks للمهام المحذوفة
+        // ============================================================
+
+        const deletedOldUserTasks = await client.query(`
+          DELETE FROM user_tasks ut
+          USING tasks t
+          WHERE ut.task_id = t.id
+            AND t.deleted_at IS NOT NULL
+            AND t.deleted_at < NOW() - INTERVAL '60 days'
+        `);
+
+        // ============================================================
+        // Commit
+        // ============================================================
+
+        await client.query('COMMIT');
+
+        console.log('🧹 ========================================');
+        console.log('🧹 TASKORA DATABASE CLEANUP COMPLETED');
+        console.log('🧹 ========================================');
+
+        console.log(
+          `👤 Users deleted: ${deletedUsers.rowCount} / Safe candidates: ${cleanupUserCount.rows[0].count}`
+        );
+
+        console.log(
+          `🎬 watched_videos deleted: ${deletedWatchedVideos.rowCount}`
+        );
+
+        console.log(
+          `🎁 daily_rewards deleted: ${deletedDailyRewards.rowCount}`
+        );
+
+        console.log(
+          `💰 earnings deleted: ${deletedEarnings.rowCount}`
+        );
+
+        console.log(
+          `📥 deposits deleted: ${deletedDeposits.rowCount}`
+        );
+
+        console.log(
+          `📤 withdrawals deleted: ${deletedWithdrawals.rowCount}`
+        );
+
+        console.log(
+          `📈 stock_transactions deleted: ${deletedStockTransactions.rowCount}`
+        );
+
+        console.log(
+          `⚖️ old resolved disputes deleted: ${deletedOldDisputes.rowCount}`
+        );
+
+        console.log(
+          `📋 old task executions deleted: ${deletedOldExecutions.rowCount}`
+        );
+
+        console.log(
+          `📎 old task proofs deleted: ${deletedOldProofs.rowCount}`
+        );
+
+        console.log(
+          `📝 old user tasks deleted: ${deletedOldUserTasks.rowCount}`
+        );
+
+      } catch (cleanupError) {
+
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {
+          // لا نفعل شيئًا هنا لأن العملية قد تكون انتهت بالفعل
+        }
+
+        console.error(
+          '❌ TASKORA DATABASE CLEANUP ERROR:',
+          cleanupError
+        );
+      }
+
+      // ============================================================
+      // END SAFE DATABASE CLEANUP
+      // ============================================================
       // ================================================================
       // 📊 Final Cron summary
       // ================================================================
