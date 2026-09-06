@@ -1936,8 +1936,12 @@ app.post(
        * أخبرني وسنعدل منطق الخصم حسب طريقة إنشاء طلب السحب.
        */
 
-      const refundAmount =
-        Number(amount);
+      const netAmount = Number(amount);
+
+const refundAmount =
+  Math.round(
+    (netAmount / 0.95) * 1000000
+  ) / 1000000;
 
 
       if (
@@ -3181,8 +3185,13 @@ app.post('/api/tasks/create', async (c) => {
       return c.json({ success: false, message: "Invalid budget: min $0.10" }, 400);
     }
     
-    const adminCommission = executorReward * 0.25;
-    const totalCostPerExecution = executorReward + adminCommission;
+    const adminCommission = executorReward * 0.20;
+const referralCommission = executorReward * 0.05;
+
+const totalCostPerExecution =
+  executorReward +
+  adminCommission +
+  referralCommission;
     
     const userRes = await client.query('SELECT balance FROM users WHERE telegram_id = $1', [creator_id]);
     
@@ -3238,11 +3247,13 @@ app.post('/api/tasks/create', async (c) => {
         message: "Task created successfully", 
         task: result.rows[0],
         payment_info: {
-          executor_reward: executorReward.toFixed(4),
-          admin_commission: adminCommission.toFixed(4),
-          total_cost_per_execution: totalCostPerExecution.toFixed(4),
-          estimated_completions: Math.floor(totalBudget / totalCostPerExecution)
-        }
+  executor_reward: executorReward.toFixed(4),
+  admin_commission: adminCommission.toFixed(4),
+  referral_commission: referralCommission.toFixed(4),
+  total_cost_per_execution: totalCostPerExecution.toFixed(4),
+  estimated_completions:
+    Math.floor(totalBudget / totalCostPerExecution)
+}
       });
       
     } catch (dbErr) {
@@ -3370,9 +3381,14 @@ app.post('/api/tasks/:id/apply', async (c) => {
     );
 
     // ✅ Unified commission = 25%
-    const adminCommission = executorReward * 0.25;
+    const adminCommission = executorReward * 0.20;
 
-    const totalCost = executorReward + adminCommission;
+const referralCommission = executorReward * 0.05;
+
+const totalCost =
+  executorReward +
+  adminCommission +
+  referralCommission;
 
     if (
       !Number.isFinite(executorReward) ||
@@ -3647,8 +3663,16 @@ app.post('/api/tasks/:id/proofs/:proofId/approve', async (c) => {
     
     const executorId = exec.rows[0].executor_id;
     const paymentAmount = parseFloat(exec.rows[0].payment_amount);
-    const adminCommission = parseFloat(exec.rows[0].commission_amount || (paymentAmount * 0.25));
-    const totalCost = paymentAmount + adminCommission;
+    const adminCommission = parseFloat(
+  exec.rows[0].commission_amount || (paymentAmount * 0.20)
+);
+
+const referralCommission = paymentAmount * 0.05;
+
+const totalCost =
+  paymentAmount +
+  adminCommission +
+  referralCommission;
     
     await client.query('BEGIN');
     
@@ -3671,10 +3695,6 @@ app.post('/api/tasks/:id/proofs/:proofId/approve', async (c) => {
       WHERE id = $2
     `, [user_id, proofId]);
     
-    await client.query(
-      'UPDATE tasks SET spent = spent + $1 WHERE id = $2', 
-      [totalCost, taskId]
-    );
     
     await client.query(`
       INSERT INTO earnings (user_id, source, amount, description, video_id, watched_seconds, created_at)
@@ -4834,17 +4854,18 @@ app.post(
       // ==========================================
       // 💰 Payment calculations
       // ==========================================
-      const paymentAmount = parseFloat(
-        dispute.payment_amount || 0
-      );
-
       const commissionAmount = parseFloat(
-        dispute.commission_amount ??
-        (paymentAmount * 0.25)
-      );
+  dispute.commission_amount ??
+  (paymentAmount * 0.20)
+);
 
-      const totalCost =
-        paymentAmount + commissionAmount;
+const referralCommission =
+  paymentAmount * 0.05;
+
+const totalCost =
+  paymentAmount +
+  commissionAmount +
+  referralCommission;
 
       // ==========================================
       // 🔐 Validate payment data
@@ -5383,31 +5404,35 @@ app.post(
         execution.payment_amount || 0
       );
 
-      // Keep stored commission.
-      // Fallback = 25%, same as task creation.
-      const adminCommission = parseFloat(
-        execution.commission_amount ??
-        (paymentAmount * 0.25)
-      );
+     const adminCommission = parseFloat(
+  execution.commission_amount ??
+  (paymentAmount * 0.20)
+);
 
-      const totalCost =
-        paymentAmount + adminCommission;
+const referralCommission =
+  paymentAmount * 0.05;
 
-      if (
-        !Number.isFinite(paymentAmount) ||
-        paymentAmount <= 0 ||
-        !Number.isFinite(adminCommission) ||
-        adminCommission < 0 ||
-        !Number.isFinite(totalCost)
-      ) {
-        await client.query('ROLLBACK');
+const totalCost =
+  paymentAmount +
+  adminCommission +
+  referralCommission;
 
-        return c.json({
-          success: false,
-          message: 'Invalid payment or commission amount'
-        }, 400);
-      }
+if (
+  !Number.isFinite(paymentAmount) ||
+  paymentAmount <= 0 ||
+  !Number.isFinite(adminCommission) ||
+  adminCommission < 0 ||
+  !Number.isFinite(referralCommission) ||
+  referralCommission < 0 ||
+  !Number.isFinite(totalCost)
+) {
+  await client.query('ROLLBACK');
 
+  return c.json({
+    success: false,
+    message: 'Invalid payment or commission amount'
+  }, 400);
+}
       // ==========================================
       // 💰 Verify reservation exists
       // ==========================================
@@ -5589,7 +5614,7 @@ app.post(
           [
             adminId,
             adminCommission,
-            `Commission from task #${execution.task_id} (25%)`
+            `Commission from task #${execution.task_id} (20%)`
           ]
         );
       }
@@ -5863,12 +5888,17 @@ async function cleanupExpiredTaskRejections() {
       );
 
       const commissionAmount = parseFloat(
-        execution.commission_amount ??
-        (paymentAmount * 0.25)
-      );
+  execution.commission_amount ??
+  (paymentAmount * 0.20)
+);
 
-      const totalCost =
-        paymentAmount + commissionAmount;
+const referralCommission =
+  paymentAmount * 0.05;
+
+const totalCost =
+  paymentAmount +
+  commissionAmount +
+  referralCommission;
 
       // ==============================================
       // 🔐 Validate amounts
@@ -6129,14 +6159,17 @@ export default {
           );
 
           const commissionAmount = parseFloat(
-            execution.commission_amount ??
-            (paymentAmount * 0.25)
-          );
+  execution.commission_amount ??
+  (paymentAmount * 0.20)
+);
 
-          const totalCost =
-            paymentAmount +
-            commissionAmount;
+const referralCommission =
+  paymentAmount * 0.05;
 
+const totalCost =
+  paymentAmount +
+  commissionAmount +
+  referralCommission;
           // ============================================================
           // 🔐 Validate financial values
           // ============================================================
@@ -6531,14 +6564,18 @@ export default {
             execution.payment_amount || 0
           );
 
-          const commissionAmount = parseFloat(
-            execution.commission_amount ??
-            (paymentAmount * 0.25)
-          );
+         const commissionAmount = parseFloat(
+  execution.commission_amount ??
+  (paymentAmount * 0.20)
+);
 
-          const totalCost =
-            paymentAmount +
-            commissionAmount;
+const referralCommission =
+  paymentAmount * 0.05;
+
+const totalCost =
+  paymentAmount +
+  commissionAmount +
+  referralCommission;
 
           if (
             !Number.isFinite(paymentAmount) ||
