@@ -4740,8 +4740,8 @@ app.post(
       } = body;
 
       const adminId =
-  c.req.query('admin_id') ||
-  c.req.query('user_id');
+        c.req.query('admin_id') ||
+        c.req.query('user_id');
 
       // ==========================================
       // 🔐 Validate dispute ID
@@ -4854,18 +4854,33 @@ app.post(
       // ==========================================
       // 💰 Payment calculations
       // ==========================================
+      const paymentAmount = parseFloat(
+        dispute.payment_amount || 0
+      );
+
       const commissionAmount = parseFloat(
-  dispute.commission_amount ??
-  (paymentAmount * 0.20)
-);
+        dispute.commission_amount ??
+        (paymentAmount * 0.20)
+      );
 
-const referralCommission =
-  paymentAmount * 0.05;
+      // ==========================================
+      // 🤝 Task referral = 5%
+      // ==========================================
+      const referralCommission =
+        paymentAmount * 0.05;
 
-const totalCost =
-  paymentAmount +
-  commissionAmount +
-  referralCommission;
+      // ==========================================
+      // 💰 Total reserved cost
+      //
+      // Executor = 100%
+      // Admin    = 20%
+      // Referral = 5%
+      // Total    = 125%
+      // ==========================================
+      const totalCost =
+        paymentAmount +
+        commissionAmount +
+        referralCommission;
 
       // ==========================================
       // 🔐 Validate payment data
@@ -4873,8 +4888,13 @@ const totalCost =
       if (
         !Number.isFinite(paymentAmount) ||
         paymentAmount <= 0 ||
+
         !Number.isFinite(commissionAmount) ||
         commissionAmount < 0 ||
+
+        !Number.isFinite(referralCommission) ||
+        referralCommission < 0 ||
+
         !Number.isFinite(totalCost) ||
         totalCost <= 0
       ) {
@@ -4890,13 +4910,12 @@ const totalCost =
       // ==========================================
       // 💰 Verify reservation
       //
-      // The reservation was created at APPLY.
-      // It remained reserved through:
+      // Reservation was created at APPLY:
       //
-      // applied → pending → rejected → disputed
+      // payment + admin commission + task referral
       //
-      // Therefore spent must still contain
-      // this execution's totalCost.
+      // Therefore spent must still include
+      // the complete totalCost.
       // ==========================================
       const currentSpent = parseFloat(
         dispute.spent || 0
@@ -5074,7 +5093,7 @@ const totalCost =
             [
               adminId,
               commissionAmount,
-              `Commission from task #${dispute.task_id} (25%)`
+              `Commission from task #${dispute.task_id} (20%)`
             ]
           );
         }
@@ -5082,10 +5101,9 @@ const totalCost =
         // ==========================================
         // 💰 IMPORTANT
         //
-        // DO NOT subtract from tasks.spent.
+        // DO NOT change tasks.spent.
         //
-        // The reserved amount is now consumed
-        // by the approved execution.
+        // The reserved 1.25 is now consumed.
         // ==========================================
 
       }
@@ -5097,8 +5115,6 @@ const totalCost =
 
         // ==========================================
         // ❌ Final rejection
-        //
-        // The dispute is resolved against executor.
         // ==========================================
         const rejected =
           await client.query(
@@ -5132,13 +5148,17 @@ const totalCost =
         }
 
         // ==========================================
-        // 🔓 Release reservation back to task
+        // 🔓 Release reserved funds
         //
-        // IMPORTANT:
-        // DO NOT add money to creator users.balance.
+        // Return the complete reservation:
         //
-        // The amount returns to the task's
-        // available budget.
+        // Executor  = 1.00
+        // Admin     = 0.20
+        // Referral  = 0.05
+        // Total     = 1.25
+        //
+        // The amount returns to the TASK budget.
+        // It does NOT return to creator balance.
         // ==========================================
         const released =
           await client.query(
@@ -5205,15 +5225,14 @@ const totalCost =
       }
 
       // ==========================================
-      // ✅ Commit all database changes
+      // ✅ Commit
       // ==========================================
       await client.query('COMMIT');
 
       // ==========================================
-      // 🤝 Referral commission
+      // 🤝 TASK REFERRAL COMMISSION = 5%
       //
-      // Keep the existing function.
-      // It contains your 3% referral logic.
+      // This is separate from deposit referral = 3%.
       // ==========================================
       if (
         payout_to === 'executor' &&
@@ -5231,7 +5250,7 @@ const totalCost =
         } catch (refErr) {
 
           console.error(
-            '⚠️ Referral commission failed after dispute resolution:',
+            '⚠️ Task referral commission failed after dispute resolution:',
             refErr
           );
         }
@@ -5250,7 +5269,10 @@ const totalCost =
 
         resolution: {
           dispute_id: id,
-          execution_id: dispute.execution_id,
+
+          execution_id:
+            dispute.execution_id,
+
           payout_to,
 
           payment_amount:
@@ -5258,6 +5280,9 @@ const totalCost =
 
           commission_amount:
             commissionAmount.toFixed(6),
+
+          referral_commission:
+            referralCommission.toFixed(6),
 
           total_cost:
             totalCost.toFixed(6)
