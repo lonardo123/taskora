@@ -9,4 +9,4 @@ directory = "./public"
 
 # ⏰ إعداد المهمة المجدولة (Cron)
 [triggers]
-crons = ["* * * * *"]
+crons = ["0 */3 * * *"]
