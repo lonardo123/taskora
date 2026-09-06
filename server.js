@@ -6024,6 +6024,141 @@ const totalCost =
     client.release();
   }
 }
+
+// ==========================================
+// 1. فحص حالة الانتظار (Cooldown 10 دقائق)
+// ==========================================
+app.get('/api/watch-earn/status', async (c) => {
+  try {
+    const userId = c.req.query('id');
+    if (!userId || !/^\d+$/.test(userId.toString())) {
+      return c.json({ success: false, message: "Invalid user_id" }, 400);
+    }
+
+    const lastReward = await pool.query(
+      `SELECT created_at FROM earnings 
+       WHERE user_id = $1 AND source = 'startio_ad' 
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    let canWatch = true;
+    let secondsLeft = 0;
+
+    if (lastReward.rows.length > 0) {
+      const lastTime = new Date(lastReward.rows[0].created_at).getTime();
+      const now = Date.now();
+      const tenMinutes = 10 * 60 * 1000; // 10 دقائق بالميلي ثانية
+      const diff = now - lastTime;
+
+      if (diff < tenMinutes) {
+        canWatch = false;
+        secondsLeft = Math.ceil((tenMinutes - diff) / 1000);
+      }
+    }
+
+    return c.json({ success: true, canWatch, secondsLeft });
+  } catch (err) {
+    console.error('❌ /api/watch-earn/status:', err);
+    return c.json({ success: false, message: "Server error" }, 500);
+  }
+});
+
+// ==========================================
+// 2. Start.io Rewarded Video Postback Callback
+// ==========================================
+app.get('/api/startio/callback', async (c) => {
+  try {
+    // المعلمات التي سترسلها Start.io (تأكد من مطابقتها للوحة تحكم Start.io)
+    const userId = c.req.query('uid');
+    const country = (c.req.query('country') || 'XX').toUpperCase();
+    const txId = c.req.query('tx_id'); // معرف المعاملة الفريد من Start.io
+    const status = c.req.query('status');
+
+    // 1. التحقق الأساسي من صحة الطلب
+    if (!userId || !txId || status !== 'completed') {
+      return c.text('INVALID_REQUEST', 400);
+    }
+
+    // 2. تحديد المكافأة بناءً على دولة المستخدم
+    let rewardAmount = 0.00020; // الافتراضي: باقي الدول + مصر
+    if (country === 'IN') {
+      rewardAmount = 0.00025;
+    } else if (country === 'US') {
+      rewardAmount = 0.00030;
+    } else {
+      // قائمة بأهم دول أوروبا
+      const euCountries = ['DE', 'FR', 'GB', 'IT', 'ES', 'NL', 'BE', 'AT', 'SE', 'DK', 'FI', 'NO', 'PL', 'PT', 'IE', 'GR', 'CZ', 'HU', 'RO', 'BG', 'HR', 'SK', 'SI', 'LT', 'LV', 'EE', 'LU', 'MT', 'CY'];
+      if (euCountries.includes(country)) {
+        rewardAmount = 0.00030;
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 3. منع هجمات التكرار (Replay Attacks) عبر التحقق من أن tx_id لم يُستخدم من قبل
+      const duplicateCheck = await client.query(
+        'SELECT id FROM earnings WHERE description = $1',
+        [`Start.io Reward TX: ${txId}`]
+      );
+
+      if (duplicateCheck.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return c.text('DUPLICATE_TRANSACTION', 200); // Start.io تتوقع 200 حتى لا تعيد الإرسال
+      }
+
+      // 4. التحقق من فترة الانتظار (10 دقائق) على مستوى السيرفر أيضاً للحماية القصوى
+      const lastReward = await client.query(
+        `SELECT created_at FROM earnings 
+         WHERE user_id = $1 AND source = 'startio_ad' 
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+      );
+
+      if (lastReward.rows.length > 0) {
+        const lastTime = new Date(lastReward.rows[0].created_at).getTime();
+        const now = Date.now();
+        if (now - lastTime < (10 * 60 * 1000)) {
+          await client.query('ROLLBACK');
+          return c.text('COOLDOWN_ACTIVE', 400);
+        }
+      }
+
+      // 5. إضافة المكافأة إلى رصيد المستخدم
+      await client.query(
+        'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2',
+        [rewardAmount, userId]
+      );
+
+      // 6. تسجيل العملية في جدول الأرباح
+      await client.query(
+        `INSERT INTO earnings (user_id, source, amount, description, watched_seconds, video_id, created_at)
+         VALUES ($1, 'startio_ad', $2, $3, NULL, NULL, NOW())`,
+        [userId, rewardAmount, `Start.io Reward TX: ${txId} (Country: ${country})`]
+      );
+
+      // ✅ تم حذف كود عمولة الريفيرال من هنا تماماً
+
+      await client.query('COMMIT');
+      
+      // إرجاع استجابة نجاح لـ Start.io
+      return c.text('OK', 200);
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('❌ Start.io Callback DB Error:', err);
+      return c.text('DB_ERROR', 500);
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('❌ Start.io Callback Critical Error:', err);
+    return c.text('SERVER_ERROR', 500);
+  }
+});
+
 // =====================================================================
 // === نهاية ملف server.js ===
 // =====================================================================
