@@ -608,7 +608,9 @@ app.get('/api/daily-rewards/status', async (c) => {
   const earnings = await pool.query(
     `SELECT COALESCE(SUM(amount), 0) as total 
      FROM earnings 
-     WHERE user_id = $1 AND DATE(created_at) = $2`,
+     WHERE user_id = $1 
+  AND DATE(created_at) = $2
+  AND source IN ('offer', 'task_execution')`,
     [userId, today]
   );
   
@@ -629,17 +631,27 @@ app.post('/api/daily-rewards/claim', async (c) => {
   const { user_id } = await c.req.json();
   const today = new Date().toISOString().split('T')[0];
   
+  // ✅ حساب أرباح اليوم من offer و task_execution فقط
   const earnings = await pool.query(
     `SELECT COALESCE(SUM(amount), 0) as total 
      FROM earnings 
-     WHERE user_id = $1 AND DATE(created_at) = $2`,
+     WHERE user_id = $1 
+       AND DATE(created_at) = $2
+       AND source IN ('offer', 'task_execution')`,
     [user_id, today]
   );
   
-  if(earnings.rows[0].total < 0.03){
-    return c.json({ success: false, message: "❌ Need $0.03+ earnings to claim" });
+  const todayEarnings = parseFloat(earnings.rows[0].total);
+  
+  // ✅ التحقق من الوصول إلى العتبة ($0.03)
+  if(todayEarnings < 0.03){
+    return c.json({ 
+      success: false, 
+      message: `❌ Need $0.03+ earnings to claim. You have $${todayEarnings.toFixed(4)}` 
+    });
   }
   
+  // ✅ التحقق من عدم المطالبة المسبقة
   const alreadyClaimed = await pool.query(
     `SELECT id FROM daily_rewards WHERE user_id = $1 AND claim_date = $2`,
     [user_id, today]
@@ -649,22 +661,36 @@ app.post('/api/daily-rewards/claim', async (c) => {
     return c.json({ success: false, message: "❌ Already claimed today" });
   }
   
+  // ✅ حساب المكافأة: 5% من أرباح اليوم
+  const REWARD_PERCENTAGE = 0.05; // 5%
+  const rewardAmount = todayEarnings * REWARD_PERCENTAGE;
+  
   await pool.query(`BEGIN`);
   try{
+    // إضافة المكافأة إلى رصيد المستخدم
     await pool.query(
-      `UPDATE users SET balance = balance + 0.002 WHERE telegram_id = $1`,
-      [user_id]
+      `UPDATE users SET balance = balance + $1 WHERE telegram_id = $2`,
+      [rewardAmount, user_id]
     );
+    
+    // تسجيل المطالبة في جدول daily_rewards
     await pool.query(
       `INSERT INTO daily_rewards (user_id, today_earnings, reward_amount, claimed, claim_date) 
-       VALUES ($1, $2, 0.002, true, $3)`,
-      [user_id, earnings.rows[0].total, today]
+       VALUES ($1, $2, $3, true, $4)`,
+      [user_id, todayEarnings, rewardAmount, today]
     );
+    
     await pool.query(`COMMIT`);
     
-    return c.json({ success: true, message: "✅ Reward claimed!", new_balance: true });
+    return c.json({ 
+      success: true, 
+      message: `✅ Reward claimed! You earned $${rewardAmount.toFixed(4)} (5% of $${todayEarnings.toFixed(4)})`,
+      reward_amount: rewardAmount,
+      today_earnings: todayEarnings
+    });
   } catch(e){
     await pool.query(`ROLLBACK`);
+    console.error('❌ Daily reward claim error:', e);
     return c.json({ success: false, message: "❌ Database error" });
   }
 });
