@@ -6051,12 +6051,10 @@ const totalCost =
   }
 }
 
-// ======================= 🧠 QUIZ SYSTEM =======================
+// ======================= 🧠 QUIZ SYSTEM (Updated) =======================
 
-// ذاكرة مؤقتة للأسئلة النشطة (الإجابة الصحيحة هنا فقط!)
 const activeQuizQuestions = new Map();
 
-// توليد UUID فريد
 function generateQuizId() {
   return crypto.randomUUID ? crypto.randomUUID() : 
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -6065,23 +6063,13 @@ function generateQuizId() {
     });
 }
 
-// فك تشفير HTML entities من Open Trivia DB
 function decodeHTML(text) {
-  return text
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&rsquo;/g, "'")
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
-    .replace(/&eacute;/g, 'é')
-    .replace(/&egrave;/g, 'è')
-    .replace(/&ecirc;/g, 'ê');
+  return text.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&')
+             .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&rsquo;/g, "'")
+             .replace(/&ldquo;/g, '"').replace(/&rdquo;/g, '"').replace(/&eacute;/g, 'é')
+             .replace(/&egrave;/g, 'è').replace(/&ecirc;/g, 'ê');
 }
 
-// خلط مصفوفة (Fisher-Yates)
 function shuffleArray(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -6091,7 +6079,6 @@ function shuffleArray(arr) {
   return a;
 }
 
-// جلب إعدادات الكويز
 async function getQuizSettings() {
   try {
     const res = await pool.query('SELECT key, value FROM quiz_settings');
@@ -6100,47 +6087,48 @@ async function getQuizSettings() {
     return {
       points_per_1000: parseFloat(settings.points_per_1000 || '0.10'),
       min_conversion_points: parseInt(settings.min_conversion_points || '1000'),
-      max_questions_per_day: parseInt(settings.max_questions_per_day || '50')
+      max_questions_per_day: parseInt(settings.max_questions_per_day || '200') // ✅ محدث إلى 200
     };
   } catch (e) {
-    return { points_per_1000: 0.10, min_conversion_points: 1000, max_questions_per_day: 50 };
-  }
+    return { points_per_1000: 0.10, min_conversion_points: 1000, max_questions_per_day: 200 };
+    }
 }
 
-// ✅ 1. جلب سؤال عشوائي
+// ✅ 1. جلب سؤال عشوائي مع صعوبة تصاعدية
 app.get('/api/quiz/question', async (c) => {
   try {
     const userId = c.req.query('user_id');
-    if (!userId || !/^\d+$/.test(userId)) {
-      return c.json({ success: false, message: "Invalid user_id" }, 400);
-    }
+    if (!userId || !/^\d+$/.test(userId)) return c.json({ success: false, message: "Invalid user_id" }, 400);
 
     const settings = await getQuizSettings();
 
-    // تهيئة أو تحديث نقاط المستخدم
     await pool.query(
-      `INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date)
-       VALUES ($1, 0, 0, CURRENT_DATE)
+      `INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
+       VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
        ON CONFLICT (user_id) DO UPDATE SET 
          questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
-         last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END`,
+         last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
+         weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
+         last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END`,
       [userId]
     );
 
-    // فحص الحد اليومي
-    const userPoints = await pool.query(
-      'SELECT questions_today, points FROM quiz_points WHERE user_id = $1',
-      [userId]
-    );
+    const userPoints = await pool.query('SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1', [userId]);
+    const qToday = userPoints.rows[0].questions_today;
 
-    if (userPoints.rows[0].questions_today >= settings.max_questions_per_day) {
+    if (qToday >= settings.max_questions_per_day) {
       return c.json({ success: false, message: "DAILY_LIMIT", points: userPoints.rows[0].points });
     }
 
-    // جلب سؤال من Open Trivia DB (مجاني، لا يحتاج مفتاح)
+    // ✅ تحديد الصعوبة بناءً على عدد الأسئلة المجابة اليوم
+    let difficulty = 'easy';
+    if (qToday > 50) difficulty = 'medium';
+    if (qToday > 100) difficulty = 'hard';
+
     let questionData;
     try {
-      const apiRes = await fetch('https://opentdb.com/api.php?amount=1&type=multiple&difficulty=medium&encode=url3986');
+      // جلب سؤال بالصعوبة المحددة من Open Trivia DB
+      const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&encode=url3986`);
       const apiData = await apiRes.json();
       
       if (apiData.response_code === 0 && apiData.results.length > 0) {
@@ -6157,35 +6145,28 @@ app.get('/api/quiz/question', async (c) => {
       console.error('❌ Open Trivia DB API error:', apiErr);
     }
 
-    // إذا فشل API، استخدم سؤال احتياطي
     if (!questionData) {
-      const fallbackQuestions = [
-        { question: "What is the largest planet in our solar system?", correctAnswer: "Jupiter", incorrectAnswers: ["Mars", "Saturn", "Neptune"], category: "Science", difficulty: "easy" },
+      const fallback = [
+        { question: "What is the largest planet?", correctAnswer: "Jupiter", incorrectAnswers: ["Mars", "Saturn", "Neptune"], category: "Science", difficulty: "easy" },
         { question: "Which language has the most native speakers?", correctAnswer: "Mandarin Chinese", incorrectAnswers: ["English", "Spanish", "Hindi"], category: "General Knowledge", difficulty: "medium" },
-        { question: "What is the chemical symbol for gold?", correctAnswer: "Au", incorrectAnswers: ["Ag", "Fe", "Cu"], category: "Science", difficulty: "easy" },
-        { question: "In which year did the Titanic sink?", correctAnswer: "1912", incorrectAnswers: ["1905", "1920", "1898"], category: "History", difficulty: "medium" },
-        { question: "What is the smallest country in the world?", correctAnswer: "Vatican City", incorrectAnswers: ["Monaco", "San Marino", "Liechtenstein"], category: "Geography", difficulty: "easy" }
+        { question: "What is the speed of light in km/s?", correctAnswer: "299,792", incorrectAnswers: ["150,000", "400,000", "1,000,000"], category: "Science", difficulty: "hard" }
       ];
-      questionData = fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
+      questionData = fallback[Math.floor(Math.random() * fallback.length)];
     }
 
-    // خلط الإجابات
     const allAnswers = [questionData.correctAnswer, ...questionData.incorrectAnswers];
     const shuffledAnswers = shuffleArray(allAnswers);
     const correctIndex = shuffledAnswers.indexOf(questionData.correctAnswer);
-
-    // إنشاء معرف فريد للسؤال
     const questionId = generateQuizId();
 
-    // حفظ الإجابة الصحيحة في الذاكرة المؤقتة (لا تُرسل للمتصفح!)
     activeQuizQuestions.set(questionId, {
       correctAnswerIndex: correctIndex,
       userId: userId,
       createdAt: Date.now(),
-      answered: false
+      answered: false,
+      skipped: false
     });
 
-    // حذف السؤال بعد 120 ثانية تلقائياً
     setTimeout(() => activeQuizQuestions.delete(questionId), 120000);
 
     return c.json({
@@ -6196,7 +6177,8 @@ app.get('/api/quiz/question', async (c) => {
       category: questionData.category,
       difficulty: questionData.difficulty,
       points: userPoints.rows[0].points,
-      questionsLeft: settings.max_questions_per_day - userPoints.rows[0].questions_today
+      weekly_score: userPoints.rows[0].weekly_score,
+      questionsLeft: settings.max_questions_per_day - qToday
     });
 
   } catch (err) {
@@ -6209,101 +6191,106 @@ app.get('/api/quiz/question', async (c) => {
 app.post('/api/quiz/answer', async (c) => {
   try {
     const { questionId, answerIndex, userId } = await c.req.json();
-
-    if (!questionId || answerIndex === undefined || !userId) {
-      return c.json({ success: false, message: "Missing data" }, 400);
-    }
+    if (!questionId || answerIndex === undefined || !userId) return c.json({ success: false, message: "Missing data" }, 400);
 
     const question = activeQuizQuestions.get(questionId);
-
-    // فحص الأمان
-    if (!question) {
-      return c.json({ success: false, message: "EXPIRED" });
-    }
-    if (question.userId !== userId.toString()) {
-      return c.json({ success: false, message: "UNAUTHORIZED" });
-    }
-    if (question.answered) {
-      return c.json({ success: false, message: "ALREADY_ANSWERED" });
-    }
-    // منع الإجابة السريعة جداً (أقل من 2 ثانية = غش)
-    if (Date.now() - question.createdAt < 2000) {
-      return c.json({ success: false, message: "TOO_FAST" });
-    }
+    if (!question) return c.json({ success: false, message: "EXPIRED" });
+    if (question.userId !== userId.toString()) return c.json({ success: false, message: "UNAUTHORIZED" });
+    if (question.answered || question.skipped) return c.json({ success: false, message: "ALREADY_PROCESSED" });
+    if (Date.now() - question.createdAt < 2000) return c.json({ success: false, message: "TOO_FAST" });
 
     const isCorrect = answerIndex === question.correctAnswerIndex;
     question.answered = true;
 
-    // تحديث عداد الأسئلة اليومية
-    await pool.query(
-      'UPDATE quiz_points SET questions_today = questions_today + 1 WHERE user_id = $1',
-      [userId]
-    );
+    await pool.query('UPDATE quiz_points SET questions_today = questions_today + 1 WHERE user_id = $1', [userId]);
 
-    return c.json({
-      success: true,
-      correct: isCorrect,
-      correctIndex: question.correctAnswerIndex
-    });
-
+    return c.json({ success: true, correct: isCorrect, correctIndex: question.correctAnswerIndex });
   } catch (err) {
     console.error('❌ /api/quiz/answer:', err);
     return c.json({ success: false, message: "Server error" }, 500);
   }
 });
 
-// ✅ 3. إضافة نقاط بعد مشاهدة الإعلان
+// ✅ 3. تخطي السؤال بعد مشاهدة الإعلان (انتهاء الوقت)
+app.post('/api/quiz/skip', async (c) => {
+  try {
+    const { questionId, userId, adCompleted } = await c.req.json();
+    if (!questionId || !userId) return c.json({ success: false, message: "Missing data" }, 400);
+
+    const question = activeQuizQuestions.get(questionId);
+    if (!question || question.userId !== userId.toString()) return c.json({ success: false, message: "INVALID" });
+    if (question.answered || question.skipped) return c.json({ success: false, message: "ALREADY_PROCESSED" });
+
+    question.skipped = true; // منع الإجابة عليه لاحقاً
+
+    await pool.query('UPDATE quiz_points SET questions_today = questions_today + 1 WHERE user_id = $1', [userId]);
+
+    // إذا شاهد الإعلان بالكامل، نمنحه نقطة تشجيعية واحدة
+    if (adCompleted) {
+      await pool.query(
+        `INSERT INTO quiz_points (user_id, points, total_earned, weekly_score)
+         VALUES ($1, 1, 1, 1)
+         ON CONFLICT (user_id) DO UPDATE SET 
+           points = quiz_points.points + 1,
+           total_earned = quiz_points.total_earned + 1,
+           weekly_score = quiz_points.weekly_score + 1`,
+        [userId]
+      );
+    }
+
+    const updated = await pool.query('SELECT points FROM quiz_points WHERE user_id = $1', [userId]);
+    return c.json({ success: true, earned: adCompleted ? 1 : 0, total_points: updated.rows[0]?.points || 0 });
+  } catch (err) {
+    console.error('❌ /api/quiz/skip:', err);
+    return c.json({ success: false, message: "Server error" }, 500);
+  }
+});
+
+// ✅ 4. إضافة نقاط بعد الإجابة الصحيحة ومشاهدة الإعلان
 app.post('/api/quiz/add-points', async (c) => {
   try {
     const { userId, points, adCompleted } = await c.req.json();
+    if (!userId || !/^\d+$/.test(userId.toString())) return c.json({ success: false, message: "Invalid user_id" }, 400);
 
-    if (!userId || !/^\d+$/.test(userId.toString())) {
-      return c.json({ success: false, message: "Invalid user_id" }, 400);
-    }
-
-    // تحديد النقاط: 2 إذا شاهد بالكامل، 1 إذا تخطى
-    const earnedPoints = adCompleted ? 2 : 1;
+    const earnedPoints = adCompleted ? 2 : 1; // 2 للإعلان المكتمل، 1 للتخطي
 
     await pool.query(
-      `INSERT INTO quiz_points (user_id, points, total_earned)
-       VALUES ($1, $2, $2)
+      `INSERT INTO quiz_points (user_id, points, total_earned, weekly_score)
+       VALUES ($1, $2, $2, $2)
        ON CONFLICT (user_id) DO UPDATE SET 
          points = quiz_points.points + $2,
-         total_earned = quiz_points.total_earned + $2`,
+         total_earned = quiz_points.total_earned + $2,
+         weekly_score = quiz_points.weekly_score + $2`,
       [userId, earnedPoints]
     );
 
-    const updated = await pool.query(
-      'SELECT points FROM quiz_points WHERE user_id = $1',
-      [userId]
-    );
-
-    return c.json({
-      success: true,
-      earned: earnedPoints,
-      total_points: updated.rows[0]?.points || 0
-    });
-
+    const updated = await pool.query('SELECT points FROM quiz_points WHERE user_id = $1', [userId]);
+    return c.json({ success: true, earned: earnedPoints, total_points: updated.rows[0]?.points || 0 });
   } catch (err) {
     console.error('❌ /api/quiz/add-points:', err);
     return c.json({ success: false, message: "Server error" }, 500);
   }
 });
 
-// ✅ 4. جلب نقاط المستخدم
+// ✅ 5. جلب نقاط المستخدم والمتصدرين
 app.get('/api/quiz/points', async (c) => {
   try {
     const userId = c.req.query('user_id');
     if (!userId) return c.json({ success: false, message: "user_id required" }, 400);
 
     const settings = await getQuizSettings();
+    const res = await pool.query('SELECT points, total_earned, total_converted, questions_today, weekly_score FROM quiz_points WHERE user_id = $1', [userId]);
+    const data = res.rows[0] || { points: 0, total_earned: 0, total_converted: 0, questions_today: 0, weekly_score: 0 };
 
-    const res = await pool.query(
-      'SELECT points, total_earned, total_converted, questions_today FROM quiz_points WHERE user_id = $1',
-      [userId]
+    // جلب المتصدرين الأسبوعيين (Top 5)
+    const leaderboard = await pool.query(
+      `SELECT u.username, qp.weekly_score 
+       FROM quiz_points qp 
+       JOIN users u ON qp.user_id = u.telegram_id 
+       WHERE qp.weekly_score > 0 
+       ORDER BY qp.weekly_score DESC 
+       LIMIT 5`
     );
-
-    const data = res.rows[0] || { points: 0, total_earned: 0, total_converted: 0, questions_today: 0 };
 
     return c.json({
       success: true,
@@ -6311,9 +6298,10 @@ app.get('/api/quiz/points', async (c) => {
       total_earned: data.total_earned,
       total_converted: data.total_converted,
       questions_today: data.questions_today,
-      settings: settings
+      weekly_score: data.weekly_score,
+      settings: settings,
+      leaderboard: leaderboard.rows
     });
-
   } catch (err) {
     console.error('❌ /api/quiz/points:', err);
     return c.json({ success: false, message: "Server error" }, 500);
