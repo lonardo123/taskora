@@ -6055,6 +6055,7 @@ const totalCost =
 
 const activeQuizQuestions = new Map();
 
+// توليد معرف فريد للسؤال
 function generateQuizId() {
   return crypto.randomUUID ? crypto.randomUUID() : 
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -6063,13 +6064,26 @@ function generateQuizId() {
     });
 }
 
+// فك تشفير رموز HTML القادمة من API
 function decodeHTML(text) {
-  return text.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&')
-             .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&rsquo;/g, "'")
-             .replace(/&ldquo;/g, '"').replace(/&rdquo;/g, '"').replace(/&eacute;/g, 'é')
-             .replace(/&egrave;/g, 'è').replace(/&ecirc;/g, 'ê');
+  if (!text) return '';
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&rsquo;/g, "'")
+    .replace(/&ldquo;/g, '"')
+    .replace(/&rdquo;/g, '"')
+    .replace(/&eacute;/g, 'é')
+    .replace(/&egrave;/g, 'è')
+    .replace(/&ecirc;/g, 'ê')
+    .replace(/&aacute;/g, 'á')
+    .replace(/&agrave;/g, 'à');
 }
 
+// خلط الإجابات عشوائياً
 function shuffleArray(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -6079,6 +6093,7 @@ function shuffleArray(arr) {
   return a;
 }
 
+// جلب إعدادات الكويز من قاعدة البيانات
 async function getQuizSettings() {
   try {
     const res = await pool.query('SELECT key, value FROM quiz_settings');
@@ -6087,21 +6102,30 @@ async function getQuizSettings() {
     return {
       points_per_1000: parseFloat(settings.points_per_1000 || '0.10'),
       min_conversion_points: parseInt(settings.min_conversion_points || '1000'),
-      max_questions_per_day: parseInt(settings.max_questions_per_day || '200') // ✅ محدث إلى 200
+      max_questions_per_day: parseInt(settings.max_questions_per_day || '200') // الحد الأقصى 200
     };
   } catch (e) {
     return { points_per_1000: 0.10, min_conversion_points: 1000, max_questions_per_day: 200 };
-    }
+  }
 }
 
-// ✅ 1. جلب سؤال عشوائي مع صعوبة تصاعدية
+// تخزين الأسئلة النشطة مؤقتاً للتحقق من الإجابات (لمنع الغش)
+const activeQuizQuestions = new Map();
+
+// ======================= 🧠 QUIZ SYSTEM: GET QUESTION =======================
+
 app.get('/api/quiz/question', async (c) => {
   try {
     const userId = c.req.query('user_id');
-    if (!userId || !/^\d+$/.test(userId)) return c.json({ success: false, message: "Invalid user_id" }, 400);
+    const lang = (c.req.query('lang') || 'en').toLowerCase(); // ✅ استقبال اللغة من الواجهة
+    
+    if (!userId || !/^\d+$/.test(userId)) {
+      return c.json({ success: false, message: "Invalid user_id" }, 400);
+    }
 
     const settings = await getQuizSettings();
 
+    // 1. تهيئة أو تحديث بيانات المستخدم اليومية والأسبوعية
     await pool.query(
       `INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
        VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
@@ -6113,22 +6137,35 @@ app.get('/api/quiz/question', async (c) => {
       [userId]
     );
 
-    const userPoints = await pool.query('SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1', [userId]);
+    const userPoints = await pool.query(
+      'SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1', 
+      [userId]
+    );
     const qToday = userPoints.rows[0].questions_today;
 
+    // 2. التحقق من الحد الأقصى اليومي (200 سؤال)
     if (qToday >= settings.max_questions_per_day) {
-      return c.json({ success: false, message: "DAILY_LIMIT", points: userPoints.rows[0].points });
+      return c.json({ 
+        success: false, 
+        message: "DAILY_LIMIT", 
+        points: userPoints.rows[0].points 
+      });
     }
 
-    // ✅ تحديد الصعوبة بناءً على عدد الأسئلة المجابة اليوم
+    // 3. تحديد مستوى الصعوبة تصاعدياً بناءً على عدد الأسئلة المجابة
     let difficulty = 'easy';
     if (qToday > 50) difficulty = 'medium';
     if (qToday > 100) difficulty = 'hard';
 
-    let questionData;
+    let questionData = null;
+
+    // 4. ✅ منطق موحد لجلب السؤال من API لجميع اللغات المدعومة (بما فيها العربية 'ar')
+    const supportedApiLangs = ['ar', 'en', 'fr', 'es', 'pt', 'de', 'ja'];
+    const dbLang = supportedApiLangs.includes(lang) ? lang : 'en';
+
     try {
-      // جلب سؤال بالصعوبة المحددة من Open Trivia DB
-      const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&encode=url3986`);
+      // طلب السؤال من Open Trivia DB باللغة المحددة
+      const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=${dbLang}&encode=url3986`);
       const apiData = await apiRes.json();
       
       if (apiData.response_code === 0 && apiData.results.length > 0) {
@@ -6142,23 +6179,27 @@ app.get('/api/quiz/question', async (c) => {
         };
       }
     } catch (apiErr) {
-      console.error('❌ Open Trivia DB API error:', apiErr);
+      console.error(`❌ Open Trivia DB API error for lang ${dbLang}:`, apiErr);
     }
 
+    // 5. ✅ Fallback احتياطي بسيط جداً فقط في حال فشل الاتصال بالـ API تماماً
     if (!questionData) {
-      const fallback = [
-        { question: "What is the largest planet?", correctAnswer: "Jupiter", incorrectAnswers: ["Mars", "Saturn", "Neptune"], category: "Science", difficulty: "easy" },
-        { question: "Which language has the most native speakers?", correctAnswer: "Mandarin Chinese", incorrectAnswers: ["English", "Spanish", "Hindi"], category: "General Knowledge", difficulty: "medium" },
-        { question: "What is the speed of light in km/s?", correctAnswer: "299,792", incorrectAnswers: ["150,000", "400,000", "1,000,000"], category: "Science", difficulty: "hard" }
-      ];
-      questionData = fallback[Math.floor(Math.random() * fallback.length)];
+      questionData = { 
+        question: lang === 'ar' ? "ما هي عاصمة فرنسا؟" : (lang === 'fr' ? "Quelle est la capitale de la France?" : "What is the capital of France?"), 
+        correctAnswer: lang === 'ar' ? "باريس" : (lang === 'fr' ? "Paris" : "Paris"), 
+        incorrectAnswers: lang === 'ar' ? ["لندن", "برلين", "مدريد"] : (lang === 'fr' ? ["Londres", "Berlin", "Madrid"] : ["London", "Berlin", "Madrid"]), 
+        category: "Geography", 
+        difficulty: "easy" 
+      };
     }
 
+    // 6. خلط الإجابات وتحديد موقع الإجابة الصحيحة
     const allAnswers = [questionData.correctAnswer, ...questionData.incorrectAnswers];
     const shuffledAnswers = shuffleArray(allAnswers);
     const correctIndex = shuffledAnswers.indexOf(questionData.correctAnswer);
     const questionId = generateQuizId();
 
+    // 7. حفظ الإجابة الصحيحة في الذاكرة المؤقتة للسيرفر (لمنع الغش)
     activeQuizQuestions.set(questionId, {
       correctAnswerIndex: correctIndex,
       userId: userId,
@@ -6167,8 +6208,10 @@ app.get('/api/quiz/question', async (c) => {
       skipped: false
     });
 
+    // حذف السؤال من الذاكرة بعد 120 ثانية (دقيقتين) لتوفير المساحة
     setTimeout(() => activeQuizQuestions.delete(questionId), 120000);
 
+    // 8. إرسال البيانات للواجهة الأمامية
     return c.json({
       success: true,
       questionId: questionId,
