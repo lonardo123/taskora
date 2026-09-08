@@ -6051,13 +6051,16 @@ const totalCost =
   }
 }
 
-// ======================= 🧠 QUIZ SYSTEM (Updated) =======================
+// ======================= 🧠 QUIZ SYSTEM HELPERS =======================
 
+// تعريف المتغير مرة واحدة فقط (هذا هو التصحيح)
 const activeQuizQuestions = new Map();
 
 // توليد معرف فريد للسؤال
 function generateQuizId() {
-  return crypto.randomUUID ? crypto.randomUUID() : 
+  // في Cloudflare Workers، crypto متاح عالمياً، ولكن نستخدم fallback للأمان
+  const cryptoObj = typeof crypto !== 'undefined' ? crypto : require('crypto');
+  return cryptoObj.randomUUID ? cryptoObj.randomUUID() : 
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0;
       return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
@@ -6102,22 +6105,19 @@ async function getQuizSettings() {
     return {
       points_per_1000: parseFloat(settings.points_per_1000 || '0.10'),
       min_conversion_points: parseInt(settings.min_conversion_points || '1000'),
-      max_questions_per_day: parseInt(settings.max_questions_per_day || '200') // الحد الأقصى 200
+      max_questions_per_day: parseInt(settings.max_questions_per_day || '200')
     };
   } catch (e) {
     return { points_per_1000: 0.10, min_conversion_points: 1000, max_questions_per_day: 200 };
   }
 }
 
-// تخزين الأسئلة النشطة مؤقتاً للتحقق من الإجابات (لمنع الغش)
-const activeQuizQuestions = new Map();
-
 // ======================= 🧠 QUIZ SYSTEM: GET QUESTION =======================
 
 app.get('/api/quiz/question', async (c) => {
   try {
     const userId = c.req.query('user_id');
-    const lang = (c.req.query('lang') || 'en').toLowerCase(); // ✅ استقبال اللغة من الواجهة
+    const lang = (c.req.query('lang') || 'en').toLowerCase();
     
     if (!userId || !/^\d+$/.test(userId)) {
       return c.json({ success: false, message: "Invalid user_id" }, 400);
@@ -6152,19 +6152,18 @@ app.get('/api/quiz/question', async (c) => {
       });
     }
 
-    // 3. تحديد مستوى الصعوبة تصاعدياً بناءً على عدد الأسئلة المجابة
+    // 3. تحديد مستوى الصعوبة تصاعدياً
     let difficulty = 'easy';
     if (qToday > 50) difficulty = 'medium';
     if (qToday > 100) difficulty = 'hard';
 
     let questionData = null;
 
-    // 4. ✅ منطق موحد لجلب السؤال من API لجميع اللغات المدعومة (بما فيها العربية 'ar')
+    // 4. منطق موحد لجلب السؤال من API لجميع اللغات المدعومة
     const supportedApiLangs = ['ar', 'en', 'fr', 'es', 'pt', 'de', 'ja'];
     const dbLang = supportedApiLangs.includes(lang) ? lang : 'en';
 
     try {
-      // طلب السؤال من Open Trivia DB باللغة المحددة
       const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=${dbLang}&encode=url3986`);
       const apiData = await apiRes.json();
       
@@ -6182,7 +6181,7 @@ app.get('/api/quiz/question', async (c) => {
       console.error(`❌ Open Trivia DB API error for lang ${dbLang}:`, apiErr);
     }
 
-    // 5. ✅ Fallback احتياطي بسيط جداً فقط في حال فشل الاتصال بالـ API تماماً
+    // 5. Fallback احتياطي في حال فشل الاتصال بالـ API
     if (!questionData) {
       questionData = { 
         question: lang === 'ar' ? "ما هي عاصمة فرنسا؟" : (lang === 'fr' ? "Quelle est la capitale de la France?" : "What is the capital of France?"), 
@@ -6208,7 +6207,7 @@ app.get('/api/quiz/question', async (c) => {
       skipped: false
     });
 
-    // حذف السؤال من الذاكرة بعد 120 ثانية (دقيقتين) لتوفير المساحة
+    // حذف السؤال من الذاكرة بعد 120 ثانية لتوفير المساحة
     setTimeout(() => activeQuizQuestions.delete(questionId), 120000);
 
     // 8. إرسال البيانات للواجهة الأمامية
