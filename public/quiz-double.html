@@ -15,7 +15,7 @@
     height: 100vh; 
     margin: 0; 
     font-family: sans-serif; 
-    overflow: hidden; /* منع التمرير */
+    overflow: hidden;
   }
   .spinner { 
     width: 40px; 
@@ -27,7 +27,6 @@
     margin-bottom: 20px; 
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -37,11 +36,11 @@
 
   <script>
     async function complete() {
-      // 1. جلب البيانات من sessionStorage فقط (أكثر موثوقية في AppCreator24)
-      const userId = sessionStorage.getItem('quiz_user_id');
-      const rewardId = sessionStorage.getItem('quiz_reward_id');
+      // ✅ القراءة من localStorage (أكثر أماناً في AppCreator24)
+      const userId = localStorage.getItem('quiz_user_id');
+      const rewardId = localStorage.getItem('quiz_reward_id');
       
-      // 2. ✅ إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت (بدون عرض أي خطأ)
+      // إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت تام (بدون أي رسائل)
       if (!userId || !rewardId) {
         window.location.href = 'quiz.html';
         return;
@@ -54,15 +53,13 @@
           body: JSON.stringify({ rewardId, userId: userId })
         });
         
-        const data = await res.json();
+        // تنظيف البيانات بعد الاستخدام
+        localStorage.removeItem('quiz_reward_id');
+        localStorage.removeItem('quiz_reward_action');
+        localStorage.removeItem('quiz_reward_question_id');
+        // ملاحظة: نحتفظ بـ quiz_user_id في localStorage لأنه قد يحتاجه لاحقاً
         
-        // 3. تنظيف البيانات بعد الاستخدام
-        sessionStorage.removeItem('quiz_user_id');
-        sessionStorage.removeItem('quiz_reward_id');
-        sessionStorage.removeItem('quiz_reward_action');
-        sessionStorage.removeItem('quiz_reward_question_id');
-        
-        // 4. العودة إلى صفحة الكويز الرئيسية لتحديث الحالة
+        // العودة إلى صفحة الكويز الرئيسية
         window.location.href = `quiz.html?user_id=${userId}`;
         
       } catch (e) {
