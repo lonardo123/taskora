@@ -1,173 +1,64 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
-
-  <title>Taskora - Skip Reward</title>
-
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: Arial, sans-serif;
-      background: #f5f7fb;
-    }
-
-    .box {
-      width: min(420px, 90%);
-      background: #fff;
-      padding: 30px;
-      border-radius: 18px;
-      text-align: center;
-      box-shadow: 0 8px 30px rgba(0,0,0,.08);
-    }
-
-    .icon {
-      font-size: 50px;
-    }
-
-    #message {
-      color: #666;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Processing...</title>
+<style>
+  body { background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+  .spinner { width: 40px; height: 40px; border: 4px solid #334155; border-top-color: #8b5cf6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
 </head>
-
 <body>
+  <div class="spinner"></div>
+    <h3>⏭️ Skipping Question...</h3>
+  <p style="color: #94a3b8; font-size: 14px; margin-top: 10px;">Verifying with server</p>
 
-<div class="box">
+  <script>
+    async function complete() {
+      const rewardId = sessionStorage.getItem('quiz_reward_id');
+      const userId = sessionStorage.getItem('quiz_reward_id') ? sessionStorage.getItem('quiz_user_id_backup') || new URLSearchParams(window.location.search).get('user_id') : null; 
+      // ملاحظة: نفضل الاعتماد على sessionStorage كما تم حفظه في quiz.html
+      
+      if (!rewardId) {
+        window.location.href = 'quiz.html'; // عودة آمنة إذا لم توجد بيانات
+        return;
+      }
 
-  <div class="icon">⏭️</div>
+      // نحتاج user_id، وهو محفوظ في quiz.html، لكن لضمان عمله في AC24، سنمرره عبر URL إذا أمكن، أو نعتمد على أن AC24 يحافظ على sessionStorage.
+      // الحل الأضمن: استخراج user_id من URL الحالي إذا مرره AC24، أو من sessionStorage
+      const finalUserId = sessionStorage.getItem('quiz_user_id') || new URLSearchParams(window.location.search).get('user_id');
 
-  <h2>Skip Question</h2>
+      if (!finalUserId) {
+         // محاولة استخلاصه منreferrer أو العودة
+         window.location.href = 'quiz.html';
+         return;
+      }
 
-  <p id="message">
-    Completing your reward...
-  </p>
-
-</div>
-
-<script>
-
-const API =
-  "https://taskora.taskora.workers.dev";
-
-async function completeReward() {
-
-  const rewardId =
-    localStorage.getItem(
-      "quiz_reward_id"
-    );
-
-  const userId =
-    localStorage.getItem(
-      "telegram_id"
-    );
-
-  const action =
-    localStorage.getItem(
-      "quiz_reward_action"
-    );
-
-  if (
-    !rewardId ||
-    !userId ||
-    action !== "skip"
-  ) {
-
-    document.getElementById(
-      "message"
-    ).textContent =
-      "Invalid reward session.";
-
-    return;
-  }
-
-  try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/reward/complete`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              rewardId,
-              userId
-            })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) {
-
-      document.getElementById(
-        "message"
-      ).textContent =
-        data.message ||
-        "Skip could not be completed.";
-
-      return;
+      try {
+        const res = await fetch('https://taskora.taskora.workers.dev/api/quiz/reward/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rewardId, userId: finalUserId })
+        });
+        const data = await res.json();
+        
+        // تنظيف
+        sessionStorage.removeItem('quiz_reward_id');
+        sessionStorage.removeItem('quiz_reward_action');
+        sessionStorage.removeItem('quiz_reward_question_id');
+        
+        // العودة إلى صفحة الكويز
+        window.location.href = `quiz.html?user_id=${finalUserId}`;
+      } catch (e) {
+        console.error(e);
+        window.location.href = `quiz.html?user_id=${finalUserId}`;
+      }
     }
-
-    localStorage.removeItem(
-      "quiz_reward_id"
-    );
-
-    localStorage.removeItem(
-      "quiz_reward_action"
-    );
-
-    localStorage.removeItem(
-      "quiz_reward_question_id"
-    );
-
-    document.getElementById(
-      "message"
-    ).textContent =
-      "Question skipped successfully.";
-
-    setTimeout(
-      () => {
-
-        window.location.href =
-          "quiz.html";
-
-      },
-      700
-    );
-
-  } catch (error) {
-
-    console.error(
-      error
-    );
-
-    document.getElementById(
-      "message"
-    ).textContent =
-      "Unable to complete skip.";
-  }
-}
-
-completeReward();
-
-</script>
-
+    
+    // تنفيذ فوراً عند تحميل القسم
+    window.onload = complete;
+  </script>
 </body>
 </html>
