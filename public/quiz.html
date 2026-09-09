@@ -329,18 +329,25 @@ function showActionArea(resultKey, primaryAction) {
   area.style.display = 'block';
 }
 
-// ================= دالة تحميل السؤال (مع تسريع عبر Timeout) =================
+// ================= دالة تحميل السؤال (سريعة ومترجمة) =================
+let questionLoadAttempts = 0;
+const MAX_LOAD_ATTEMPTS = 2; // تقليل المحاولات لزيادة السرعة
+
 async function loadQuestion() {
-  document.getElementById('loadingOverlay').style.display = 'flex';
+  const overlay = document.getElementById('loadingOverlay');
+  const loadingText = document.getElementById('loadingText');
+  
+  if (overlay) overlay.style.display = 'flex';
   document.getElementById('actionArea').style.display = 'none';
   document.getElementById('answersGrid').innerHTML = '';
   
+  questionLoadAttempts++;
+  
   try {
-    // حفظ معرف المستخدم في localStorage لضمان عدم ضياعه عند الانتقال بين الصفحات
     localStorage.setItem('quiz_user_id', quizUserId);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500); // مهلة 2.5 ثانية كحد أقصى
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // مهلة 4 ثواني كحد أقصى
 
     const res = await fetch(`${API_BASE}/api/quiz/question?user_id=${quizUserId}&lang=${currentLang}`, {
       signal: controller.signal
@@ -349,14 +356,40 @@ async function loadQuestion() {
     
     const data = await res.json();
     
+    // ✅ معالجة الحد اليومي برسالة مترجمة
     if (!data.success) {
-      if (data.message === 'DAILY_LIMIT') {
-        document.getElementById('qText').textContent = currentLang === 'ar' ? 'لقد وصلت للحد اليومي (200 سؤال). عد غداً!' : 'Daily limit (200) reached. Come back tomorrow!';
-        document.getElementById('loadingOverlay').style.display = 'none';
+      if (data.message === 'DAILY_LIMIT_REACHED') {
+        if (overlay) overlay.style.display = 'none';
+        
+        // ترجمات رسالة الحد اليومي
+        const limitMessages = {
+          ar: '🎉 لقد وصلت للحد اليومي (200 سؤال). عد غداً لمزيد من التحديات!',
+          en: '🎉 Daily limit (200 questions) reached. Come back tomorrow!',
+          fr: '🎉 Limite quotidienne (200 questions) atteinte. Revenez demain !',
+          es: '🎉 Límite diario (200 preguntas) alcanzado. ¡Vuelve mañana!',
+          pt: '🎉 Limite diário (200 perguntas) atingido. Volte amanhã!',
+          de: '🎉 Tageslimit (200 Fragen) erreicht. Kommen Sie morgen wieder!',
+          ja: '🎉 1日の制限（200問）に達しました。明日またお越しください！'
+        };
+        
+        document.getElementById('qText').textContent = limitMessages[currentLang] || limitMessages['en'];
+        document.getElementById('qCategory').textContent = '🏆';
+        document.getElementById('qDifficulty').textContent = '';
+        document.getElementById('qLeft').textContent = '0';
+        document.getElementById('answersGrid').innerHTML = '';
+        clearInterval(timerInterval);
         return;
       }
-      throw new Error(data.message);
+      
+      if (data.message === 'API_UNAVAILABLE') {
+        throw new Error(currentLang === 'ar' ? 'خدمة الأسئلة غير متاحة حالياً، يرجى المحاولة لاحقاً.' : 'Question service unavailable, please try again.');
+      }
+      
+      throw new Error(data.message || 'Unknown error');
     }
+
+    // ✅ نجاح التحميل، إعادة تعيين العداد
+    questionLoadAttempts = 0;
 
     currentQuestionId = data.questionId;
     document.getElementById('qCategory').textContent = data.category;
@@ -373,17 +406,54 @@ async function loadQuestion() {
       grid.appendChild(btn);
     });
 
-    document.getElementById('loadingOverlay').style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
     startTimer();
 
   } catch (err) {
-    // في حال الخطأ أو انتهاء المهلة، نعرض رسالة بسيطة ونعيد المحاولة بصمت
-    console.warn('Quiz load error or timeout, using fallback:', err);
-    document.getElementById('loadingText').textContent = currentLang === 'ar' ? 'جاري تحميل سؤال بديل...' : 'Loading fallback question...';
-    setTimeout(() => loadQuestion(), 1000); // إعادة المحاولة تلقائياً
+    console.warn(`Attempt ${questionLoadAttempts} failed:`, err.message);
+    
+    if (questionLoadAttempts >= MAX_LOAD_ATTEMPTS) {
+      if (overlay) overlay.style.display = 'none';
+      document.getElementById('questionArea').innerHTML = `
+        <div style="text-align:center;padding:40px 20px;">
+          <div style="font-size:64px;margin-bottom:20px;">⚠️</div>
+          <h3 style="color:#fbbf24;margin-bottom:15px;">${currentLang === 'ar' ? 'تعذر تحميل السؤال' : 'Failed to Load'}</h3>
+          <p style="color:#94a3b8;margin-bottom:20px;">${err.message}</p>
+          <button onclick="resetAndRetry()" style="padding:12px 30px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:white;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;">
+            🔄 ${currentLang === 'ar' ? 'إعادة المحاولة' : 'Try Again'}
+          </button>
+        </div>
+      `;
+      return;
+    }
+    
+    // إعادة محاولة سريعة
+    setTimeout(() => loadQuestion(), 1000);
   }
 }
 
+// دالة إعادة التعيين عند الضغط على "Try Again"
+function resetAndRetry() {
+  questionLoadAttempts = 0;
+  document.getElementById('questionArea').innerHTML = `
+    <div class="q-meta">
+      <span class="badge" id="qCategory">Category</span>
+      <span class="badge" id="qDifficulty">⭐</span>
+      <span class="badge" id="qLeft">Left: 200</span>
+    </div>
+    <div class="q-text" id="qText">Loading question...</div>
+    <div class="answers-grid" id="answersGrid"></div>
+    <div class="action-area" id="actionArea">
+      <h3 id="actionTitle" style="margin-bottom: 15px; font-size: 18px;"></h3>
+      <button id="btnDouble" class="action-btn btn-double" onclick="requestReward('double')">🎬 <span data-i18n="doublePoints">Double Points</span></button>
+      <button id="btnRetry" class="action-btn btn-retry" onclick="requestReward('retry')">🔄 <span data-i18n="retry">Retry Question</span></button>
+      <button id="btnSkip" class="action-btn btn-skip" onclick="requestReward('skip')">⏭️ <span data-i18n="skip">Skip Question</span></button>
+      <button id="btnNext" class="action-btn btn-next" onclick="loadQuestion()" style="display:none;">➡️ <span data-i18n="next">Next Question</span></button>
+    </div>
+  `;
+  applyTranslations();
+  loadQuestion();
+}
 // ================= دالة طلب المكافأة (بدون أي رسائل مزعجة) =================
 async function requestReward(action) {
   // إخفاء أي شيء وعرض تحميل بسيط جداً
