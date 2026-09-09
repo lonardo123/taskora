@@ -6128,28 +6128,7 @@ async function getQuizSettings() {
 }
 
 // ================================================================
-// دالة مساعدة للترجمة الديناميكية (من الإنجليزية إلى لغة المستخدم)
-// ================================================================
-async function translateText(text, targetLang) {
-  if (!text || targetLang === 'en') return text;
-  
-  try {
-    // نستخدم MyMemory API المجاني للترجمة من الإنجليزية (en) إلى اللغة المطلوبة
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLang}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    if (data.responseStatus === 200 && data.responseData.translatedText) {
-      return data.responseData.translatedText;
-    }
-    return text; // في حال فشل الترجمة، نحتفظ بالنص الإنجليزي
-  } catch (err) {
-    console.error(`❌ Translation error for lang ${targetLang}:`, err);
-    return text;
-  }
-}
-// ================================================================
-// 1️⃣ GET QUIZ QUESTION (مع دعم الترجمة الديناميكية)
+// 1️⃣ GET QUIZ QUESTION (مصادر مباشرة لكل لغة - بدون ترجمة أو أسئلة ثابتة)
 // ================================================================
 app.get('/api/quiz/question', async (c) => {
   try {
@@ -6160,90 +6139,74 @@ app.get('/api/quiz/question', async (c) => {
       return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-    const userCheck = await pool.query(
-      'SELECT telegram_id FROM users WHERE telegram_id = $1',
-      [userId]
-    );
-
+    const userCheck = await pool.query('SELECT telegram_id FROM users WHERE telegram_id = $1', [userId]);
     if (userCheck.rows.length === 0) {
       return c.json({ success: false, message: 'USER_NOT_FOUND' }, 404);
     }
 
     const settings = await getQuizSettings();
 
-    // ============================================================
-    // تهيئة quiz_points
-    // ============================================================
+    // تهيئة أو تحديث نقاط المستخدم
     await pool.query(
-      `
-      INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
-      VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
-      ON CONFLICT (user_id) DO UPDATE SET 
-        questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
-        last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
-        weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
-        last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END
-      `,
+      `INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
+       VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
+       ON CONFLICT (user_id) DO UPDATE SET 
+         questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
+         last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
+         weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
+         last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END`,
       [userId]
     );
 
-    const userPoints = await pool.query(
-      'SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1',
-      [userId]
-    );
-
+    const userPoints = await pool.query('SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1', [userId]);
     const qToday = Number(userPoints.rows[0]?.questions_today || 0);
 
+    // ✅ التحقق من الحد اليومي (200 سؤال) وإرجاع رسالة ليتم ترجمتها في الواجهة
     if (qToday >= settings.max_questions_per_day) {
       return c.json({
         success: false,
-        message: 'DAILY_LIMIT',
+        message: 'DAILY_LIMIT_REACHED',
         points: Number(userPoints.rows[0]?.points || 0)
       });
     }
 
-    // ============================================================
     // تحديد الصعوبة
-    // ============================================================
     let difficulty = 'easy';
     if (qToday > 50) difficulty = 'medium';
     if (qToday > 100) difficulty = 'hard';
 
-    // ============================================================
-    // منطق جلب السؤال والترجمة
-    // ============================================================
-    // اللغات المدعومة مباشرة من Open Trivia DB
-    const supportedApiLangs = ['en', 'de', 'fr', 'es', 'pt', 'ja'];
-    
-    // إذا كانت اللغة غير مدعومة، نجلبها بالإنجليزية ثم نترجمها
-    const fetchLang = supportedApiLangs.includes(lang) ? lang : 'en';
     let questionData = null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500); // مهلة 2.5 ثانية لضمان السرعة
 
     try {
-      const apiRes = await fetch(
-        `https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=${fetchLang}&encode=url3986`
-      );
-      const apiData = await apiRes.json();
-
-      if (apiData.response_code === 0 && apiData.results?.length > 0) {
-        const q = apiData.results[0];
-        questionData = {
-          question: decodeURIComponent(q.question),
-          correctAnswer: decodeURIComponent(q.correct_answer),
-          incorrectAnswers: q.incorrect_answers.map(a => decodeURIComponent(a)),
-          category: decodeURIComponent(q.category),
-          difficulty: q.difficulty
-        };
-      }
-    } catch (apiErr) {
-      console.error(`❌ Open Trivia DB error:`, apiErr);
-    }
-
-    // محاولة أخيرة بالجلب باللغة الإنجليزية فقط في حال فشل الطلب الأول
-    if (!questionData && fetchLang !== 'en') {
-      try {
-        const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=en&encode=url3986`);
+      if (lang === 'ar') {
+        // ✅ API مخصص وموثوق للأسئلة العربية (مصدر عام مفتوح)
+        const apiRes = await fetch('https://raw.githubusercontent.com/fawazahmed0/trivia-api/main/ar.json', { signal: controller.signal });
+        const allQuestions = await apiRes.json();
+        
+        // اختيار سؤال عشوائي من المصفوبة
+        const randomQ = allQuestions[Math.floor(Math.random() * allQuestions.length)];
+        if (randomQ) {
+          questionData = {
+            question: randomQ.question,
+            correctAnswer: randomQ.answer,
+            incorrectAnswers: randomQ.options.filter(opt => opt !== randomQ.answer).slice(0, 3), // نأخذ 3 إجابات خاطئة
+            category: 'عام',
+            difficulty: difficulty
+          };
+        }
+      } else {
+        // ✅ Open Trivia DB للغات المدعومة أصلاً (en, fr, es, pt, de, ja)
+        const supportedLangs = ['en', 'fr', 'es', 'pt', 'de', 'ja'];
+        const dbLang = supportedLangs.includes(lang) ? lang : 'en';
+        
+        const apiRes = await fetch(
+          `https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=${dbLang}&encode=url3986`,
+          { signal: controller.signal }
+        );
         const apiData = await apiRes.json();
+
         if (apiData.response_code === 0 && apiData.results?.length > 0) {
           const q = apiData.results[0];
           questionData = {
@@ -6254,58 +6217,37 @@ app.get('/api/quiz/question', async (c) => {
             difficulty: q.difficulty
           };
         }
-      } catch (err) {
-        console.error(`❌ Fallback Open Trivia DB (en) error:`, err);
       }
+    } catch (apiErr) {
+      console.error(`❌ API fetch error for lang ${lang}:`, apiErr.message);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
-    // إذا فشل الجلب تماماً، نرجع خطأ (بدون أسئلة احتياطية ثابتة كما طلبت)
+    // ✅ إذا فشل الـ API، نرجع خطأ واضح (بدون أسئلة احتياطية حسب طلبك)
     if (!questionData) {
-      return c.json({ success: false, message: 'Failed to fetch question from API' }, 500);
+      return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
     }
 
-    // ============================================================
-    // الترجمة الديناميكية إذا كانت لغة الجلب تختلف عن لغة المستخدم
-    // ============================================================
-    if (fetchLang !== lang) {
-      try {
-        questionData.question = await translateText(questionData.question, lang);
-        questionData.correctAnswer = await translateText(questionData.correctAnswer, lang);
-        questionData.incorrectAnswers = await Promise.all(
-          questionData.incorrectAnswers.map(ans => translateText(ans, lang))
-        );
-        questionData.category = await translateText(questionData.category, lang);
-      } catch (transErr) {
-        console.error(`❌ Translation process failed:`, transErr);
-        // في حال فشل الترجمة، سيظل النص باللغة الإنجليزية وهو مقبول
-      }
-    }
-
-    // ============================================================
-    // خلط الإجابات وحفظ الجلسة
-    // ============================================================
+    // خلط الإجابات
     const allAnswers = [questionData.correctAnswer, ...questionData.incorrectAnswers];
-    const shuffledAnswers = shuffleArray(allAnswers);
+    const shuffledAnswers = allAnswers.sort(() => Math.random() - 0.5);
     const correctIndex = shuffledAnswers.indexOf(questionData.correctAnswer);
-    const questionId = generateQuizId();
+    const questionId = crypto.randomUUID();
 
+    // حفظ الجلسة
     await pool.query(
-      `
-      INSERT INTO quiz_question_sessions (question_id, user_id, correct_index, created_at, answered, skipped, retry_used, double_used)
-      VALUES ($1, $2, $3, NOW(), false, false, false, false)
-      `,
+      `INSERT INTO quiz_question_sessions (question_id, user_id, correct_index, created_at, answered, skipped, retry_used, double_used)
+       VALUES ($1, $2, $3, NOW(), false, false, false, false)`,
       [questionId, userId, correctIndex]
     );
 
-    // ============================================================
-    // الرد النهائي
-    // ============================================================
     return c.json({
       success: true,
       questionId,
-      question: decodeHTML(questionData.question),
-      answers: shuffledAnswers.map(answer => decodeHTML(answer)),
-      category: decodeHTML(questionData.category),
+      question: questionData.question,
+      answers: shuffledAnswers,
+      category: questionData.category,
       difficulty: questionData.difficulty,
       points: Number(userPoints.rows[0].points || 0),
       weekly_score: Number(userPoints.rows[0].weekly_score || 0),
