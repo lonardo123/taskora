@@ -15,49 +15,44 @@
     <h3>🔄 Preparing Retry...</h3>
   <p style="color: #94a3b8; font-size: 14px; margin-top: 10px;">Verifying with server</p>
 
-  <script>
+    <script>
     async function complete() {
+      // 1. جلب البيانات من sessionStorage فقط (أكثر موثوقية في AppCreator24)
+      const userId = sessionStorage.getItem('quiz_user_id');
       const rewardId = sessionStorage.getItem('quiz_reward_id');
-      const userId = sessionStorage.getItem('quiz_reward_id') ? sessionStorage.getItem('quiz_user_id_backup') || new URLSearchParams(window.location.search).get('user_id') : null; 
-      // ملاحظة: نفضل الاعتماد على sessionStorage كما تم حفظه في quiz.html
       
-      if (!rewardId) {
-        window.location.href = 'quiz.html'; // عودة آمنة إذا لم توجد بيانات
+      // 2. ✅ إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت (بدون عرض أي خطأ)
+      if (!userId || !rewardId) {
+        window.location.href = 'quiz.html';
         return;
-      }
-
-      // نحتاج user_id، وهو محفوظ في quiz.html، لكن لضمان عمله في AC24، سنمرره عبر URL إذا أمكن، أو نعتمد على أن AC24 يحافظ على sessionStorage.
-      // الحل الأضمن: استخراج user_id من URL الحالي إذا مرره AC24، أو من sessionStorage
-      const finalUserId = sessionStorage.getItem('quiz_user_id') || new URLSearchParams(window.location.search).get('user_id');
-
-      if (!finalUserId) {
-         // محاولة استخلاصه منreferrer أو العودة
-         window.location.href = 'quiz.html';
-         return;
       }
 
       try {
         const res = await fetch('https://taskora.taskora.workers.dev/api/quiz/reward/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rewardId, userId: finalUserId })
+          body: JSON.stringify({ rewardId, userId: userId })
         });
+        
         const data = await res.json();
         
-        // تنظيف
+        // 3. تنظيف البيانات بعد الاستخدام
+        sessionStorage.removeItem('quiz_user_id');
         sessionStorage.removeItem('quiz_reward_id');
         sessionStorage.removeItem('quiz_reward_action');
         sessionStorage.removeItem('quiz_reward_question_id');
         
-        // العودة إلى صفحة الكويز
-        window.location.href = `quiz.html?user_id=${finalUserId}`;
+        // 4. العودة إلى صفحة الكويز الرئيسية لتحديث الحالة
+        window.location.href = `quiz.html?user_id=${userId}`;
+        
       } catch (e) {
         console.error(e);
-        window.location.href = `quiz.html?user_id=${finalUserId}`;
+        // في حال فشل الاتصال، نعود أيضاً لصفحة الكويز بصمت
+        window.location.href = `quiz.html?user_id=${userId}`;
       }
     }
     
-    // تنفيذ فوراً عند تحميل القسم
+    // تنفيذ الدالة فور تحميل الصفحة
     window.onload = complete;
   </script>
 </body>
