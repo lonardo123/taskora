@@ -372,41 +372,47 @@ function showActionArea(resultKey, primaryAction) {
 
 // ================= REWARD & APPCREATOR24 FLOW =================
 async function requestReward(action) {
-  document.getElementById('loadingOverlay').style.display = 'flex';
-  document.getElementById('loadingText').textContent = 'Preparing reward...';
-  
+  // إخفاء أي رسائل سابقة وعرض مؤشر تحميل بسيط (بدون نصوص مزعجة)
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.style.display = 'flex';
+
   try {
     // 1. إنشاء جلسة المكافأة في السيرفر
-    const res = await fetch(`${API_BASE}/api/quiz/reward/create`, {
+    const res = await fetch(`https://taskora.taskora.workers.dev/api/quiz/reward/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: quizUserId, questionId: currentQuestionId, action })
     });
     const data = await res.json();
     
-    if (!data.success) throw new Error(data.message);
+    if (!data.success) {
+      if (overlay) overlay.style.display = 'none';
+      // في حال الفشل، نعود للسؤال التالي بصمت دون إظهار alert
+      loadQuestion();
+      return;
+    }
     
-    // 2. حفظ الحالة في sessionStorage للعودة من AppCreator24
+    // 2. ✅ الحفظ الآمن في sessionStorage (هذا هو السطر الذي كان ينقصنا)
+    sessionStorage.setItem('quiz_user_id', quizUserId);
     sessionStorage.setItem('quiz_reward_id', data.rewardId);
     sessionStorage.setItem('quiz_reward_action', action);
     sessionStorage.setItem('quiz_reward_question_id', currentQuestionId);
     
     // 3. التوجيه إلى قسم AppCreator24 الصحيح
-    // ملاحظة حاسمة: المراجع هي quiz-doub, quiz-retry, quiz-skip
     let ac24Ref = '';
     if (action === 'double') ac24Ref = 'quiz-doub';
     else if (action === 'retry') ac24Ref = 'quiz-retry';
     else if (action === 'skip') ac24Ref = 'quiz-skip';
     
-    // استخدام window.location.href لضمان عمل go: في AppCreator24
+    // التحويل الفوري
     setTimeout(() => {
       window.location.href = `go:${ac24Ref}`;
-    }, 500);
+    }, 300);
     
   } catch (err) {
     console.error('Reward request error:', err);
-    document.getElementById('loadingOverlay').style.display = 'none';
-    alert('Failed to start reward session. Please try again.');
+    if (overlay) overlay.style.display = 'none';
+    loadQuestion(); // عودة صامتة في حال فشل الاتصال
   }
 }
 
