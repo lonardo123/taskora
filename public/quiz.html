@@ -1,1794 +1,478 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Taskora Quiz</title>
+<style>
+  :root {
+    --bg-primary: #0f172a;
+    --bg-card: #1e293b;
+    --bg-input: #334155;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --accent: #3b82f6;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+  body { background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; padding: 15px; }
+  
+  /* Header Stats */
+  .header-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
+  .stat-box { background: var(--bg-card); padding: 12px; border-radius: 12px; text-align: center; border: 1px solid #334155; }
+  .stat-box .label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-box .value { font-size: 18px; font-weight: 700; color: var(--warning); margin-top: 4px; }
+  
+  /* Controls */
+  .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+  .lang-select { background: var(--bg-card); color: var(--text-primary); border: 1px solid #334155; padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; }
+  .convert-btn { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+  /* Timer Bar */
+  .timer-container { background: var(--bg-card); padding: 12px; border-radius: 12px; margin-bottom: 15px; }
+  .timer-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .timer-bar-bg { background: var(--bg-input); height: 8px; border-radius: 4px; overflow: hidden; }
+  .timer-bar-fill { background: linear-gradient(90deg, var(--success), var(--warning), var(--danger)); height: 100%; width: 100%; transition: width 1s linear; }
+  .timer-bar-fill.danger { background: var(--danger); animation: pulse 1s infinite; }
 
-  <title>Taskora Quiz</title>
+  /* Question Card */
+  .question-card { background: var(--bg-card); padding: 20px; border-radius: 16px; border: 1px solid #334155; margin-bottom: 15px; }
+  .q-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+  .q-meta span.badge { background: var(--bg-input); padding: 4px 8px; border-radius: 6px; }
+  .q-text { font-size: 18px; font-weight: 600; line-height: 1.5; margin-bottom: 20px; min-height: 60px; }
+  
+  /* Answers */
+  .answers-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .answer-btn { background: var(--bg-input); color: var(--text-primary); border: 2px solid transparent; padding: 16px; border-radius: 12px; font-size: 15px; font-weight: 500; cursor: pointer; transition: all 0.2s; text-align: left; }
+  .answer-btn:hover { border-color: var(--accent); background: #1e3a8a; }
+  .answer-btn.correct { border-color: var(--success); background: #064e3b; color: #86efac; }
+  .answer-btn.wrong { border-color: var(--danger); background: #7f1d1d; color: #fca5a5; }
+  .answer-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-  <style>
-    * {
-      box-sizing: border-box;
-    }
+  /* Action Buttons (Double/Retry/Skip) */
+  .action-area { display: none; text-align: center; margin-top: 20px; animation: fadeIn 0.3s ease; }
+  .action-btn { width: 100%; padding: 16px; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .btn-double { background: linear-gradient(135deg, #8b5cf6, #6d28d9); color: white; }
+  .btn-retry { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+  .btn-skip { background: linear-gradient(135deg, #64748b, #475569); color: white; }
+  .btn-next { background: linear-gradient(135deg, var(--success), #16a34a); color: white; }
 
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #f5f7fb;
-      color: #222;
-    }
+  /* Leaderboard */
+  .leaderboard { background: var(--bg-card); padding: 15px; border-radius: 12px; margin-top: 20px; }
+  .lb-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .lb-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #334155; font-size: 14px; }
+  .lb-item:last-child { border-bottom: none; }
+  .lb-rank { width: 30px; font-weight: 700; color: var(--warning); }
 
-    .quiz-container {
-      width: min(720px, 94%);
-      margin: 30px auto;
-    }
-
-    .quiz-header,
-    .quiz-card,
-    .quiz-result,
-    .quiz-convert-box,
-    .quiz-leaderboard {
-      background: #fff;
-      border-radius: 16px;
-      padding: 20px;
-      margin-bottom: 16px;
-      box-shadow: 0 5px 20px rgba(0,0,0,.06);
-    }
-
-    .quiz-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 15px;
-    }
-
-    .quiz-header h2 {
-      margin: 0 0 5px;
-    }
-
-    .quiz-header p {
-      margin: 0;
-      color: #666;
-    }
-
-    #quiz-language {
-      padding: 9px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-    }
-
-    .quiz-stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .quiz-stat-card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 15px;
-      text-align: center;
-      box-shadow: 0 5px 20px rgba(0,0,0,.05);
-    }
-
-    .quiz-stat-card span {
-      display: block;
-      color: #777;
-      font-size: 13px;
-      margin-bottom: 5px;
-    }
-
-    .quiz-stat-card strong {
-      font-size: 22px;
-    }
-
-    .quiz-convert-box {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 15px;
-    }
-
-    .quiz-convert-box small {
-      display: block;
-      color: #777;
-      margin-top: 4px;
-    }
-
-    button {
-      border: 0;
-      border-radius: 10px;
-      padding: 12px 16px;
-      cursor: pointer;
-      font-weight: 600;
-    }
-
-    #quiz-convert-btn,
-    #quiz-next-btn {
-      background: #222;
-      color: #fff;
-    }
-
-    .quiz-question-info {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 15px;
-      font-size: 14px;
-    }
-
-    .quiz-timer-box {
-      text-align: center;
-      margin: 15px 0;
-    }
-
-    #quiz-timer {
-      font-size: 40px;
-      font-weight: bold;
-    }
-
-    #quiz-timer-label {
-      color: #777;
-    }
-
-    .quiz-loading {
-      text-align: center;
-      padding: 20px;
-      color: #777;
-    }
-
-    .quiz-question-card h3 {
-      line-height: 1.5;
-      margin-bottom: 20px;
-    }
-
-    .quiz-answers {
-      display: grid;
-      gap: 10px;
-    }
-
-    .quiz-answer-btn {
-      width: 100%;
-      background: #f0f2f6;
-      text-align: left;
-    }
-
-    .quiz-answer-btn:disabled {
-      opacity: .6;
-      cursor: not-allowed;
-    }
-
-    .quiz-reward-actions {
-      display: grid;
-      gap: 10px;
-      margin-top: 15px;
-    }
-
-    #quiz-double-btn,
-    #quiz-retry-btn,
-    #quiz-skip-btn {
-      background: #222;
-      color: #fff;
-    }
-
-    .quiz-result {
-      text-align: center;
-    }
-
-    #quiz-result-icon {
-      font-size: 45px;
-    }
-
-    #quiz-result-title {
-      margin-bottom: 8px;
-    }
-
-    #quiz-result-message {
-      color: #666;
-    }
-
-    #quiz-limit {
-      display: none;
-      padding: 15px;
-      background: #fff;
-      border-radius: 12px;
-      margin-bottom: 15px;
-      text-align: center;
-    }
-
-    .quiz-leaderboard-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 10px 0;
-      border-bottom: 1px solid #eee;
-    }
-
-    @media (max-width: 600px) {
-      .quiz-header {
-        flex-direction: column;
-        align-items: stretch;
-      }
-
-      .quiz-stats {
-        grid-template-columns: 1fr;
-      }
-
-      .quiz-question-info {
-        flex-direction: column;
-      }
-
-      .quiz-convert-box {
-        flex-direction: column;
-        align-items: stretch;
-      }
-    }
-  </style>
+  /* Loading & Messages */
+  .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; }
+  .spinner { width: 40px; height: 40px; border: 4px solid var(--bg-input); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+  
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</has context>
+</style>
 </head>
-
 <body>
 
-<div class="quiz-container">
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="loading-overlay">
+  <div class="spinner"></div>
+  <p id="loadingText">Loading Quiz...</p>
+</div>
 
-  <div class="quiz-header">
-    <div>
-      <h2 id="quiz-title">🧠 Quiz & Earn</h2>
-      <p id="quiz-subtitle">
-        Answer questions and earn points
-      </p>
-    </div>
-
-    <select
-      id="quiz-language"
-      onchange="changeQuizLanguage()"
-    >
-      <option value="en">English</option>
-      <option value="ar">العربية</option>
-      <option value="fr">Français</option>
-      <option value="es">Español</option>
-      <option value="pt">Português</option>
-      <option value="de">Deutsch</option>
-      <option value="ja">日本語</option>
-    </select>
+<!-- Header Stats -->
+<div class="header-stats">
+  <div class="stat-box">
+    <div class="label" data-i18n="points">Points</div>
+    <div class="value" id="statPoints">0</div>
   </div>
-
-  <div class="quiz-stats">
-
-    <div class="quiz-stat-card">
-      <span id="quiz-points-label">Points</span>
-      <strong id="quiz-points">0</strong>
-    </div>
-
-    <div class="quiz-stat-card">
-      <span id="quiz-today-label">Today</span>
-      <strong id="quiz-today">0</strong>
-    </div>
-
-    <div class="quiz-stat-card">
-      <span id="quiz-weekly-label">Weekly</span>
-      <strong id="quiz-weekly">0</strong>
-    </div>
-
+  <div class="stat-box">
+    <div class="label" data-i18n="today">Today</div>
+    <div class="value" id="statToday">0</div>
   </div>
-
-  <div class="quiz-convert-box">
-
-    <div>
-      <strong id="quiz-convert-title">
-        Convert Points
-      </strong>
-
-      <small id="quiz-convert-info">
-        Convert your points to balance
-      </small>
-    </div>
-
-    <button
-      id="quiz-convert-btn"
-      onclick="openQuizConvert()"
-    >
-      Convert
-    </button>
-
+  <div class="stat-box">
+    <div class="label" data-i18n="weekly">Weekly</div>
+    <div class="value" id="statWeekly">0</div>
   </div>
+</div>
 
-  <div
-    id="quiz-limit"
-  ></div>
+<!-- Controls -->
+<div class="controls">
+  <select id="langSelect" class="lang-select" onchange="changeLanguage(this.value)">
+    <option value="en">🇬🇧 English</option>
+    <option value="ar">🇸🇦 العربية</option>
+    <option value="fr">🇫🇷 Français</option>
+    <option value="es">🇪🇸 Español</option>
+    <option value="pt">🇵🇹 Português</option>
+    <option value="de">🇩🇪 Deutsch</option>
+    <option value="ja">🇯🇵 日本語</option>
+  </select>
+  <button class="convert-btn" onclick="convertPoints()" data-i18n="convert">Convert Points</button>
+</div>
 
-  <div class="quiz-card">
-
-    <div class="quiz-question-info">
-
-      <span>
-        <b id="quiz-category-label">
-          Category:
-        </b>
-        <span id="quiz-category">-</span>
-      </span>
-
-      <span>
-        <b id="quiz-difficulty-label">
-          Difficulty:
-        </b>
-        <span id="quiz-difficulty">-</span>
-      </span>
-
-      <span>
-        <b id="quiz-left-label">
-          Left:
-        </b>
-        <span id="quiz-left">0</span>
-      </span>
-
-    </div>
-
-    <div class="quiz-timer-box">
-
-      <div id="quiz-timer">
-        60
-      </div>
-
-      <div id="quiz-timer-label">
-        seconds
-      </div>
-
-    </div>
-
-    <div class="quiz-question-card">
-
-      <div
-        id="quiz-loading"
-        class="quiz-loading"
-      >
-        Loading question...
-      </div>
-
-      <h3
-        id="quiz-question"
-        style="display:none;"
-      ></h3>
-
-      <div
-        id="quiz-answers"
-        class="quiz-answers"
-      ></div>
-
-    </div>
-
+<!-- Timer -->
+<div class="timer-container">
+  <div class="timer-header">
+    <span data-i18n="timeRemaining">Time Remaining</span>
+    <span id="timerText" style="color: var(--warning); font-weight: 700;">60s</span>
   </div>
-
-  <div
-    id="quiz-result"
-    class="quiz-result"
-    style="display:none;"
-  >
-
-    <div id="quiz-result-icon"></div>
-
-    <h3 id="quiz-result-title"></h3>
-
-    <p id="quiz-result-message"></p>
-
-    <div
-      id="quiz-reward-actions"
-      class="quiz-reward-actions"
-      style="display:none;"
-    >
-
-      <button
-        id="quiz-double-btn"
-        onclick="quizReward('double')"
-      >
-        🎬 Double Points
-      </button>
-
-      <button
-        id="quiz-retry-btn"
-        onclick="quizReward('retry')"
-      >
-        🎬 Retry
-      </button>
-
-      <button
-        id="quiz-skip-btn"
-        onclick="quizReward('skip')"
-      >
-        🎬 Skip
-      </button>
-
-    </div>
-
-    <button
-      id="quiz-next-btn"
-      onclick="nextQuizQuestion()"
-      style="display:none;"
-    >
-      Next Question
-    </button>
-
+  <div class="timer-bar-bg">
+    <div id="timerBar" class="timer-bar-fill"></div>
   </div>
+</div>
 
-  <div class="quiz-leaderboard">
-
-    <h3 id="quiz-leaderboard-title">
-      🏆 Weekly Leaderboard
-    </h3>
-
-    <div id="quiz-leaderboard-list">
-      No leaderboard data yet.
-    </div>
-
+<!-- Question Area -->
+<div class="question-card" id="questionArea">
+  <div class="q-meta">
+    <span class="badge" id="qCategory">Category</span>
+    <span class="badge" id="qDifficulty">⭐</span>
+    <span class="badge" id="qLeft">Left: 200</span>
   </div>
+  <div class="q-text" id="qText">Loading question...</div>
+  <div class="answers-grid" id="answersGrid"></div>
+  
+  <!-- Action Area (Hidden by default) -->
+  <div class="action-area" id="actionArea">
+    <h3 id="actionTitle" style="margin-bottom: 15px; font-size: 18px;"></h3>
+    <button id="btnDouble" class="action-btn btn-double" onclick="requestReward('double')">🎬 <span data-i18n="doublePoints">Double Points</span></button>
+    <button id="btnRetry" class="action-btn btn-retry" onclick="requestReward('retry')">🔄 <span data-i18n="retry">Retry Question</span></button>
+    <button id="btnSkip" class="action-btn btn-skip" onclick="requestReward('skip')">⏭️ <span data-i18n="skip">Skip Question</span></button>
+    <button id="btnNext" class="action-btn btn-next" onclick="loadQuestion()" style="display:none;">➡️ <span data-i18n="next">Next Question</span></button>
+  </div>
+</div>
 
+<!-- Leaderboard -->
+<div class="leaderboard">
+  <div class="lb-title">🏆 <span data-i18n="leaderboard">Weekly Leaderboard</span></div>
+  <div id="leaderboardList">
+    <div class="lb-item" style="justify-content: center; color: var(--text-secondary);">Loading...</div>
+  </div>
 </div>
 
 <script>
-const API = "https://taskora.taskora.workers.dev";
+// ================= CONFIG & STATE =================
+const API_BASE = 'https://taskora.taskora.workers.dev'; // عدل هذا إذا كان مختلفاً
+let quizUserId = null;
+let currentQuestionId = null;
+let currentLang = localStorage.getItem('quiz_language') || 'en';
+let timerInterval = null;
+let timeLeft = 60;
 
-let quizQuestionId = null;
-let quizAnswered = false;
-let quizTimer = null;
-let quizTimeLeft = 60;
-
-let quizCurrentLanguage =
-  localStorage.getItem("quiz_language") || "en";
-
-
-// =========================================================
-// 🔐 QUIZ USER ID
-// =========================================================
-
-// قراءة user_id من رابط صفحة Quiz
-const quizUrlParams = new URLSearchParams(window.location.search);
-
-const quizUserIdFromUrl =
-  quizUrlParams.get('user_id')?.trim() || null;
-
-// حفظ نفس user_id لاستخدامه طوال جلسة Quiz
-let quizUserId = quizUserIdFromUrl;
-
-// التحقق من وجود Telegram ID صحيح
-if (!quizUserId || !/^\d+$/.test(quizUserId)) {
-
-  console.error('❌ Quiz user_id is missing or invalid:', quizUserId);
-
-  quizUserId = null;
-}
-
-// دالة موحدة للحصول على مستخدم Quiz الحالي
-function getQuizUserId() {
-  return quizUserId;
-}
-
-const quizTranslations = {
-
-  en: {
-    title: "🧠 Quiz & Earn",
-    subtitle: "Answer questions and earn points",
-    points: "Points",
-    today: "Today",
-    weekly: "Weekly",
-    convert: "Convert",
-    convertTitle: "Convert Points",
-    convertInfo: "Convert your points to balance",
-    category: "Category:",
-    difficulty: "Difficulty:",
-    left: "Left:",
-    seconds: "seconds",
-    loading: "Loading question...",
-    double: "🎬 Double Points",
-    retry: "🎬 Retry",
-    skip: "🎬 Skip",
-    next: "Next Question",
-    leaderboard: "🏆 Weekly Leaderboard",
-    correct: "Correct!",
-    wrong: "Wrong!",
-    timeup: "Time is up!",
-    watchDouble: "Watch a video to double your points.",
-    watchRetry: "Watch a video to retry.",
-    watchSkip: "Watch a video to skip.",
-    dailyLimit: "Daily limit reached.",
-    noQuestions: "No more questions today.",
-    conversionPrompt: "Enter points to convert:"
-  },
-
-  ar: {
-    title: "🧠 اختبار واربح",
-    subtitle: "أجب عن الأسئلة واكسب النقاط",
-    points: "النقاط",
-    today: "اليوم",
-    weekly: "الأسبوعي",
-    convert: "تحويل",
-    convertTitle: "تحويل النقاط",
-    convertInfo: "حوّل نقاطك إلى رصيد",
-    category: "التصنيف:",
-    difficulty: "الصعوبة:",
-    left: "المتبقي:",
-    seconds: "ثانية",
-    loading: "جارٍ تحميل السؤال...",
-    double: "🎬 مضاعفة النقاط",
-    retry: "🎬 إعادة المحاولة",
-    skip: "🎬 تخطي",
-    next: "السؤال التالي",
-    leaderboard: "🏆 المتصدرون أسبوعيًا",
-    correct: "إجابة صحيحة!",
-    wrong: "إجابة خاطئة!",
-    timeup: "انتهى الوقت!",
-    watchDouble: "شاهد الفيديو لمضاعفة النقاط.",
-    watchRetry: "شاهد الفيديو لإعادة المحاولة.",
-    watchSkip: "شاهد الفيديو لتخطي السؤال.",
-    dailyLimit: "لقد وصلت إلى الحد اليومي.",
-    noQuestions: "لا توجد أسئلة أخرى اليوم.",
-    conversionPrompt: "أدخل عدد النقاط المراد تحويلها:"
-  },
-
-  fr: {
-    title: "🧠 Quiz & Earn",
-    subtitle: "Répondez aux questions et gagnez des points",
-    points: "Points",
-    today: "Aujourd'hui",
-    weekly: "Hebdomadaire",
-    convert: "Convertir",
-    convertTitle: "Convertir les points",
-    convertInfo: "Convertissez vos points en solde",
-    category: "Catégorie:",
-    difficulty: "Difficulté:",
-    left: "Restant:",
-    seconds: "secondes",
-    loading: "Chargement...",
-    double: "🎬 Doubler les points",
-    retry: "🎬 Réessayer",
-    skip: "🎬 Passer",
-    next: "Question suivante",
-    leaderboard: "🏆 Classement hebdomadaire",
-    correct: "Correct!",
-    wrong: "Incorrect!",
-    timeup: "Temps écoulé!",
-    watchDouble: "Regardez une vidéo pour doubler vos points.",
-    watchRetry: "Regardez une vidéo pour réessayer.",
-    watchSkip: "Regardez une vidéo pour passer.",
-    dailyLimit: "Limite quotidienne atteinte.",
-    noQuestions: "Plus de questions aujourd'hui.",
-    conversionPrompt: "Entrez les points à convertir:"
-  },
-
-  es: {
-    title: "🧠 Quiz & Earn",
-    subtitle: "Responde preguntas y gana puntos",
-    points: "Puntos",
-    today: "Hoy",
-    weekly: "Semanal",
-    convert: "Convertir",
-    convertTitle: "Convertir puntos",
-    convertInfo: "Convierte tus puntos en saldo",
-    category: "Categoría:",
-    difficulty: "Dificultad:",
-    left: "Restantes:",
-    seconds: "segundos",
-    loading: "Cargando pregunta...",
-    double: "🎬 Duplicar puntos",
-    retry: "🎬 Reintentar",
-    skip: "🎬 Saltar",
-    next: "Siguiente pregunta",
-    leaderboard: "🏆 Clasificación semanal",
-    correct: "¡Correcto!",
-    wrong: "¡Incorrecto!",
-    timeup: "¡Se acabó el tiempo!",
-    watchDouble: "Mira un vídeo para duplicar tus puntos.",
-    watchRetry: "Mira un vídeo para volver a intentarlo.",
-    watchSkip: "Mira un vídeo para saltar.",
-    dailyLimit: "Límite diario alcanzado.",
-    noQuestions: "No hay más preguntas hoy.",
-    conversionPrompt: "Introduce los puntos a convertir:"
-  },
-
-  pt: {
-    title: "🧠 Quiz & Earn",
-    subtitle: "Responda perguntas e ganhe pontos",
-    points: "Pontos",
-    today: "Hoje",
-    weekly: "Semanal",
-    convert: "Converter",
-    convertTitle: "Converter pontos",
-    convertInfo: "Converta seus pontos em saldo",
-    category: "Categoria:",
-    difficulty: "Dificuldade:",
-    left: "Restantes:",
-    seconds: "segundos",
-    loading: "Carregando pergunta...",
-    double: "🎬 Dobrar pontos",
-    retry: "🎬 Tentar novamente",
-    skip: "🎬 Pular",
-    next: "Próxima pergunta",
-    leaderboard: "🏆 Ranking semanal",
-    correct: "Correto!",
-    wrong: "Incorreto!",
-    timeup: "Tempo esgotado!",
-    watchDouble: "Assista a um vídeo para dobrar seus pontos.",
-    watchRetry: "Assista a um vídeo para tentar novamente.",
-    watchSkip: "Assista a um vídeo para pular.",
-    dailyLimit: "Limite diário atingido.",
-    noQuestions: "Não há mais perguntas hoje.",
-    conversionPrompt: "Digite os pontos para converter:"
-  },
-
-  de: {
-    title: "🧠 Quiz & Earn",
-    subtitle: "Beantworte Fragen und verdiene Punkte",
-    points: "Punkte",
-    today: "Heute",
-    weekly: "Wöchentlich",
-    convert: "Umwandeln",
-    convertTitle: "Punkte umwandeln",
-    convertInfo: "Wandle deine Punkte in Guthaben um",
-    category: "Kategorie:",
-    difficulty: "Schwierigkeit:",
-    left: "Übrig:",
-    seconds: "Sekunden",
-    loading: "Frage wird geladen...",
-    double: "🎬 Punkte verdoppeln",
-    retry: "🎬 Erneut versuchen",
-    skip: "🎬 Überspringen",
-    next: "Nächste Frage",
-    leaderboard: "🏆 Wochenrangliste",
-    correct: "Richtig!",
-    wrong: "Falsch!",
-    timeup: "Zeit abgelaufen!",
-    watchDouble: "Video ansehen, um die Punkte zu verdoppeln.",
-    watchRetry: "Video ansehen, um es erneut zu versuchen.",
-    watchSkip: "Video ansehen, um zu überspringen.",
-    dailyLimit: "Tageslimit erreicht.",
-    noQuestions: "Heute keine weiteren Fragen.",
-    conversionPrompt: "Punkte zum Umwandeln eingeben:"
-  },
-
-  ja: {
-    title: "🧠 クイズ＆収益",
-    subtitle: "質問に答えてポイントを獲得",
-    points: "ポイント",
-    today: "今日",
-    weekly: "週間",
-    convert: "交換",
-    convertTitle: "ポイント交換",
-    convertInfo: "ポイントを残高に交換",
-    category: "カテゴリ:",
-    difficulty: "難易度:",
-    left: "残り:",
-    seconds: "秒",
-    loading: "問題を読み込み中...",
-    double: "🎬 ポイント2倍",
-    retry: "🎬 再挑戦",
-    skip: "🎬 スキップ",
-    next: "次の問題",
-    leaderboard: "🏆 週間ランキング",
-    correct: "正解！",
-    wrong: "不正解！",
-    timeup: "時間切れ！",
-    watchDouble: "動画を見てポイントを2倍にします。",
-    watchRetry: "動画を見てもう一度挑戦します。",
-    watchSkip: "動画を見てスキップします。",
-    dailyLimit: "本日の上限に達しました。",
-    noQuestions: "今日はこれ以上問題がありません。",
-    conversionPrompt: "交換するポイント数を入力:"
-  }
-
+// ================= TRANSLATIONS =================
+const translations = {
+  en: { points: 'Points', today: 'Today', weekly: 'Weekly', convert: 'Convert', timeRemaining: 'Time Remaining', doublePoints: 'Double Points', retry: 'Retry Question', skip: 'Skip Question', next: 'Next Question', leaderboard: 'Weekly Leaderboard', correct: 'Correct! 🎉', wrong: 'Wrong Answer 😔', timeUp: 'Time\'s Up! ⏰', watchAdDouble: 'Watch ad to double your points!', watchAdRetry: 'Watch ad to try again!', watchAdSkip: 'Watch ad to skip this question!' },
+  ar: { points: 'النقاط', today: 'اليوم', weekly: 'أسبوعي', convert: 'تحويل', timeRemaining: 'الوقت المتبقي', doublePoints: 'مضاعفة النقاط', retry: 'إعادة المحاولة', skip: 'تخطي السؤال', next: 'السؤال التالي', leaderboard: 'المتصدرون أسبوعياً', correct: 'إجابة صحيحة! 🎉', wrong: 'إجابة خاطئة 😔', timeUp: 'انتهى الوقت! ⏰', watchAdDouble: 'شاهد إعلاناً لمضاعفة نقاطك!', watchAdRetry: 'شاهد إعلاناً لإعادة المحاولة!', watchAdSkip: 'شاهد إعلاناً لتخطي هذا السؤال!' },
+  fr: { points: 'Points', today: 'Aujourd\'hui', weekly: 'Hebdo', convert: 'Convertir', timeRemaining: 'Temps restant', doublePoints: 'Doubler les points', retry: 'Réessayer', skip: 'Passer', next: 'Suivant', leaderboard: 'Classement Hebdo', correct: 'Correct ! 🎉', wrong: 'Faux 😔', timeUp: 'Temps écoulé ! ⏰', watchAdDouble: 'Regardez une pub pour doubler !', watchAdRetry: 'Regardez une pub pour réessayer !', watchAdSkip: 'Regardez une pub pour passer !' },
+  es: { points: 'Puntos', today: 'Hoy', weekly: 'Semanal', convert: 'Convertir', timeRemaining: 'Tiempo restante', doublePoints: 'Duplicar puntos', retry: 'Reintentar', skip: 'Saltar', next: 'Siguiente', leaderboard: 'Clasificación Semanal', correct: '¡Correcto! 🎉', wrong: 'Incorrecto 😔', timeUp: '¡Tiempo agotado! ⏰', watchAdDouble: '¡Mira un anuncio para duplicar!', watchAdRetry: '¡Mira un anuncio para reintentar!', watchAdSkip: '¡Mira un anuncio para saltar!' }
 };
 
-function applyQuizTranslations() {
-
-  const t =
-    quizTranslations[quizCurrentLanguage] ||
-    quizTranslations.en;
-
-  const map = {
-    "quiz-title": t.title,
-    "quiz-subtitle": t.subtitle,
-    "quiz-points-label": t.points,
-    "quiz-today-label": t.today,
-    "quiz-weekly-label": t.weekly,
-    "quiz-convert-btn": t.convert,
-    "quiz-convert-title": t.convertTitle,
-    "quiz-convert-info": t.convertInfo,
-    "quiz-category-label": t.category,
-    "quiz-difficulty-label": t.difficulty,
-    "quiz-left-label": t.left,
-    "quiz-timer-label": t.seconds,
-    "quiz-loading": t.loading,
-    "quiz-double-btn": t.double,
-    "quiz-retry-btn": t.retry,
-    "quiz-skip-btn": t.skip,
-    "quiz-next-btn": t.next,
-    "quiz-leaderboard-title": t.leaderboard
-  };
-
-  Object.entries(map).forEach(
-    ([id, text]) => {
-
-      const el =
-        document.getElementById(id);
-
-      if (el) {
-        el.textContent = text;
-      }
-
-    }
-  );
-
-  document.documentElement.lang =
-    quizCurrentLanguage;
-
-  document.documentElement.dir =
-    quizCurrentLanguage === "ar"
-      ? "rtl"
-      : "ltr";
-}
-
-function changeQuizLanguage() {
-
-  const select =
-    document.getElementById(
-      "quiz-language"
-    );
-
-  if (!select) return;
-
-  quizCurrentLanguage =
-    select.value;
-
-  localStorage.setItem(
-    "quiz_language",
-    quizCurrentLanguage
-  );
-
-  applyQuizTranslations();
-
-  loadQuizQuestion();
-}
-
-async function loadQuizPage() {
-
-  const userId =
-    getQuizUserId();
-
-  if (!userId) {
-    alert("Please login first.");
+// ================= INITIALIZATION =================
+window.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  quizUserId = urlParams.get('user_id')?.trim();
+  
+  if (!quizUserId || !/^\d+$/.test(quizUserId)) {
+    document.body.innerHTML = '<div style="text-align:center;padding:50px;color:#ef4444;">Invalid or missing user_id in URL.</div>';
     return;
   }
 
-  const select =
-    document.getElementById(
-      "quiz-language"
-    );
-
-  if (select) {
-    select.value =
-      quizCurrentLanguage;
-  }
-
-  applyQuizTranslations();
-
-  await loadQuizPoints();
-
-  await loadQuizQuestion();
-}
-
-async function loadQuizQuestion() {
-
-  const userId =
-    getQuizUserId();
-
-  if (!userId) return;
-
-  stopQuizTimer();
-
-  quizAnswered = false;
-  quizQuestionId = null;
-
-  const loading =
-    document.getElementById(
-      "quiz-loading"
-    );
-
-  const question =
-    document.getElementById(
-      "quiz-question"
-    );
-
-  const answers =
-    document.getElementById(
-      "quiz-answers"
-    );
-
-  const result =
-    document.getElementById(
-      "quiz-result"
-    );
-
-  if (loading) {
-    loading.style.display =
-      "block";
-  }
-
-  if (question) {
-    question.style.display =
-      "none";
-  }
-
-  if (answers) {
-    answers.innerHTML = "";
-  }
-
-  if (result) {
-    result.style.display =
-      "none";
-  }
-
-  try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/question` +
-        `?user_id=${encodeURIComponent(userId)}` +
-        `&lang=${encodeURIComponent(quizCurrentLanguage)}`
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) {
-
-      if (
-        data.message ===
-        "DAILY_LIMIT"
-      ) {
-
-        showQuizLimit(
-          quizTranslations[
-            quizCurrentLanguage
-          ]?.dailyLimit ||
-          "Daily limit reached."
-        );
-
-      } else {
-
-        showQuizLimit(
-          data.message ||
-          "No question available."
-        );
-
-      }
-
-      if (loading) {
-        loading.style.display =
-          "none";
-      }
-
-      return;
-    }
-
-    const limit =
-      document.getElementById(
-        "quiz-limit"
-      );
-
-    if (limit) {
-      limit.style.display =
-        "none";
-    }
-
-    quizQuestionId =
-      data.questionId;
-
-    document.getElementById(
-      "quiz-category"
-    ).textContent =
-      data.category || "-";
-
-    document.getElementById(
-      "quiz-difficulty"
-    ).textContent =
-      data.difficulty || "-";
-
-    document.getElementById(
-      "quiz-left"
-    ).textContent =
-      Number(
-        data.questionsLeft || 0
-      );
-
-    if (question) {
-
-      question.textContent =
-        data.question;
-
-      question.style.display =
-        "block";
-    }
-
-    if (answers) {
-
-      data.answers.forEach(
-        (answer, index) => {
-
-          const button =
-            document.createElement(
-              "button"
-            );
-
-          button.type =
-            "button";
-
-          button.className =
-            "quiz-answer-btn";
-
-          button.textContent =
-            answer;
-
-          button.onclick =
-            () =>
-              submitQuizAnswer(
-                index
-              );
-
-          answers.appendChild(
-            button
-          );
-
-        }
-      );
-
-    }
-
-    if (loading) {
-      loading.style.display =
-        "none";
-    }
-
-    startQuizTimer();
-
-  } catch (error) {
-
-    console.error(
-      "Quiz question error:",
-      error
-    );
-
-    if (loading) {
-      loading.textContent =
-        "Unable to load question.";
-    }
-  }
-}
-
-async function submitQuizAnswer(
-  answerIndex
-) {
-
-  if (
-    quizAnswered ||
-    !quizQuestionId
-  ) {
-    return;
-  }
-
-  const userId =
-    getQuizUserId();
-
-  if (!userId) return;
-
-  quizAnswered = true;
-
-  stopQuizTimer();
-
-  document
-    .querySelectorAll(
-      ".quiz-answer-btn"
-    )
-    .forEach(
-      btn =>
-        btn.disabled = true
-    );
-
-  try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/answer`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              questionId:
-                quizQuestionId,
-
-              answerIndex:
-                answerIndex,
-
-              userId:
-                userId
-            })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) {
-
-      alert(
-        data.message ||
-        "Unable to submit answer."
-      );
-
-      return;
-    }
-
-    await loadQuizPoints();
-
-    showQuizResult(
-      data.correct,
-      false
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Quiz answer error:",
-      error
-    );
-
-    alert(
-      "Unable to submit answer."
-    );
-  }
-}
-
-function showQuizResult(
-  correct,
-  timeUp
-) {
-
-  const result =
-    document.getElementById(
-      "quiz-result"
-    );
-
-  const icon =
-    document.getElementById(
-      "quiz-result-icon"
-    );
-
-  const title =
-    document.getElementById(
-      "quiz-result-title"
-    );
-
-  const message =
-    document.getElementById(
-      "quiz-result-message"
-    );
-
-  const rewards =
-    document.getElementById(
-      "quiz-reward-actions"
-    );
-
-  const next =
-    document.getElementById(
-      "quiz-next-btn"
-    );
-
-  const t =
-    quizTranslations[
-      quizCurrentLanguage
-    ] ||
-    quizTranslations.en;
-
-  if (!result) return;
-
-  result.style.display =
-    "block";
-
-  if (timeUp) {
-
-    icon.textContent = "⏰";
-    title.textContent = t.timeup;
-    message.textContent =
-      t.watchSkip;
-
-    rewards.style.display =
-      "grid";
-
-    document.getElementById(
-      "quiz-double-btn"
-    ).style.display =
-      "none";
-
-    document.getElementById(
-      "quiz-retry-btn"
-    ).style.display =
-      "none";
-
-    document.getElementById(
-      "quiz-skip-btn"
-    ).style.display =
-      "block";
-
-    next.style.display =
-      "none";
-
-    return;
-  }
-
-  if (correct) {
-
-    icon.textContent = "✅";
-    title.textContent = t.correct;
-    message.textContent =
-      t.watchDouble;
-
-    rewards.style.display =
-      "grid";
-
-    document.getElementById(
-      "quiz-double-btn"
-    ).style.display =
-      "block";
-
-    document.getElementById(
-      "quiz-retry-btn"
-    ).style.display =
-      "none";
-
-    document.getElementById(
-      "quiz-skip-btn"
-    ).style.display =
-      "none";
-
-    next.style.display =
-      "block";
-
+  document.getElementById('langSelect').value = currentLang;
+  applyTranslations();
+  
+  // التحقق من العودة من إعلان AppCreator24
+  const returningRewardId = sessionStorage.getItem('quiz_reward_id');
+  const returningAction = sessionStorage.getItem('quiz_reward_action');
+  
+  if (returningRewardId && returningAction) {
+    completeReward(returningRewardId);
   } else {
+    loadUserDataAndQuestion();
+  }
+});
 
-    icon.textContent = "❌";
+// ================= CORE FUNCTIONS =================
+function applyTranslations() {
+  const t = translations[currentLang] || translations.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (t[key]) el.textContent = t[key];
+  });
+}
+
+function changeLanguage(lang) {
+  currentLang = lang;
+  localStorage.setItem('quiz_language', lang);
+  applyTranslations();
+  loadQuestion(); // إعادة تحميل السؤال باللغة الجديدة
+}
+
+async function loadUserDataAndQuestion() {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  try {
+    // 1. جلب بيانات المستخدم والمتصدرين
+    const res = await fetch(`${API_BASE}/api/quiz/points?user_id=${quizUserId}`);
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('statPoints').textContent = data.points;
+      document.getElementById('statToday').textContent = data.questions_today;
+      document.getElementById('statWeekly').textContent = data.weekly_score;
+      renderLeaderboard(data.leaderboard);
+    }
+    // 2. جلب السؤال
+    await loadQuestion();
+  } catch (err) {
+    console.error('Init error:', err);
+    document.getElementById('loadingText').textContent = 'Connection Error. Tap to retry.';
+    document.getElementById('loadingOverlay').onclick = loadUserDataAndQuestion;
+  }
+}
+
+async function loadQuestion() {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  document.getElementById('actionArea').style.display = 'none';
+  document.getElementById('answersGrid').innerHTML = '';
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/quiz/question?user_id=${quizUserId}&lang=${currentLang}`);
+    const data = await res.json();
+    
+    if (!data.success) {
+      if (data.message === 'DAILY_LIMIT') {
+        document.getElementById('qText').textContent = currentLang === 'ar' ? 'لقد وصلت للحد اليومي (200 سؤال). عد غداً!' : 'Daily limit (200) reached. Come back tomorrow!';
+        document.getElementById('loadingOverlay').style.display = 'none';
+        return;
+      }
+      throw new Error(data.message);
+    }
+
+    currentQuestionId = data.questionId;
+    document.getElementById('qCategory').textContent = data.category;
+    document.getElementById('qDifficulty').textContent = data.difficulty === 'easy' ? '⭐' : data.difficulty === 'medium' ? '⭐⭐' : '⭐⭐⭐';
+    document.getElementById('qLeft').textContent = (currentLang === 'ar' ? 'متبقي: ' : 'Left: ') + data.questionsLeft;
+    document.getElementById('qText').textContent = data.question;
+
+    const grid = document.getElementById('answersGrid');
+    data.answers.forEach((ans, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'answer-btn';
+      btn.textContent = ans;
+      btn.onclick = () => submitAnswer(idx);
+      grid.appendChild(btn);
+    });
+
+    document.getElementById('loadingOverlay').style.display = 'none';
+    startTimer();
+
+  } catch (err) {
+    document.getElementById('loadingText').textContent = 'Failed to load question. Tap to retry.';
+    document.getElementById('loadingOverlay').onclick = loadQuestion;
+  }
+}
+
+// ================= TIMER LOGIC =================
+function startTimer() {
+  clearInterval(timerInterval);
+  timeLeft = 60;
+  updateTimerUI();
+  
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    updateTimerUI();
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      handleTimeUp();
+    }
+  }, 1000);
+}
+
+function updateTimerUI() {
+  document.getElementById('timerText').textContent = timeLeft + 's';
+  const bar = document.getElementById('timerBar');
+  bar.style.width = (timeLeft / 60 * 100) + '%';
+  if (timeLeft <= 10) bar.classList.add('danger');
+  else bar.classList.remove('danger');
+}
+
+function handleTimeUp() {
+  disableAnswers();
+  showActionArea('timeUp', 'skip');
+}
+
+// ================= ANSWER LOGIC =================
+async function submitAnswer(answerIndex) {
+  clearInterval(timerInterval);
+  disableAnswers();
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/quiz/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: quizUserId, questionId: currentQuestionId, answerIndex })
+    });
+    const data = await res.json();
+    
+    const btns = document.querySelectorAll('.answer-btn');
+    btns[data.correctIndex].classList.add('correct');
+    
+    if (data.correct) {
+      showActionArea('correct', 'double');
+    } else {
+      btns[answerIndex].classList.add('wrong');
+      showActionArea('wrong', 'retry');
+    }
+    
+    // تحديث النقاط في الواجهة فوراً
+    const ptsRes = await fetch(`${API_BASE}/api/quiz/points?user_id=${quizUserId}`);
+    const ptsData = await ptsRes.json();
+    if (ptsData.success) document.getElementById('statPoints').textContent = ptsData.points;
+
+  } catch (err) {
+    console.error('Submit error:', err);
+    loadQuestion();
+  }
+}
+
+function disableAnswers() {
+  document.querySelectorAll('.answer-btn').forEach(btn => {
+    btn.disabled = true;
+    btn.style.cursor = 'default';
+  });
+}
+
+function showActionArea(resultKey, primaryAction) {
+  const t = translations[currentLang] || translations.en;
+  const area = document.getElementById('actionArea');
+  const title = document.getElementById('actionTitle');
+  
+  document.getElementById('btnDouble').style.display = primaryAction === 'double' ? 'flex' : 'none';
+  document.getElementById('btnRetry').style.display = primaryAction === 'retry' ? 'flex' : 'none';
+  document.getElementById('btnSkip').style.display = primaryAction === 'skip' ? 'flex' : 'none';
+  document.getElementById('btnNext').style.display = 'none'; // يظهر بعد اكتمال المكافأة
+
+  if (resultKey === 'correct') {
+    title.textContent = t.correct;
+    title.style.color = 'var(--success)';
+    document.getElementById('btnDouble').querySelector('span').textContent = t.watchAdDouble;
+  } else if (resultKey === 'wrong') {
     title.textContent = t.wrong;
-    message.textContent =
-      t.watchRetry;
-
-    rewards.style.display =
-      "grid";
-
-    document.getElementById(
-      "quiz-double-btn"
-    ).style.display =
-      "none";
-
-    document.getElementById(
-      "quiz-retry-btn"
-    ).style.display =
-      "block";
-
-    document.getElementById(
-      "quiz-skip-btn"
-    ).style.display =
-      "none";
-
-    next.style.display =
-      "none";
+    title.style.color = 'var(--danger)';
+    document.getElementById('btnRetry').querySelector('span').textContent = t.watchAdRetry;
+  } else {
+    title.textContent = t.timeUp;
+    title.style.color = 'var(--warning)';
+    document.getElementById('btnSkip').querySelector('span').textContent = t.watchAdSkip;
   }
+  
+  area.style.display = 'block';
 }
 
-function startQuizTimer() {
-
-  stopQuizTimer();
-
-  quizTimeLeft = 60;
-
-  updateQuizTimer();
-
-  quizTimer =
-    setInterval(() => {
-
-      quizTimeLeft--;
-
-      updateQuizTimer();
-
-      if (
-        quizTimeLeft <= 0
-      ) {
-
-        stopQuizTimer();
-
-        handleQuizTimeUp();
-      }
-
-    }, 1000);
-}
-
-function updateQuizTimer() {
-
-  const timer =
-    document.getElementById(
-      "quiz-timer"
-    );
-
-  if (timer) {
-
-    timer.textContent =
-      Math.max(
-        0,
-        quizTimeLeft
-      );
-  }
-}
-
-function stopQuizTimer() {
-
-  if (quizTimer) {
-
-    clearInterval(
-      quizTimer
-    );
-
-    quizTimer = null;
-  }
-}
-
-function handleQuizTimeUp() {
-
-  if (
-    quizAnswered ||
-    !quizQuestionId
-  ) {
-    return;
-  }
-
-  quizAnswered = true;
-
-  document
-    .querySelectorAll(
-      ".quiz-answer-btn"
-    )
-    .forEach(
-      btn =>
-        btn.disabled = true
-    );
-
-  showQuizResult(
-    false,
-    true
-  );
-}
-
-async function quizReward(action) {
-
-  const userId =
-    getQuizUserId();
-
-  if (
-    !userId ||
-    !quizQuestionId
-  ) {
-    return;
-  }
-
-  if (
-    ![
-      "double",
-      "retry",
-      "skip"
-    ].includes(action)
-  ) {
-    return;
-  }
-
+// ================= REWARD & APPCREATOR24 FLOW =================
+async function requestReward(action) {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  document.getElementById('loadingText').textContent = 'Preparing reward...';
+  
   try {
-
-    const createResponse =
-      await fetch(
-        `${API}/api/quiz/reward/create`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              userId:
-                userId,
-
-              questionId:
-                quizQuestionId,
-
-              action:
-                action
-            })
-        }
-      );
-
-    const createData =
-      await createResponse.json();
-
-    if (!createData.success) {
-
-      alert(
-        createData.message ||
-        "Unable to create reward session."
-      );
-
-      return;
-    }
-
-    const rewardId =
-      createData.rewardId;
-
-    if (!rewardId) {
-
-      alert(
-        "Invalid reward session."
-      );
-
-      return;
-    }
-
-    localStorage.setItem(
-      "quiz_reward_id",
-      rewardId
-    );
-
-    localStorage.setItem(
-      "quiz_reward_action",
-      action
-    );
-
-    localStorage.setItem(
-      "quiz_reward_question_id",
-      quizQuestionId
-    );
-
-    const references = {
-      double: "quiz-doub",
-      retry: "quiz-retry",
-      skip: "quiz-skip"
-    };
-
-    window.location.href =
-      `go:${references[action]}`;
-
-  } catch (error) {
-
-    console.error(
-      "Quiz reward error:",
-      error
-    );
-
-    alert(
-      "Unable to start rewarded video."
-    );
+    // 1. إنشاء جلسة المكافأة في السيرفر
+    const res = await fetch(`${API_BASE}/api/quiz/reward/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: quizUserId, questionId: currentQuestionId, action })
+    });
+    const data = await res.json();
+    
+    if (!data.success) throw new Error(data.message);
+    
+    // 2. حفظ الحالة في sessionStorage للعودة من AppCreator24
+    sessionStorage.setItem('quiz_reward_id', data.rewardId);
+    sessionStorage.setItem('quiz_reward_action', action);
+    sessionStorage.setItem('quiz_reward_question_id', currentQuestionId);
+    
+    // 3. التوجيه إلى قسم AppCreator24 الصحيح
+    // ملاحظة حاسمة: المراجع هي quiz-doub, quiz-retry, quiz-skip
+    let ac24Ref = '';
+    if (action === 'double') ac24Ref = 'quiz-doub';
+    else if (action === 'retry') ac24Ref = 'quiz-retry';
+    else if (action === 'skip') ac24Ref = 'quiz-skip';
+    
+    // استخدام window.location.href لضمان عمل go: في AppCreator24
+    setTimeout(() => {
+      window.location.href = `go:${ac24Ref}`;
+    }, 500);
+    
+  } catch (err) {
+    console.error('Reward request error:', err);
+    document.getElementById('loadingOverlay').style.display = 'none';
+    alert('Failed to start reward session. Please try again.');
   }
 }
 
-async function completeQuizReward() {
-
-  const rewardId =
-    localStorage.getItem(
-      "quiz_reward_id"
-    );
-
-  const userId =
-    getQuizUserId();
-
-  if (
-    !rewardId ||
-    !userId
-  ) {
-    return;
-  }
-
+async function completeReward(rewardId) {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  document.getElementById('loadingText').textContent = 'Verifying reward...';
+  
   try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/reward/complete`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              rewardId:
-                rewardId,
-
-              userId:
-                userId
-            })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) {
-
-      alert(
-        data.message ||
-        "Reward could not be completed."
-      );
-
-      return;
+    const res = await fetch(`${API_BASE}/api/quiz/reward/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rewardId, userId: quizUserId })
+    });
+    const data = await res.json();
+    
+    // تنظيف sessionStorage
+    sessionStorage.removeItem('quiz_reward_id');
+    sessionStorage.removeItem('quiz_reward_action');
+    sessionStorage.removeItem('quiz_reward_question_id');
+    
+    if (data.success) {
+      // تحديث الواجهة وإظهار زر "السؤال التالي"
+      document.getElementById('actionArea').querySelectorAll('button').forEach(b => b.style.display = 'none');
+      document.getElementById('btnNext').style.display = 'flex';
+      document.getElementById('actionTitle').textContent = `+${data.pointsEarned} Points! 🎉`;
+      document.getElementById('actionTitle').style.color = 'var(--success)';
+      
+      // تحديث النقاط
+      const ptsRes = await fetch(`${API_BASE}/api/quiz/points?user_id=${quizUserId}`);
+      const ptsData = await ptsRes.json();
+      if (ptsData.success) document.getElementById('statPoints').textContent = ptsData.points;
+    } else {
+      alert('Reward verification failed: ' + data.message);
+      loadQuestion();
     }
-
-    localStorage.removeItem(
-      "quiz_reward_id"
-    );
-
-    localStorage.removeItem(
-      "quiz_reward_action"
-    );
-
-    localStorage.removeItem(
-      "quiz_reward_question_id"
-    );
-
-    await loadQuizPoints();
-
-    /*
-      Retry:
-      لا نطلب سؤالًا جديدًا.
-      نستخدم نفس questionId ونسمح
-      للمستخدم بالإجابة مرة أخرى.
-    */
-
-    if (
-      data.action === "retry"
-    ) {
-
-      quizAnswered = false;
-
-      const result =
-        document.getElementById(
-          "quiz-result"
-        );
-
-      if (result) {
-        result.style.display =
-          "none";
-      }
-
-      document
-        .querySelectorAll(
-          ".quiz-answer-btn"
-        )
-        .forEach(
-          btn =>
-            btn.disabled = false
-        );
-
-      startQuizTimer();
-
-      return;
-    }
-
-    /*
-      Double / Skip:
-      السؤال انتهى، لذلك ننتقل للسؤال التالي.
-    */
-
-    if (
-      data.action === "double" ||
-      data.action === "skip"
-    ) {
-
-      await loadQuizQuestion();
-    }
-
-  } catch (error) {
-
-    console.error(
-      "Complete quiz reward error:",
-      error
-    );
-
-    alert(
-      "Unable to complete reward."
-    );
+  } catch (err) {
+    console.error('Complete reward error:', err);
+    alert('Connection error during verification.');
+    loadQuestion();
+  } finally {
+    document.getElementById('loadingOverlay').style.display = 'none';
   }
 }
 
-function nextQuizQuestion() {
-  loadQuizQuestion();
-}
-
-async function loadQuizPoints() {
-
-  const userId =
-    getQuizUserId();
-
-  if (!userId) return;
-
-  try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/points` +
-        `?user_id=${encodeURIComponent(userId)}`
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) return;
-
-    document.getElementById(
-      "quiz-points"
-    ).textContent =
-      Number(
-        data.points || 0
-      );
-
-    document.getElementById(
-      "quiz-today"
-    ).textContent =
-      Number(
-        data.questions_today || 0
-      );
-
-    document.getElementById(
-      "quiz-weekly"
-    ).textContent =
-      Number(
-        data.weekly_score || 0
-      );
-
-    if (
-      data.settings
-    ) {
-
-      document.getElementById(
-        "quiz-left"
-      ).textContent =
-        Math.max(
-          0,
-          Number(
-            data.settings
-              .max_questions_per_day ||
-            0
-          ) -
-          Number(
-            data.questions_today ||
-            0
-          )
-        );
-    }
-
-    renderQuizLeaderboard(
-      data.leaderboard || []
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Quiz points error:",
-      error
-    );
-  }
-}
-
-function renderQuizLeaderboard(
-  rows
-) {
-
-  const container =
-    document.getElementById(
-      "quiz-leaderboard-list"
-    );
-
-  if (!container) return;
-
-  if (!rows.length) {
-
-    container.textContent =
-      "No leaderboard data yet.";
-
+// ================= UTILS =================
+function renderLeaderboard(data) {
+  const list = document.getElementById('leaderboardList');
+  if (!data || data.length === 0) {
+    list.innerHTML = '<div class="lb-item" style="justify-content: center; color: var(--text-secondary);">No data yet</div>';
     return;
   }
-
-  container.innerHTML = "";
-
-  rows.forEach(
-    (row, index) => {
-
-      const div =
-        document.createElement(
-          "div"
-        );
-
-      div.className =
-        "quiz-leaderboard-row";
-
-      const username =
-        row.username ||
-        "User";
-
-      const score =
-        Number(
-          row.weekly_score || 0
-        );
-
-      div.textContent =
-        `${index + 1}. ${username} — ${score}`;
-
-      container.appendChild(
-        div
-      );
-    }
-  );
+  list.innerHTML = data.map((row, i) => `
+    <div class="lb-item">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="lb-rank">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1)}</span>
+        <span>@${row.username || 'User'}</span>
+      </div>
+      <span style="font-weight:700;color:var(--warning);">${row.weekly_score} pts</span>
+    </div>
+  `).join('');
 }
 
-async function openQuizConvert() {
-
-  const userId =
-    getQuizUserId();
-
-  if (!userId) return;
-
-  const points =
-    Number(
-      document.getElementById(
-        "quiz-points"
-      )?.textContent || 0
-    );
-
-  if (points <= 0) {
-
-    alert(
-      "You do not have enough points."
-    );
-
-    return;
-  }
-
-  const t =
-    quizTranslations[
-      quizCurrentLanguage
-    ] ||
-    quizTranslations.en;
-
-  const value =
-    prompt(
-      t.conversionPrompt,
-      points
-    );
-
-  if (value === null) return;
-
-  const requested =
-    Number(value);
-
-  if (
-    !Number.isInteger(requested) ||
-    requested <= 0
-  ) {
-
-    alert(
-      "Invalid points."
-    );
-
-    return;
-  }
-
-  try {
-
-    const response =
-      await fetch(
-        `${API}/api/quiz/convert`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-
-          body:
-            JSON.stringify({
-              userId:
-                userId,
-
-              pointsToConvert:
-                requested
-            })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (!data.success) {
-
-      alert(
-        data.message ||
-        "Conversion failed."
-      );
-
-      return;
-    }
-
-    alert(
-      `+$${data.usd_added}`
-    );
-
-    await loadQuizPoints();
-
-  } catch (error) {
-
-    console.error(
-      "Quiz conversion error:",
-      error
-    );
-
-    alert(
-      "Conversion failed."
-    );
-  }
+function convertPoints() {
+  // يمكن ربط هذا بـ Modal أو توجيه لصفحة التحويل
+  alert('Conversion feature: 1000 points = $0.10 (Configurable by Admin)');
 }
-
-function showQuizLimit(
-  message
-) {
-
-  const limit =
-    document.getElementById(
-      "quiz-limit"
-    );
-
-  if (!limit) return;
-
-  limit.textContent =
-    message;
-
-  limit.style.display =
-    "block";
-}
-
-document.addEventListener(
-  "DOMContentLoaded",
-  () => {
-
-    const select =
-      document.getElementById(
-        "quiz-language"
-      );
-
-    if (select) {
-      select.value =
-        quizCurrentLanguage;
-    }
-
-    applyQuizTranslations();
-
-    loadQuizPage();
-  }
-);
 </script>
-
 </body>
 </html>
