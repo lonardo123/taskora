@@ -2,26 +2,45 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Processing...</title>
 <style>
-  body { background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
-  .spinner { width: 40px; height: 40px; border: 4px solid #334155; border-top-color: #8b5cf6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+  body { 
+    background: #0f172a; 
+    color: white; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    justify-content: center; 
+    height: 100vh; 
+    margin: 0; 
+    font-family: sans-serif; 
+    overflow: hidden;
+  }
+  .spinner { 
+    width: 40px; 
+    height: 40px; 
+    border: 4px solid #334155; 
+    border-top-color: #8b5cf6; 
+    border-radius: 50%; 
+    animation: spin 1s linear infinite; 
+    margin-bottom: 20px; 
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
   <div class="spinner"></div>
-    <h3>⏭️ Skipping Question...</h3>
+  <h3 id="statusText">⏭️ Skipping Question...</h3>
   <p style="color: #94a3b8; font-size: 14px; margin-top: 10px;">Verifying with server</p>
 
-    <script>
+  <script>
     async function complete() {
-      // 1. جلب البيانات من sessionStorage فقط (أكثر موثوقية في AppCreator24)
-      const userId = sessionStorage.getItem('quiz_user_id');
-      const rewardId = sessionStorage.getItem('quiz_reward_id');
+      // ✅ القراءة من localStorage (أكثر أماناً في AppCreator24)
+      const userId = localStorage.getItem('quiz_user_id');
+      const rewardId = localStorage.getItem('quiz_reward_id');
       
-      // 2. ✅ إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت (بدون عرض أي خطأ)
+      // إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت تام (بدون أي رسائل)
       if (!userId || !rewardId) {
         window.location.href = 'quiz.html';
         return;
@@ -34,15 +53,13 @@
           body: JSON.stringify({ rewardId, userId: userId })
         });
         
-        const data = await res.json();
+        // تنظيف البيانات بعد الاستخدام
+        localStorage.removeItem('quiz_reward_id');
+        localStorage.removeItem('quiz_reward_action');
+        localStorage.removeItem('quiz_reward_question_id');
+        // ملاحظة: نحتفظ بـ quiz_user_id في localStorage لأنه قد يحتاجه لاحقاً
         
-        // 3. تنظيف البيانات بعد الاستخدام
-        sessionStorage.removeItem('quiz_user_id');
-        sessionStorage.removeItem('quiz_reward_id');
-        sessionStorage.removeItem('quiz_reward_action');
-        sessionStorage.removeItem('quiz_reward_question_id');
-        
-        // 4. العودة إلى صفحة الكويز الرئيسية لتحديث الحالة
+        // العودة إلى صفحة الكويز الرئيسية
         window.location.href = `quiz.html?user_id=${userId}`;
         
       } catch (e) {
