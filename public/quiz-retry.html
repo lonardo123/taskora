@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Taskora - Retry</title>
+
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+    }
+
+    .box {
+      width: min(420px, 90%);
+      background: #fff;
+      padding: 30px;
+      border-radius: 18px;
+      text-align: center;
+      box-shadow: 0 8px 30px rgba(0,0,0,.08);
+    }
+
+    .icon {
+      font-size: 50px;
+    }
+
+    #message {
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="box">
+
+  <div class="icon">🔄</div>
+
+  <h2>Retry</h2>
+
+  <p id="message">
+    Preparing your retry...
+  </p>
+
+</div>
+
+<script>
+
+const API =
+  "https://taskora.taskora.workers.dev";
+
+async function completeReward() {
+
+  const rewardId =
+    localStorage.getItem(
+      "quiz_reward_id"
+    );
+
+  const userId =
+    localStorage.getItem(
+      "telegram_id"
+    );
+
+  const action =
+    localStorage.getItem(
+      "quiz_reward_action"
+    );
+
+  if (
+    !rewardId ||
+    !userId ||
+    action !== "retry"
+  ) {
+
+    document.getElementById(
+      "message"
+    ).textContent =
+      "Invalid reward session.";
+
+    return;
+  }
+
+  try {
+
+    const response =
+      await fetch(
+        `${API}/api/quiz/reward/complete`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              rewardId,
+              userId
+            })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (!data.success) {
+
+      document.getElementById(
+        "message"
+      ).textContent =
+        data.message ||
+        "Retry could not be completed.";
+
+      return;
+    }
+
+    localStorage.removeItem(
+      "quiz_reward_id"
+    );
+
+    localStorage.removeItem(
+      "quiz_reward_action"
+    );
+
+    localStorage.removeItem(
+      "quiz_reward_question_id"
+    );
+
+    document.getElementById(
+      "message"
+    ).textContent =
+      "Retry activated.";
+
+    setTimeout(
+      () => {
+
+        window.location.href =
+          "quiz.html";
+
+      },
+      700
+    );
+
+  } catch (error) {
+
+    console.error(
+      error
+    );
+
+    document.getElementById(
+      "message"
+    ).textContent =
+      "Unable to complete retry.";
+  }
+}
+
+completeReward();
+
+</script>
+
+</body>
+</html>
