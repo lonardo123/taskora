@@ -6127,428 +6127,196 @@ async function getQuizSettings() {
   }
 }
 
-
 // ================================================================
-// 1️⃣ GET QUIZ QUESTION
+// دالة مساعدة للترجمة الديناميكية (من الإنجليزية إلى لغة المستخدم)
 // ================================================================
-
-app.get('/api/quiz/question', async (c) => {
-
+async function translateText(text, targetLang) {
+  if (!text || targetLang === 'en') return text;
+  
   try {
-
+    // نستخدم MyMemory API المجاني للترجمة من الإنجليزية (en) إلى اللغة المطلوبة
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLang}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data.responseStatus === 200 && data.responseData.translatedText) {
+      return data.responseData.translatedText;
+    }
+    return text; // في حال فشل الترجمة، نحتفظ بالنص الإنجليزي
+  } catch (err) {
+    console.error(`❌ Translation error for lang ${targetLang}:`, err);
+    return text;
+  }
+}
+// ================================================================
+// 1️⃣ GET QUIZ QUESTION (مع دعم الترجمة الديناميكية)
+// ================================================================
+app.get('/api/quiz/question', async (c) => {
+  try {
     const userId = c.req.query('user_id');
-
-    const lang =
-      (c.req.query('lang') || 'en')
-        .toLowerCase()
-        .trim();
+    const lang = (c.req.query('lang') || 'en').toLowerCase().trim();
 
     if (!userId || !/^\d+$/.test(userId)) {
-
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-
-    // التأكد أن المستخدم موجود
     const userCheck = await pool.query(
       'SELECT telegram_id FROM users WHERE telegram_id = $1',
       [userId]
     );
 
     if (userCheck.rows.length === 0) {
-
-      return c.json({
-        success: false,
-        message: 'USER_NOT_FOUND'
-      }, 404);
+      return c.json({ success: false, message: 'USER_NOT_FOUND' }, 404);
     }
 
-
     const settings = await getQuizSettings();
-
 
     // ============================================================
     // تهيئة quiz_points
     // ============================================================
-
     await pool.query(
       `
-      INSERT INTO quiz_points (
-        user_id,
-        points,
-        questions_today,
-        last_reset_date,
-        weekly_score,
-        last_weekly_reset
-      )
-      VALUES (
-        $1,
-        0,
-        0,
-        CURRENT_DATE,
-        0,
-        CURRENT_DATE
-      )
-
-      ON CONFLICT (user_id)
-
-      DO UPDATE SET
-
-        questions_today =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN 0
-            ELSE quiz_points.questions_today
-          END,
-
-        last_reset_date =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_reset_date
-          END,
-
-        weekly_score =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN 0
-            ELSE quiz_points.weekly_score
-          END,
-
-        last_weekly_reset =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_weekly_reset
-          END
+      INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
+      VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
+      ON CONFLICT (user_id) DO UPDATE SET 
+        questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
+        last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
+        weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
+        last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END
       `,
       [userId]
     );
-
 
     const userPoints = await pool.query(
-      `
-      SELECT
-        questions_today,
-        points,
-        weekly_score
-      FROM quiz_points
-      WHERE user_id = $1
-      `,
+      'SELECT questions_today, points, weekly_score FROM quiz_points WHERE user_id = $1',
       [userId]
     );
 
-
-    const qToday =
-      Number(userPoints.rows[0]?.questions_today || 0);
-
-
-    // ============================================================
-    // الحد اليومي
-    // ============================================================
+    const qToday = Number(userPoints.rows[0]?.questions_today || 0);
 
     if (qToday >= settings.max_questions_per_day) {
-
       return c.json({
-
         success: false,
-
         message: 'DAILY_LIMIT',
-
-        points:
-          Number(userPoints.rows[0]?.points || 0)
-
+        points: Number(userPoints.rows[0]?.points || 0)
       });
     }
-
 
     // ============================================================
     // تحديد الصعوبة
     // ============================================================
-
     let difficulty = 'easy';
-
-    if (qToday > 50) {
-      difficulty = 'medium';
-    }
-
-    if (qToday > 100) {
-      difficulty = 'hard';
-    }
-
+    if (qToday > 50) difficulty = 'medium';
+    if (qToday > 100) difficulty = 'hard';
 
     // ============================================================
-    // اللغات
+    // منطق جلب السؤال والترجمة
     // ============================================================
-
-    const supportedApiLangs = [
-      'ar',
-      'en',
-      'fr',
-      'es',
-      'pt',
-      'de',
-      'ja'
-    ];
-
-    const dbLang =
-      supportedApiLangs.includes(lang)
-        ? lang
-        : 'en';
-
-
+    // اللغات المدعومة مباشرة من Open Trivia DB
+    const supportedApiLangs = ['en', 'de', 'fr', 'es', 'pt', 'ja'];
+    
+    // إذا كانت اللغة غير مدعومة، نجلبها بالإنجليزية ثم نترجمها
+    const fetchLang = supportedApiLangs.includes(lang) ? lang : 'en';
     let questionData = null;
 
-
-    // ============================================================
-    // Open Trivia DB
-    // ============================================================
-
     try {
-
       const apiRes = await fetch(
-        `https://opentdb.com/api.php` +
-        `?amount=1` +
-        `&type=multiple` +
-        `&difficulty=${difficulty}` +
-        `&language=${dbLang}` +
-        `&encode=url3986`
+        `https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=${fetchLang}&encode=url3986`
       );
-
-
       const apiData = await apiRes.json();
 
-
-      if (
-        apiData.response_code === 0 &&
-        apiData.results?.length > 0
-      ) {
-
+      if (apiData.response_code === 0 && apiData.results?.length > 0) {
         const q = apiData.results[0];
-
         questionData = {
-
-          question:
-            decodeURIComponent(q.question),
-
-          correctAnswer:
-            decodeURIComponent(q.correct_answer),
-
-          incorrectAnswers:
-            q.incorrect_answers.map(
-              answer => decodeURIComponent(answer)
-            ),
-
-          category:
-            decodeURIComponent(q.category),
-
-          difficulty:
-            q.difficulty
+          question: decodeURIComponent(q.question),
+          correctAnswer: decodeURIComponent(q.correct_answer),
+          incorrectAnswers: q.incorrect_answers.map(a => decodeURIComponent(a)),
+          category: decodeURIComponent(q.category),
+          difficulty: q.difficulty
         };
       }
-
     } catch (apiErr) {
-
-      console.error(
-        `❌ Open Trivia DB error (${dbLang}):`,
-        apiErr
-      );
+      console.error(`❌ Open Trivia DB error:`, apiErr);
     }
 
-
-    // ============================================================
-    // Fallback
-    // ============================================================
-
-    if (!questionData) {
-
-      if (lang === 'ar') {
-
-        questionData = {
-
-          question:
-            'ما هي عاصمة فرنسا؟',
-
-          correctAnswer:
-            'باريس',
-
-          incorrectAnswers:
-            [
-              'لندن',
-              'برلين',
-              'مدريد'
-            ],
-
-          category:
-            'Geography',
-
-          difficulty:
-            'easy'
-        };
-
-      } else if (lang === 'fr') {
-
-        questionData = {
-
-          question:
-            'Quelle est la capitale de la France ?',
-
-          correctAnswer:
-            'Paris',
-
-          incorrectAnswers:
-            [
-              'Londres',
-              'Berlin',
-              'Madrid'
-            ],
-
-          category:
-            'Geography',
-
-          difficulty:
-            'easy'
-        };
-
-      } else {
-
-        questionData = {
-
-          question:
-            'What is the capital of France?',
-
-          correctAnswer:
-            'Paris',
-
-          incorrectAnswers:
-            [
-              'London',
-              'Berlin',
-              'Madrid'
-            ],
-
-          category:
-            'Geography',
-
-          difficulty:
-            'easy'
-        };
+    // محاولة أخيرة بالجلب باللغة الإنجليزية فقط في حال فشل الطلب الأول
+    if (!questionData && fetchLang !== 'en') {
+      try {
+        const apiRes = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&difficulty=${difficulty}&language=en&encode=url3986`);
+        const apiData = await apiRes.json();
+        if (apiData.response_code === 0 && apiData.results?.length > 0) {
+          const q = apiData.results[0];
+          questionData = {
+            question: decodeURIComponent(q.question),
+            correctAnswer: decodeURIComponent(q.correct_answer),
+            incorrectAnswers: q.incorrect_answers.map(a => decodeURIComponent(a)),
+            category: decodeURIComponent(q.category),
+            difficulty: q.difficulty
+          };
+        }
+      } catch (err) {
+        console.error(`❌ Fallback Open Trivia DB (en) error:`, err);
       }
     }
 
+    // إذا فشل الجلب تماماً، نرجع خطأ (بدون أسئلة احتياطية ثابتة كما طلبت)
+    if (!questionData) {
+      return c.json({ success: false, message: 'Failed to fetch question from API' }, 500);
+    }
 
     // ============================================================
-    // خلط الإجابات
+    // الترجمة الديناميكية إذا كانت لغة الجلب تختلف عن لغة المستخدم
     // ============================================================
-
-    const allAnswers = [
-      questionData.correctAnswer,
-      ...questionData.incorrectAnswers
-    ];
-
-    const shuffledAnswers =
-      shuffleArray(allAnswers);
-
-
-    const correctIndex =
-      shuffledAnswers.indexOf(
-        questionData.correctAnswer
-      );
-
-
-    const questionId =
-      generateQuizId();
-
+    if (fetchLang !== lang) {
+      try {
+        questionData.question = await translateText(questionData.question, lang);
+        questionData.correctAnswer = await translateText(questionData.correctAnswer, lang);
+        questionData.incorrectAnswers = await Promise.all(
+          questionData.incorrectAnswers.map(ans => translateText(ans, lang))
+        );
+        questionData.category = await translateText(questionData.category, lang);
+      } catch (transErr) {
+        console.error(`❌ Translation process failed:`, transErr);
+        // في حال فشل الترجمة، سيظل النص باللغة الإنجليزية وهو مقبول
+      }
+    }
 
     // ============================================================
-    // حفظ السؤال في قاعدة البيانات
+    // خلط الإجابات وحفظ الجلسة
     // ============================================================
+    const allAnswers = [questionData.correctAnswer, ...questionData.incorrectAnswers];
+    const shuffledAnswers = shuffleArray(allAnswers);
+    const correctIndex = shuffledAnswers.indexOf(questionData.correctAnswer);
+    const questionId = generateQuizId();
 
     await pool.query(
       `
-      INSERT INTO quiz_question_sessions (
-        question_id,
-        user_id,
-        correct_index,
-        created_at,
-        answered,
-        skipped,
-        retry_used,
-        double_used
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        NOW(),
-        false,
-        false,
-        false,
-        false
-      )
+      INSERT INTO quiz_question_sessions (question_id, user_id, correct_index, created_at, answered, skipped, retry_used, double_used)
+      VALUES ($1, $2, $3, NOW(), false, false, false, false)
       `,
-      [
-        questionId,
-        userId,
-        correctIndex
-      ]
+      [questionId, userId, correctIndex]
     );
 
-
     // ============================================================
-    // الرد
+    // الرد النهائي
     // ============================================================
-
     return c.json({
-
       success: true,
-
       questionId,
-
-      question:
-        decodeHTML(questionData.question),
-
-      answers:
-        shuffledAnswers.map(
-          answer => decodeHTML(answer)
-        ),
-
-      category:
-        questionData.category,
-
-      difficulty:
-        questionData.difficulty,
-
-      points:
-        Number(userPoints.rows[0].points || 0),
-
-      weekly_score:
-        Number(userPoints.rows[0].weekly_score || 0),
-
-      questionsLeft:
-        settings.max_questions_per_day - qToday
+      question: decodeHTML(questionData.question),
+      answers: shuffledAnswers.map(answer => decodeHTML(answer)),
+      category: decodeHTML(questionData.category),
+      difficulty: questionData.difficulty,
+      points: Number(userPoints.rows[0].points || 0),
+      weekly_score: Number(userPoints.rows[0].weekly_score || 0),
+      questionsLeft: settings.max_questions_per_day - qToday
     });
 
-
   } catch (err) {
-
-    console.error(
-      '❌ /api/quiz/question:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
+    console.error('❌ /api/quiz/question:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 });
-
 
 // ================================================================
 // 2️⃣ ANSWER QUESTION
