@@ -231,47 +231,6 @@ async function loadUserDataAndQuestion() {
   }
 }
 
-async function loadQuestion() {
-  document.getElementById('loadingOverlay').style.display = 'flex';
-  document.getElementById('actionArea').style.display = 'none';
-  document.getElementById('answersGrid').innerHTML = '';
-  
-  try {
-    const res = await fetch(`${API_BASE}/api/quiz/question?user_id=${quizUserId}&lang=${currentLang}`);
-    const data = await res.json();
-    
-    if (!data.success) {
-      if (data.message === 'DAILY_LIMIT') {
-        document.getElementById('qText').textContent = currentLang === 'ar' ? 'لقد وصلت للحد اليومي (200 سؤال). عد غداً!' : 'Daily limit (200) reached. Come back tomorrow!';
-        document.getElementById('loadingOverlay').style.display = 'none';
-        return;
-      }
-      throw new Error(data.message);
-    }
-
-    currentQuestionId = data.questionId;
-    document.getElementById('qCategory').textContent = data.category;
-    document.getElementById('qDifficulty').textContent = data.difficulty === 'easy' ? '⭐' : data.difficulty === 'medium' ? '⭐⭐' : '⭐⭐⭐';
-    document.getElementById('qLeft').textContent = (currentLang === 'ar' ? 'متبقي: ' : 'Left: ') + data.questionsLeft;
-    document.getElementById('qText').textContent = data.question;
-
-    const grid = document.getElementById('answersGrid');
-    data.answers.forEach((ans, idx) => {
-      const btn = document.createElement('button');
-      btn.className = 'answer-btn';
-      btn.textContent = ans;
-      btn.onclick = () => submitAnswer(idx);
-      grid.appendChild(btn);
-    });
-
-    document.getElementById('loadingOverlay').style.display = 'none';
-    startTimer();
-
-  } catch (err) {
-    document.getElementById('loadingText').textContent = 'Failed to load question. Tap to retry.';
-    document.getElementById('loadingOverlay').onclick = loadQuestion;
-  }
-}
 
 // ================= TIMER LOGIC =================
 function startTimer() {
@@ -370,15 +329,72 @@ function showActionArea(resultKey, primaryAction) {
   area.style.display = 'block';
 }
 
-// ================= REWARD & APPCREATOR24 FLOW =================
+// ================= دالة تحميل السؤال (مع تسريع عبر Timeout) =================
+async function loadQuestion() {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  document.getElementById('actionArea').style.display = 'none';
+  document.getElementById('answersGrid').innerHTML = '';
+  
+  try {
+    // حفظ معرف المستخدم في localStorage لضمان عدم ضياعه عند الانتقال بين الصفحات
+    localStorage.setItem('quiz_user_id', quizUserId);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500); // مهلة 2.5 ثانية كحد أقصى
+
+    const res = await fetch(`${API_BASE}/api/quiz/question?user_id=${quizUserId}&lang=${currentLang}`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
+    const data = await res.json();
+    
+    if (!data.success) {
+      if (data.message === 'DAILY_LIMIT') {
+        document.getElementById('qText').textContent = currentLang === 'ar' ? 'لقد وصلت للحد اليومي (200 سؤال). عد غداً!' : 'Daily limit (200) reached. Come back tomorrow!';
+        document.getElementById('loadingOverlay').style.display = 'none';
+        return;
+      }
+      throw new Error(data.message);
+    }
+
+    currentQuestionId = data.questionId;
+    document.getElementById('qCategory').textContent = data.category;
+    document.getElementById('qDifficulty').textContent = data.difficulty === 'easy' ? '⭐' : data.difficulty === 'medium' ? '⭐⭐' : '⭐⭐⭐';
+    document.getElementById('qLeft').textContent = (currentLang === 'ar' ? 'متبقي: ' : 'Left: ') + data.questionsLeft;
+    document.getElementById('qText').textContent = data.question;
+
+    const grid = document.getElementById('answersGrid');
+    data.answers.forEach((ans, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'answer-btn';
+      btn.textContent = ans;
+      btn.onclick = () => submitAnswer(idx);
+      grid.appendChild(btn);
+    });
+
+    document.getElementById('loadingOverlay').style.display = 'none';
+    startTimer();
+
+  } catch (err) {
+    // في حال الخطأ أو انتهاء المهلة، نعرض رسالة بسيطة ونعيد المحاولة بصمت
+    console.warn('Quiz load error or timeout, using fallback:', err);
+    document.getElementById('loadingText').textContent = currentLang === 'ar' ? 'جاري تحميل سؤال بديل...' : 'Loading fallback question...';
+    setTimeout(() => loadQuestion(), 1000); // إعادة المحاولة تلقائياً
+  }
+}
+
+// ================= دالة طلب المكافأة (بدون أي رسائل مزعجة) =================
 async function requestReward(action) {
-  // إخفاء أي رسائل سابقة وعرض مؤشر تحميل بسيط (بدون نصوص مزعجة)
+  // إخفاء أي شيء وعرض تحميل بسيط جداً
   const overlay = document.getElementById('loadingOverlay');
-  if (overlay) overlay.style.display = 'flex';
+  if (overlay) {
+    overlay.style.display = 'flex';
+    document.getElementById('loadingText').textContent = currentLang === 'ar' ? 'جاري التحضير...' : 'Preparing...';
+  }
 
   try {
-    // 1. إنشاء جلسة المكافأة في السيرفر
-    const res = await fetch(`https://taskora.taskora.workers.dev/api/quiz/reward/create`, {
+    const res = await fetch(`${API_BASE}/api/quiz/reward/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: quizUserId, questionId: currentQuestionId, action })
@@ -387,24 +403,22 @@ async function requestReward(action) {
     
     if (!data.success) {
       if (overlay) overlay.style.display = 'none';
-      // في حال الفشل، نعود للسؤال التالي بصمت دون إظهار alert
-      loadQuestion();
+      loadQuestion(); // عودة صامتة للسؤال التالي في حال الفشل
       return;
     }
     
-    // 2. ✅ الحفظ الآمن في sessionStorage (هذا هو السطر الذي كان ينقصنا)
-    sessionStorage.setItem('quiz_user_id', quizUserId);
-    sessionStorage.setItem('quiz_reward_id', data.rewardId);
-    sessionStorage.setItem('quiz_reward_action', action);
-    sessionStorage.setItem('quiz_reward_question_id', currentQuestionId);
+    // ✅ الحفظ المضمون في localStorage (أفضل من sessionStorage في AppCreator24)
+    localStorage.setItem('quiz_user_id', quizUserId);
+    localStorage.setItem('quiz_reward_id', data.rewardId);
+    localStorage.setItem('quiz_reward_action', action);
+    localStorage.setItem('quiz_reward_question_id', currentQuestionId);
     
-    // 3. التوجيه إلى قسم AppCreator24 الصحيح
+    // التوجيه إلى قسم AppCreator24
     let ac24Ref = '';
     if (action === 'double') ac24Ref = 'quiz-doub';
     else if (action === 'retry') ac24Ref = 'quiz-retry';
     else if (action === 'skip') ac24Ref = 'quiz-skip';
     
-    // التحويل الفوري
     setTimeout(() => {
       window.location.href = `go:${ac24Ref}`;
     }, 300);
@@ -412,10 +426,9 @@ async function requestReward(action) {
   } catch (err) {
     console.error('Reward request error:', err);
     if (overlay) overlay.style.display = 'none';
-    loadQuestion(); // عودة صامتة في حال فشل الاتصال
+    loadQuestion(); // عودة صامتة
   }
 }
-
 async function completeReward(rewardId) {
   document.getElementById('loadingOverlay').style.display = 'flex';
   document.getElementById('loadingText').textContent = 'Verifying reward...';
