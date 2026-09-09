@@ -438,8 +438,31 @@ let quizTimeLeft = 60;
 let quizCurrentLanguage =
   localStorage.getItem("quiz_language") || "en";
 
+
+// =========================================================
+// 🔐 QUIZ USER ID
+// =========================================================
+
+// قراءة user_id من رابط صفحة Quiz
+const quizUrlParams = new URLSearchParams(window.location.search);
+
+const quizUserIdFromUrl =
+  quizUrlParams.get('user_id')?.trim() || null;
+
+// حفظ نفس user_id لاستخدامه طوال جلسة Quiz
+let quizUserId = quizUserIdFromUrl;
+
+// التحقق من وجود Telegram ID صحيح
+if (!quizUserId || !/^\d+$/.test(quizUserId)) {
+
+  console.error('❌ Quiz user_id is missing or invalid:', quizUserId);
+
+  quizUserId = null;
+}
+
+// دالة موحدة للحصول على مستخدم Quiz الحالي
 function getQuizUserId() {
-  return localStorage.getItem("telegram_id");
+  return quizUserId;
 }
 
 const quizTranslations = {
