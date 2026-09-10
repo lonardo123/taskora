@@ -180,18 +180,10 @@ window.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  document.getElementById('langSelect').value = currentLang;
-  applyTranslations();
-  
-  // التحقق من العودة من إعلان AppCreator24
-  const returningRewardId = sessionStorage.getItem('quiz_reward_id');
-  const returningAction = sessionStorage.getItem('quiz_reward_action');
-  
-  if (returningRewardId && returningAction) {
-    completeReward(returningRewardId);
-  } else {
-    loadUserDataAndQuestion();
-  }
+ document.getElementById('langSelect').value = currentLang;
+applyTranslations();
+
+loadUserDataAndQuestion();
 });
 
 // ================= CORE FUNCTIONS =================
@@ -499,46 +491,7 @@ async function requestReward(action) {
     loadQuestion(); // عودة صامتة
   }
 }
-async function completeReward(rewardId) {
-  document.getElementById('loadingOverlay').style.display = 'flex';
-  document.getElementById('loadingText').textContent = 'Verifying reward...';
-  
-  try {
-    const res = await fetch(`${API_BASE}/api/quiz/reward/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rewardId, userId: quizUserId })
-    });
-    const data = await res.json();
-    
-    // تنظيف sessionStorage
-    sessionStorage.removeItem('quiz_reward_id');
-    sessionStorage.removeItem('quiz_reward_action');
-    sessionStorage.removeItem('quiz_reward_question_id');
-    
-    if (data.success) {
-      // تحديث الواجهة وإظهار زر "السؤال التالي"
-      document.getElementById('actionArea').querySelectorAll('button').forEach(b => b.style.display = 'none');
-      document.getElementById('btnNext').style.display = 'flex';
-      document.getElementById('actionTitle').textContent = `+${data.pointsEarned} Points! 🎉`;
-      document.getElementById('actionTitle').style.color = 'var(--success)';
-      
-      // تحديث النقاط
-      const ptsRes = await fetch(`${API_BASE}/api/quiz/points?user_id=${quizUserId}`);
-      const ptsData = await ptsRes.json();
-      if (ptsData.success) document.getElementById('statPoints').textContent = ptsData.points;
-    } else {
-      alert('Reward verification failed: ' + data.message);
-      loadQuestion();
-    }
-  } catch (err) {
-    console.error('Complete reward error:', err);
-    alert('Connection error during verification.');
-    loadQuestion();
-  } finally {
-    document.getElementById('loadingOverlay').style.display = 'none';
-  }
-}
+
 
 // ================= UTILS =================
 function renderLeaderboard(data) {
