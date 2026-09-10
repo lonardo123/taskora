@@ -53,6 +53,30 @@ async function getOrCreateUser(client, telegramId) {
 // ==========================================
 let currentMessage = null;
 
+
+// ==========================================
+// ⚙️ Quiz Settings Page
+// فتح صفحة إعدادات الكويز من public/quiz-settings.html
+// ==========================================
+app.get('/quiz-settings', async (c) => {
+  try {
+    const url = new URL(c.req.url);
+
+    url.pathname = '/quiz-settings.html';
+
+    return c.env.ASSETS.fetch(
+      new Request(url.toString(), c.req.raw)
+    );
+
+  } catch (err) {
+    console.error('❌ /quiz-settings:', err);
+
+    return c.text(
+      'Quiz Settings page failed to load.',
+      500
+    );
+  }
+});
 // ==========================================
 // Worker Start
 // Cloudflare Workers لا يستخدم express.static()
