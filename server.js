@@ -6441,10 +6441,10 @@ app.get('/api/quiz/question', async (c) => {
         ),
 
       questionsLeft:
-        Math.max(
-          0,
-          settings.max_questions_per_day - qToday
-        )
+  Math.max(
+    0,
+    settings.max_questions_per_day - qToday - 1
+  )
     });
 
   } catch (err) {
