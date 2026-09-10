@@ -394,7 +394,7 @@ const translations = {
     cancel: 'Cancel',
     confirm: 'Confirm',
     enterPoints: 'Enter points',
-    minimumPoints: 'Minimum conversion is 1000 points.',
+    minimumPoints: (points) => `Minimum conversion is ${points} points.`,
     insufficientPoints: 'You do not have enough points.',
     invalidPoints: 'Enter a valid number of points.',
     conversionSuccess: 'Points converted successfully.',
@@ -425,7 +425,7 @@ const translations = {
     cancel: 'إلغاء',
     confirm: 'تأكيد التحويل',
     enterPoints: 'أدخل النقاط',
-    minimumPoints: 'الحد الأدنى للتحويل هو 1000 نقطة.',
+    minimumPoints: (points) => `الحد الأدنى للتحويل هو ${points} نقطة.`,
     insufficientPoints: 'لا توجد نقاط كافية في حسابك.',
     invalidPoints: 'أدخل عددًا صحيحًا من النقاط.',
     conversionSuccess: 'تم تحويل النقاط بنجاح.',
@@ -456,7 +456,7 @@ const translations = {
     cancel: 'Annuler',
     confirm: 'Confirmer',
     enterPoints: 'Entrez les points',
-    minimumPoints: 'Le minimum est de 1000 points.',
+    minimumPoints: (points) => `Le minimum est de ${points} points.`,
     insufficientPoints: 'Vous n’avez pas assez de points.',
     invalidPoints: 'Entrez un nombre valide.',
     conversionSuccess: 'Points convertis avec succès.',
@@ -487,7 +487,7 @@ const translations = {
     cancel: 'Cancelar',
     confirm: 'Confirmar',
     enterPoints: 'Introduce los puntos',
-    minimumPoints: 'El mínimo es de 1000 puntos.',
+    minimumPoints: (points) => `El mínimo es de ${points} puntos.`,
     insufficientPoints: 'No tienes suficientes puntos.',
     invalidPoints: 'Introduce un número válido.',
     conversionSuccess: 'Puntos convertidos correctamente.',
@@ -518,7 +518,7 @@ const translations = {
     cancel: 'Cancelar',
     confirm: 'Confirmar',
     enterPoints: 'Digite os pontos',
-    minimumPoints: 'O mínimo para conversão é 1000 pontos.',
+    minimumPoints: (points) => `O mínimo para conversão é ${points} pontos.`,
     insufficientPoints: 'Você não possui pontos suficientes.',
     invalidPoints: 'Digite um número válido.',
     conversionSuccess: 'Pontos convertidos com sucesso.',
@@ -549,7 +549,7 @@ const translations = {
     cancel: 'Abbrechen',
     confirm: 'Bestätigen',
     enterPoints: 'Punkte eingeben',
-    minimumPoints: 'Die Mindestumwandlung beträgt 1000 Punkte.',
+    minimumPoints: (points) => `Die Mindestumwandlung beträgt ${points} Punkte.`,
     insufficientPoints: 'Du hast nicht genügend Punkte.',
     invalidPoints: 'Gib eine gültige Zahl ein.',
     conversionSuccess: 'Punkte erfolgreich umgewandelt.',
@@ -580,7 +580,7 @@ const translations = {
     cancel: 'キャンセル',
     confirm: '交換する',
     enterPoints: 'ポイントを入力',
-    minimumPoints: '交換には最低1000ポイントが必要です。',
+    minimumPoints: (points) => `最小交換ポイント数は ${points} ポイントです。.`,
     insufficientPoints: 'ポイントが不足しています。',
     invalidPoints: '有効なポイント数を入力してください。',
     conversionSuccess: 'ポイントの交換が完了しました。',
@@ -1139,7 +1139,7 @@ async function submitPointsConversion() {
   ) {
 
     errorBox.textContent =
-      t.minimumPoints;
+  t.minimumPoints(quizMinimumConversionPoints);
 
     errorBox.style.display =
       'block';
