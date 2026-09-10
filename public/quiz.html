@@ -339,7 +339,7 @@ async function loadQuestion() {
     localStorage.setItem('quiz_user_id', quizUserId);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // مهلة 4 ثواني كحد أقصى
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // مهلة 4 ثواني كحد أقصى
 
     const res = await fetch(`${API_BASE}/api/quiz/question?user_id=${quizUserId}&lang=${currentLang}`, {
       signal: controller.signal
