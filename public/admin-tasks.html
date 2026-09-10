@@ -285,7 +285,13 @@ tr:hover{background:#1e293b/50}
         <span class="icon">📬</span>
         <span class="label">User Messages</span>
       </button>
-      
+      <button
+  class="quick-btn"
+  onclick="openQuizSettings()"
+>
+  <span class="icon">🧠</span>
+  <span class="label">Quiz Settings</span>
+</button>
     </div>
 
     <!-- Stats Dashboard -->
@@ -3680,6 +3686,13 @@ async function loadCommissionStats() {
   }
 }
 
+// ==========================================
+// 🧠 فتح إعدادات Quiz
+// ==========================================
+function openQuizSettings() {
+  window.location.href =
+    `/quiz-settings?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`;
+}
   
 // ================= REFRESH ALL =================
 async function refreshAll() {
