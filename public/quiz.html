@@ -350,7 +350,7 @@ async function loadQuestion() {
     
     // ✅ معالجة الحد اليومي برسالة مترجمة
     if (!data.success) {
-      if (data.message === 'DAILY_LIMIT_REACHED') {
+      if (data.message === 'DAILY_LIMIT') {
         if (overlay) overlay.style.display = 'none';
         
         // ترجمات رسالة الحد اليومي
