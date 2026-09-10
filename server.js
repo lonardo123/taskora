@@ -6093,40 +6093,48 @@ function shuffleArray(arr) {
 }
 
 async function getQuizSettings() {
-  try {
-    const res = await pool.query(
-      'SELECT key, value FROM quiz_settings'
-    );
+  const res = await pool.query(
+    'SELECT key, value FROM quiz_settings'
+  );
 
-    const settings = {};
+  const settings = {};
 
-    res.rows.forEach(row => {
-      settings[row.key] = row.value;
-    });
+  res.rows.forEach(row => {
+    settings[row.key] = row.value;
+  });
 
-    return {
-      points_per_1000:
-        parseFloat(settings.points_per_1000 || '0.10'),
+  const pointsPer1000 =
+    settings.points_per_1000 === undefined
+      ? 0.10
+      : Number(settings.points_per_1000);
 
-      min_conversion_points:
-        parseInt(settings.min_conversion_points || '1000'),
+  const minConversionPoints =
+    settings.min_conversion_points === undefined
+      ? 1000
+      : Number(settings.min_conversion_points);
 
-      max_questions_per_day:
-        parseInt(settings.max_questions_per_day || '200')
-    };
+  const maxQuestionsPerDay =
+    settings.max_questions_per_day === undefined
+      ? 200
+      : Number(settings.max_questions_per_day);
 
-  } catch (err) {
-
-    console.error('❌ getQuizSettings:', err);
-
-    return {
-      points_per_1000: 0.10,
-      min_conversion_points: 1000,
-      max_questions_per_day: 200
-    };
+  if (
+    !Number.isFinite(pointsPer1000) ||
+    pointsPer1000 <= 0 ||
+    !Number.isInteger(minConversionPoints) ||
+    minConversionPoints <= 0 ||
+    !Number.isInteger(maxQuestionsPerDay) ||
+    maxQuestionsPerDay <= 0
+  ) {
+    throw new Error('INVALID_QUIZ_SETTINGS');
   }
-}
 
+  return {
+    points_per_1000: pointsPer1000,
+    min_conversion_points: minConversionPoints,
+    max_questions_per_day: maxQuestionsPerDay
+  };
+}
 // ================================================================
 // 1️⃣ GET QUIZ QUESTION
 // ================================================================
@@ -6384,34 +6392,36 @@ app.get('/api/quiz/question', async (c) => {
 
     // حفظ جلسة السؤال
     await pool.query(
-      `
-      INSERT INTO quiz_question_sessions (
-        question_id,
-        user_id,
-        correct_index,
-        created_at,
-        answered,
-        skipped,
-        retry_used,
-        double_used
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        NOW(),
-        false,
-        false,
-        false,
-        false
-      )
-      `,
-      [
-        questionId,
-        userId,
-        correctIndex
-      ]
-    );
+  `
+  INSERT INTO quiz_question_sessions (
+    question_id,
+    user_id,
+    correct_index,
+    is_correct,
+    created_at,
+    answered,
+    skipped,
+    retry_used,
+    double_used
+  )
+  VALUES (
+    $1,
+    $2,
+    $3,
+    false,
+    NOW(),
+    false,
+    false,
+    false,
+    false
+  )
+  `,
+  [
+    questionId,
+    userId,
+    correctIndex
+  ]
+);
 
     return c.json({
       success: true,
@@ -6465,9 +6475,9 @@ app.get('/api/quiz/question', async (c) => {
 // ================================================================
 
 app.post('/api/quiz/answer', async (c) => {
+  const client = await pool.connect();
 
   try {
-
     const {
       questionId,
       answerIndex,
@@ -6492,10 +6502,12 @@ app.post('/api/quiz/answer', async (c) => {
       }, 400);
     }
 
+    const numericAnswerIndex = Number(answerIndex);
+
     if (
-      !Number.isInteger(Number(answerIndex)) ||
-      Number(answerIndex) < 0 ||
-      Number(answerIndex) > 3
+      !Number.isInteger(numericAnswerIndex) ||
+      numericAnswerIndex < 0 ||
+      numericAnswerIndex > 3
     ) {
       return c.json({
         success: false,
@@ -6503,16 +6515,19 @@ app.post('/api/quiz/answer', async (c) => {
       }, 400);
     }
 
+    await client.query('BEGIN');
+
     // ============================================================
-    // جلب جلسة السؤال
+    // قفل جلسة السؤال
     // ============================================================
 
-    const questionRes = await pool.query(
+    const questionRes = await client.query(
       `
       SELECT
         question_id,
         user_id,
         correct_index,
+        is_correct,
         created_at,
         answered,
         skipped,
@@ -6521,6 +6536,7 @@ app.post('/api/quiz/answer', async (c) => {
       FROM quiz_question_sessions
       WHERE question_id = $1
         AND user_id = $2
+      FOR UPDATE
       `,
       [
         questionId,
@@ -6529,28 +6545,30 @@ app.post('/api/quiz/answer', async (c) => {
     );
 
     if (questionRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+
       return c.json({
         success: false,
         message: 'EXPIRED'
-      });
+      }, 404);
     }
 
     const question = questionRes.rows[0];
 
-    // لا يمكن الإجابة على سؤال تم تخطيه
-    if (question.skipped) {
-      return c.json({
-        success: false,
-        message: 'ALREADY_PROCESSED'
-      });
-    }
+    // ============================================================
+    // منع الإجابة بعد المعالجة
+    // ============================================================
 
-    // لا يمكن الإجابة أكثر من مرة في نفس المحاولة
-    if (question.answered) {
+    if (
+      question.answered ||
+      question.skipped
+    ) {
+      await client.query('ROLLBACK');
+
       return c.json({
         success: false,
         message: 'ALREADY_PROCESSED'
-      });
+      }, 409);
     }
 
     // ============================================================
@@ -6563,10 +6581,12 @@ app.post('/api/quiz/answer', async (c) => {
     if (
       Date.now() - createdAt < 2000
     ) {
+      await client.query('ROLLBACK');
+
       return c.json({
         success: false,
         message: 'TOO_FAST'
-      });
+      }, 400);
     }
 
     // ============================================================
@@ -6574,16 +6594,11 @@ app.post('/api/quiz/answer', async (c) => {
     // ============================================================
 
     const isCorrect =
-      Number(answerIndex) ===
+      numericAnswerIndex ===
       Number(question.correct_index);
 
     // ============================================================
-    // تحديد هل هذه أول محاولة أم Retry
-    //
-    // retry_used = true
-    // يعني أن المستخدم استخدم Retry بالفعل
-    // وبالتالي هذه المحاولة الثانية لن تزيد
-    // questions_today مرة أخرى.
+    // تحديد هل هذه أول إجابة أم Retry
     // ============================================================
 
     const isRetryAttempt =
@@ -6593,88 +6608,97 @@ app.post('/api/quiz/answer', async (c) => {
     // تسجيل الإجابة
     // ============================================================
 
-    const updateResult = await pool.query(
+    const updateResult = await client.query(
       `
       UPDATE quiz_question_sessions
-      SET answered = true
-      WHERE question_id = $1
-        AND user_id = $2
+      SET
+        answered = true,
+        is_correct = $1
+      WHERE question_id = $2
+        AND user_id = $3
         AND answered = false
         AND skipped = false
       RETURNING question_id
       `,
       [
+        isCorrect,
         questionId,
         userId
       ]
     );
 
     if (updateResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+
       return c.json({
         success: false,
         message: 'ALREADY_PROCESSED'
-      });
+      }, 409);
     }
 
     // ============================================================
-    // احتساب السؤال في الحد اليومي مرة واحدة فقط
+    // احتساب السؤال اليومي
     //
-    // Retry لا يزيد questions_today مرة ثانية.
+    // Retry لا يزيد questions_today مرة ثانية
     // ============================================================
 
     if (!isRetryAttempt) {
+      const questionCountResult =
+        await client.query(
+          `
+          UPDATE quiz_points
+          SET questions_today =
+            questions_today + 1
+          WHERE user_id = $1
+          RETURNING questions_today
+          `,
+          [userId]
+        );
 
-      await pool.query(
-        `
-        UPDATE quiz_points
-        SET questions_today =
-          questions_today + 1
-        WHERE user_id = $1
-        `,
-        [userId]
-      );
-
+      if (questionCountResult.rows.length === 0) {
+        throw new Error(
+          'QUIZ_POINTS_NOT_FOUND'
+        );
+      }
     }
 
     // ============================================================
-    // الإجابة الصحيحة = +1 نقطة
-    // سواء كانت المحاولة الأولى أو محاولة Retry.
+    // النقاط
+    //
+    // Correct = +1
+    // Wrong   = 0
+    // Retry   = +1 فقط إذا كانت الإجابة صحيحة
     // ============================================================
+
+    let pointsEarned = 0;
 
     if (isCorrect) {
+      const pointsResult =
+        await client.query(
+          `
+          UPDATE quiz_points
+          SET
+            points = points + 1,
+            total_earned = total_earned + 1,
+            weekly_score = weekly_score + 1
+          WHERE user_id = $1
+          RETURNING points
+          `,
+          [userId]
+        );
 
-      await pool.query(
-        `
-        INSERT INTO quiz_points (
-          user_id,
-          points,
-          total_earned,
-          weekly_score
-        )
-        VALUES (
-          $1,
-          1,
-          1,
-          1
-        )
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-          points =
-            quiz_points.points + 1,
+      if (pointsResult.rows.length === 0) {
+        throw new Error(
+          'QUIZ_POINTS_NOT_FOUND'
+        );
+      }
 
-          total_earned =
-            quiz_points.total_earned + 1,
-
-          weekly_score =
-            quiz_points.weekly_score + 1
-        `,
-        [userId]
-      );
-
+      pointsEarned = 1;
     }
 
-    return c.json({
+    await client.query('COMMIT');
 
+    return c.json({
       success: true,
 
       correct:
@@ -6683,14 +6707,16 @@ app.post('/api/quiz/answer', async (c) => {
       correctIndex:
         Number(question.correct_index),
 
-      pointsEarned:
-        isCorrect ? 1 : 0,
+      pointsEarned,
 
       isRetryAttempt
-
     });
 
   } catch (err) {
+
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
 
     console.error(
       '❌ /api/quiz/answer:',
@@ -6701,69 +6727,266 @@ app.post('/api/quiz/answer', async (c) => {
       success: false,
       message: 'Server error'
     }, 500);
+
+  } finally {
+    client.release();
   }
 });
 
 // ================================================================
-// 3️⃣ CREATE REWARD SESSION (قبل الذهاب إلى AppCreator24)
+// 3️⃣ CREATE REWARD SESSION
 // ================================================================
+
 app.post('/api/quiz/reward/create', async (c) => {
+  const client = await pool.connect();
+
   try {
-    const { userId, questionId, action } = await c.req.json();
+    const {
+      userId,
+      questionId,
+      action
+    } = await c.req.json();
 
-    if (!userId || !questionId || !action) {
-      return c.json({ success: false, message: 'Missing data' }, 400);
+    if (
+      !userId ||
+      !questionId ||
+      !action
+    ) {
+      return c.json({
+        success: false,
+        message: 'Missing data'
+      }, 400);
     }
+
     if (!/^\d+$/.test(userId.toString())) {
-      return c.json({ success: false, message: 'Invalid user_id' }, 400);
-    }
-    if (!['double', 'retry', 'skip'].includes(action)) {
-      return c.json({ success: false, message: 'Invalid action' }, 400);
+      return c.json({
+        success: false,
+        message: 'Invalid user_id'
+      }, 400);
     }
 
-    // التحقق من حالة السؤال
-    const questionRes = await pool.query(
-      `SELECT answered, skipped, retry_used, double_used FROM quiz_question_sessions WHERE question_id = $1 AND user_id = $2`,
-      [questionId, userId]
+    if (
+      !['double', 'retry', 'skip']
+        .includes(action)
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid action'
+      }, 400);
+    }
+
+    await client.query('BEGIN');
+
+    // ============================================================
+    // قفل السؤال لمنع إنشاء أكثر من Reward Session في نفس الوقت
+    // ============================================================
+
+    const questionRes = await client.query(
+      `
+      SELECT
+        question_id,
+        user_id,
+        answered,
+        is_correct,
+        skipped,
+        retry_used,
+        double_used
+      FROM quiz_question_sessions
+      WHERE question_id = $1
+        AND user_id = $2
+      FOR UPDATE
+      `,
+      [
+        questionId,
+        userId
+      ]
     );
 
     if (questionRes.rows.length === 0) {
-      return c.json({ success: false, message: 'QUESTION_NOT_FOUND' }, 404);
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: 'QUESTION_NOT_FOUND'
+      }, 404);
     }
 
-    const q = questionRes.rows[0];
-    if (action === 'double' && (!q.answered || q.double_used)) {
-      return c.json({ success: false, message: 'INVALID_DOUBLE_REQUEST' }, 400);
-    }
-    if (action === 'retry' && (!q.answered || q.retry_used)) {
-      return c.json({ success: false, message: 'INVALID_RETRY_REQUEST' }, 400);
-    }
-    if (action === 'skip' && (q.answered || q.skipped)) {
-      return c.json({ success: false, message: 'INVALID_SKIP_REQUEST' }, 400);
+    const question =
+      questionRes.rows[0];
+
+    // ============================================================
+    // DOUBLE
+    // ============================================================
+
+    if (action === 'double') {
+
+      if (!question.answered) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'QUESTION_NOT_ANSWERED'
+        }, 400);
+      }
+
+      if (!question.is_correct) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'DOUBLE_REQUIRES_CORRECT_ANSWER'
+        }, 400);
+      }
+
+      if (question.double_used) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'DOUBLE_ALREADY_USED'
+        }, 409);
+      }
     }
 
-    // منع وجود جلسة معلقة نفسية
-    const pending = await pool.query(
-      `SELECT reward_id FROM quiz_reward_sessions WHERE user_id = $1 AND question_id = $2 AND action = $3 AND status = 'pending' AND expires_at > NOW()`,
-      [userId, questionId, action]
+    // ============================================================
+    // RETRY
+    // ============================================================
+
+    if (action === 'retry') {
+
+      if (!question.answered) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'QUESTION_NOT_ANSWERED'
+        }, 400);
+      }
+
+      if (question.retry_used) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'RETRY_ALREADY_USED'
+        }, 409);
+      }
+    }
+
+    // ============================================================
+    // SKIP
+    // ============================================================
+
+    if (action === 'skip') {
+
+      if (
+        question.answered ||
+        question.skipped
+      ) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'QUESTION_ALREADY_PROCESSED'
+        }, 409);
+      }
+    }
+
+    // ============================================================
+    // البحث عن Reward Session معلقة
+    // ============================================================
+
+    const pendingReward =
+      await client.query(
+        `
+        SELECT reward_id
+        FROM quiz_reward_sessions
+        WHERE user_id = $1
+          AND question_id = $2
+          AND action = $3
+          AND status = 'pending'
+          AND expires_at > NOW()
+        LIMIT 1
+        `,
+        [
+          userId,
+          questionId,
+          action
+        ]
+      );
+
+    if (pendingReward.rows.length > 0) {
+
+      await client.query('COMMIT');
+
+      return c.json({
+        success: true,
+        rewardId:
+          pendingReward.rows[0].reward_id
+      });
+    }
+
+    // ============================================================
+    // إنشاء Reward Session
+    // ============================================================
+
+    const rewardId =
+      generateQuizId();
+
+    await client.query(
+      `
+      INSERT INTO quiz_reward_sessions (
+        reward_id,
+        user_id,
+        question_id,
+        action,
+        status,
+        created_at,
+        expires_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        'pending',
+        NOW(),
+        NOW() + INTERVAL '10 minutes'
+      )
+      `,
+      [
+        rewardId,
+        userId,
+        questionId,
+        action
+      ]
     );
 
-    if (pending.rows.length > 0) {
-      return c.json({ success: true, rewardId: pending.rows[0].reward_id });
-    }
+    await client.query('COMMIT');
 
-    // إنشاء جلسة مكافأة جديدة (صالحة لمدة 10 دقائق)
-    const rewardId = crypto.randomUUID();
-    await pool.query(
-      `INSERT INTO quiz_reward_sessions (reward_id, user_id, question_id, action, status, created_at, expires_at)
-       VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW() + INTERVAL '10 minutes')`,
-      [rewardId, userId, questionId, action]
-    );
+    return c.json({
+      success: true,
+      rewardId
+    });
 
-    return c.json({ success: true, rewardId });
   } catch (err) {
-    console.error('❌ /api/quiz/reward/create:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+
+    console.error(
+      '❌ /api/quiz/reward/create:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: 'Server error'
+    }, 500);
+
+  } finally {
+    client.release();
   }
 });
 
@@ -6772,11 +6995,9 @@ app.post('/api/quiz/reward/create', async (c) => {
 // ================================================================
 
 app.post('/api/quiz/reward/complete', async (c) => {
-
   const client = await pool.connect();
 
   try {
-
     const {
       rewardId,
       userId
@@ -6784,19 +7005,25 @@ app.post('/api/quiz/reward/complete', async (c) => {
 
     if (
       !rewardId ||
-      !userId ||
-      !/^\d+$/.test(userId.toString())
+      !userId
     ) {
       return c.json({
         success: false,
-        message: 'Invalid data'
+        message: 'Missing data'
+      }, 400);
+    }
+
+    if (!/^\d+$/.test(userId.toString())) {
+      return c.json({
+        success: false,
+        message: 'Invalid user_id'
       }, 400);
     }
 
     await client.query('BEGIN');
 
     // ============================================================
-    // قفل جلسة المكافأة
+    // قفل Reward Session
     // ============================================================
 
     const rewardRes = await client.query(
@@ -6820,7 +7047,6 @@ app.post('/api/quiz/reward/complete', async (c) => {
     );
 
     if (rewardRes.rows.length === 0) {
-
       await client.query('ROLLBACK');
 
       return c.json({
@@ -6832,26 +7058,51 @@ app.post('/api/quiz/reward/complete', async (c) => {
     const reward =
       rewardRes.rows[0];
 
-    if (reward.status === 'completed') {
+    // ============================================================
+    // منع الاستخدام الثاني
+    // ============================================================
 
+    if (reward.status === 'completed') {
       await client.query('ROLLBACK');
 
       return c.json({
         success: false,
-        message: 'ALREADY_COMPLETED'
+        message: 'REWARD_ALREADY_COMPLETED'
+      }, 409);
+    }
+
+    if (reward.status !== 'pending') {
+      await client.query('ROLLBACK');
+
+      return c.json({
+        success: false,
+        message: 'INVALID_REWARD_STATUS'
       }, 400);
     }
 
+    // ============================================================
+    // انتهاء Reward Session
+    // ============================================================
+
     if (
-      new Date(reward.expires_at).getTime() <
-      Date.now()
+      new Date(reward.expires_at).getTime()
+      <= Date.now()
     ) {
 
-      await client.query('ROLLBACK');
+      await client.query(
+        `
+        UPDATE quiz_reward_sessions
+        SET status = 'expired'
+        WHERE reward_id = $1
+        `,
+        [rewardId]
+      );
+
+      await client.query('COMMIT');
 
       return c.json({
         success: false,
-        message: 'SESSION_EXPIRED'
+        message: 'REWARD_EXPIRED'
       }, 400);
     }
 
@@ -6859,27 +7110,29 @@ app.post('/api/quiz/reward/complete', async (c) => {
     // قفل جلسة السؤال
     // ============================================================
 
-    const questionRes = await client.query(
-      `
-      SELECT
-        question_id,
-        answered,
-        skipped,
-        retry_used,
-        double_used
-      FROM quiz_question_sessions
-      WHERE question_id = $1
-        AND user_id = $2
-      FOR UPDATE
-      `,
-      [
-        reward.question_id,
-        userId
-      ]
-    );
+    const questionRes =
+      await client.query(
+        `
+        SELECT
+          question_id,
+          user_id,
+          answered,
+          is_correct,
+          skipped,
+          retry_used,
+          double_used
+        FROM quiz_question_sessions
+        WHERE question_id = $1
+          AND user_id = $2
+        FOR UPDATE
+        `,
+        [
+          reward.question_id,
+          userId
+        ]
+      );
 
     if (questionRes.rows.length === 0) {
-
       await client.query('ROLLBACK');
 
       return c.json({
@@ -6891,30 +7144,56 @@ app.post('/api/quiz/reward/complete', async (c) => {
     const question =
       questionRes.rows[0];
 
-    // ============================================================
-    // تنفيذ العملية
-    // ============================================================
-
     let pointsEarned = 0;
 
     // ============================================================
     // DOUBLE
+    //
+    // السؤال الصحيح حصل بالفعل على +1 في /answer
+    // لذلك الإعلان يعطي +1 إضافية
+    // الإجمالي = +2
     // ============================================================
 
     if (reward.action === 'double') {
 
-      if (
-        !question.answered ||
-        question.double_used
-      ) {
-
+      if (!question.answered) {
         await client.query('ROLLBACK');
 
         return c.json({
           success: false,
-          message: 'INVALID_DOUBLE_STATE'
+          message: 'QUESTION_NOT_ANSWERED'
         }, 400);
       }
+
+      if (!question.is_correct) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'DOUBLE_REQUIRES_CORRECT_ANSWER'
+        }, 400);
+      }
+
+      if (question.double_used) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'DOUBLE_ALREADY_USED'
+        }, 409);
+      }
+
+      await client.query(
+        `
+        UPDATE quiz_points
+        SET
+          points = points + 1,
+          total_earned = total_earned + 1,
+          weekly_score = weekly_score + 1
+        WHERE user_id = $1
+        `,
+        [userId]
+      );
 
       await client.query(
         `
@@ -6922,7 +7201,6 @@ app.post('/api/quiz/reward/complete', async (c) => {
         SET double_used = true
         WHERE question_id = $1
           AND user_id = $2
-          AND double_used = false
         `,
         [
           reward.question_id,
@@ -6930,8 +7208,6 @@ app.post('/api/quiz/reward/complete', async (c) => {
         ]
       );
 
-      // النقطة الأساسية تم منحها في /answer.
-      // Double يضيف نقطة إضافية فقط.
       pointsEarned = 1;
     }
 
@@ -6941,17 +7217,22 @@ app.post('/api/quiz/reward/complete', async (c) => {
 
     else if (reward.action === 'retry') {
 
-      if (
-        !question.answered ||
-        question.retry_used
-      ) {
-
+      if (!question.answered) {
         await client.query('ROLLBACK');
 
         return c.json({
           success: false,
-          message: 'INVALID_RETRY_STATE'
+          message: 'QUESTION_NOT_ANSWERED'
         }, 400);
+      }
+
+      if (question.retry_used) {
+        await client.query('ROLLBACK');
+
+        return c.json({
+          success: false,
+          message: 'RETRY_ALREADY_USED'
+        }, 409);
       }
 
       await client.query(
@@ -6959,11 +7240,10 @@ app.post('/api/quiz/reward/complete', async (c) => {
         UPDATE quiz_question_sessions
         SET
           answered = false,
+          is_correct = false,
           retry_used = true
         WHERE question_id = $1
           AND user_id = $2
-          AND answered = true
-          AND retry_used = false
         `,
         [
           reward.question_id,
@@ -6971,13 +7251,14 @@ app.post('/api/quiz/reward/complete', async (c) => {
         ]
       );
 
-      // Retry نفسه لا يمنح نقطة.
-      // النقطة تمنح فقط إذا كانت الإجابة الجديدة صحيحة.
       pointsEarned = 0;
     }
 
     // ============================================================
     // SKIP
+    //
+    // Skip = 0 نقطة
+    // لكنه يستهلك السؤال ويزيد questions_today مرة واحدة
     // ============================================================
 
     else if (reward.action === 'skip') {
@@ -6986,23 +7267,21 @@ app.post('/api/quiz/reward/complete', async (c) => {
         question.answered ||
         question.skipped
       ) {
-
         await client.query('ROLLBACK');
 
         return c.json({
           success: false,
-          message: 'INVALID_SKIP_STATE'
-        }, 400);
+          message: 'QUESTION_ALREADY_PROCESSED'
+        }, 409);
       }
 
       await client.query(
         `
         UPDATE quiz_question_sessions
-        SET skipped = true
+        SET
+          skipped = true
         WHERE question_id = $1
           AND user_id = $2
-          AND answered = false
-          AND skipped = false
         `,
         [
           reward.question_id,
@@ -7010,100 +7289,105 @@ app.post('/api/quiz/reward/complete', async (c) => {
         ]
       );
 
-      // حسب نظام Quiz الحالي:
-      // Skip بعد مشاهدة الإعلان = +1 نقطة.
-      pointsEarned = 1;
+      const skipCountResult =
+        await client.query(
+          `
+          UPDATE quiz_points
+          SET questions_today =
+            questions_today + 1
+          WHERE user_id = $1
+          RETURNING questions_today
+          `,
+          [userId]
+        );
 
-      // Skip لم يمر عبر /answer،
-      // لذلك يجب احتساب السؤال هنا مرة واحدة.
+      if (skipCountResult.rows.length === 0) {
+        throw new Error(
+          'QUIZ_POINTS_NOT_FOUND'
+        );
+      }
+
+      pointsEarned = 0;
+    }
+
+    // ============================================================
+    // إكمال Reward Session
+    // ============================================================
+
+    const completeReward =
       await client.query(
         `
-        UPDATE quiz_points
-        SET questions_today =
-          questions_today + 1
+        UPDATE quiz_reward_sessions
+        SET
+          status = 'completed',
+          completed_at = NOW()
+        WHERE reward_id = $1
+          AND user_id = $2
+          AND status = 'pending'
+        RETURNING reward_id
+        `,
+        [
+          rewardId,
+          userId
+        ]
+      );
+
+    if (completeReward.rows.length === 0) {
+      throw new Error(
+        'REWARD_COMPLETION_FAILED'
+      );
+    }
+
+    // ============================================================
+    // النقاط الحالية
+    // ============================================================
+
+    const pointsRes =
+      await client.query(
+        `
+        SELECT
+          points,
+          total_earned,
+          total_converted,
+          questions_today,
+          weekly_score
+        FROM quiz_points
         WHERE user_id = $1
         `,
         [userId]
       );
-    }
 
-    else {
-
-      await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'INVALID_ACTION_STATE'
-      }, 400);
-    }
-
-    // ============================================================
-    // إضافة النقاط
-    // ============================================================
-
-    if (pointsEarned > 0) {
-
-      await client.query(
-        `
-        INSERT INTO quiz_points (
-          user_id,
-          points,
-          total_earned,
-          weekly_score
-        )
-        VALUES (
-          $1,
-          $2,
-          $2,
-          $2
-        )
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-
-          points =
-            quiz_points.points + $2,
-
-          total_earned =
-            quiz_points.total_earned + $2,
-
-          weekly_score =
-            quiz_points.weekly_score + $2
-        `,
-        [
-          userId,
-          pointsEarned
-        ]
+    if (pointsRes.rows.length === 0) {
+      throw new Error(
+        'QUIZ_POINTS_NOT_FOUND'
       );
     }
 
-    // ============================================================
-    // إكمال جلسة المكافأة
-    // ============================================================
-
-    await client.query(
-      `
-      UPDATE quiz_reward_sessions
-      SET status = 'completed'
-      WHERE reward_id = $1
-        AND status = 'pending'
-      `,
-      [rewardId]
-    );
+    const points =
+      pointsRes.rows[0];
 
     await client.query('COMMIT');
 
     return c.json({
-
       success: true,
-
-      message:
-        'Reward processed successfully',
 
       action:
         reward.action,
 
-      pointsEarned
+      earned:
+        pointsEarned,
 
+      total_points:
+        Number(points.points || 0),
+
+      total_earned:
+        Number(points.total_earned || 0),
+
+      questions_today:
+        Number(points.questions_today || 0),
+
+      weekly_score:
+        Number(points.weekly_score || 0)
     });
 
   } catch (err) {
@@ -7123,11 +7407,9 @@ app.post('/api/quiz/reward/complete', async (c) => {
     }, 500);
 
   } finally {
-
     client.release();
   }
 });
-
 
 // ================================================================
 // 5️⃣ QUIZ POINTS + LEADERBOARD
@@ -7151,6 +7433,66 @@ app.get('/api/quiz/points', async (c) => {
         message: 'Invalid user_id'
       }, 400);
     }
+
+
+    // ============================================================
+    // إنشاء سجل النقاط للمستخدم إذا لم يكن موجودًا
+    // + تصفير الأسئلة اليومية عند بداية يوم جديد
+    // + تصفير الترتيب الأسبوعي بعد 7 أيام
+    // ============================================================
+
+    await pool.query(
+      `
+      INSERT INTO quiz_points (
+        user_id,
+        points,
+        questions_today,
+        last_reset_date,
+        weekly_score,
+        last_weekly_reset
+      )
+      VALUES (
+        $1,
+        0,
+        0,
+        CURRENT_DATE,
+        0,
+        CURRENT_DATE
+      )
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        questions_today =
+          CASE
+            WHEN quiz_points.last_reset_date < CURRENT_DATE
+            THEN 0
+            ELSE quiz_points.questions_today
+          END,
+
+        last_reset_date =
+          CASE
+            WHEN quiz_points.last_reset_date < CURRENT_DATE
+            THEN CURRENT_DATE
+            ELSE quiz_points.last_reset_date
+          END,
+
+        weekly_score =
+          CASE
+            WHEN quiz_points.last_weekly_reset <
+                 (CURRENT_DATE - INTERVAL '7 days')
+            THEN 0
+            ELSE quiz_points.weekly_score
+          END,
+
+        last_weekly_reset =
+          CASE
+            WHEN quiz_points.last_weekly_reset <
+                 (CURRENT_DATE - INTERVAL '7 days')
+            THEN CURRENT_DATE
+            ELSE quiz_points.last_weekly_reset
+          END
+      `,
+      [userId]
+    );
 
 
     const settings =
@@ -7243,7 +7585,6 @@ app.get('/api/quiz/points', async (c) => {
     }, 500);
   }
 });
-
 
 // ================================================================
 // 6️⃣ CONVERT POINTS
