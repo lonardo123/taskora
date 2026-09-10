@@ -66,6 +66,143 @@
   .lb-item:last-child { border-bottom: none; }
   .lb-rank { width: 30px; font-weight: 700; color: var(--warning); }
 
+
+/* ================= CONVERT POINTS MODAL ================= */
+
+.convert-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.88);
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.convert-modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card);
+  border: 1px solid #334155;
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  animation: fadeIn 0.25s ease;
+}
+
+.convert-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.convert-modal-info {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.convert-available {
+  background: var(--bg-input);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+.convert-available-label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.convert-available-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.convert-input {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 2px solid #475569;
+  border-radius: 10px;
+  padding: 14px;
+  font-size: 17px;
+  outline: none;
+  text-align: center;
+}
+
+.convert-input:focus {
+  border-color: var(--accent);
+}
+
+.convert-amount {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.convert-amount strong {
+  color: var(--success);
+  font-size: 18px;
+}
+
+.convert-error {
+  display: none;
+  margin-top: 10px;
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid #7f1d1d;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.convert-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.convert-confirm,
+.convert-cancel {
+  border: none;
+  border-radius: 10px;
+  padding: 13px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.convert-confirm {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: white;
+}
+
+.convert-cancel {
+  background: #475569;
+  color: white;
+}
+
+.convert-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+  
+  
   /* Loading & Messages */
   .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; }
   .spinner { width: 40px; height: 40px; border: 4px solid var(--bg-input); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
@@ -153,6 +290,86 @@
   </div>
 </div>
 
+
+<!-- Convert Points Modal -->
+<div id="convertModal" class="convert-modal">
+
+  <div class="convert-modal-card">
+
+    <div class="convert-modal-title" data-i18n="convertTitle">
+      Convert Points
+    </div>
+
+    <div class="convert-modal-info" data-i18n="convertInfo">
+      Convert your quiz points to your account balance.
+    </div>
+
+    <div class="convert-available">
+      <span class="convert-available-label" data-i18n="availablePoints">
+        Available Points
+      </span>
+
+      <div
+        id="convertAvailablePoints"
+        class="convert-available-value"
+      >
+        0
+      </div>
+    </div>
+
+    <input
+      id="convertPointsInput"
+      class="convert-input"
+      type="number"
+      min="1000"
+      step="1"
+      inputmode="numeric"
+      placeholder="Enter points"
+      oninput="updateConvertAmount()"
+    >
+
+    <div class="convert-amount">
+      <span data-i18n="youWillReceive">
+        You will receive:
+      </span>
+
+      <strong id="convertUsdAmount">
+        $0.00
+      </strong>
+    </div>
+
+    <div
+      id="convertError"
+      class="convert-error"
+    ></div>
+
+    <div class="convert-actions">
+
+      <button
+        type="button"
+        class="convert-cancel"
+        onclick="closeConvertModal()"
+        data-i18n="cancel"
+      >
+        Cancel
+      </button>
+
+      <button
+        type="button"
+        id="convertConfirmBtn"
+        class="convert-confirm"
+        onclick="submitPointsConversion()"
+        data-i18n="confirm"
+      >
+        Confirm
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+  
 <script>
 // ================= CONFIG & STATE =================
 const API_BASE = 'https://taskora.taskora.workers.dev'; // عدل هذا إذا كان مختلفاً
@@ -164,10 +381,223 @@ let timeLeft = 60;
 
 // ================= TRANSLATIONS =================
 const translations = {
-  en: { points: 'Points', today: 'Today', weekly: 'Weekly', convert: 'Convert', timeRemaining: 'Time Remaining', doublePoints: 'Double Points', retry: 'Retry Question', skip: 'Skip Question', next: 'Next Question', leaderboard: 'Weekly Leaderboard', correct: 'Correct! 🎉', wrong: 'Wrong Answer 😔', timeUp: 'Time\'s Up! ⏰', watchAdDouble: 'Watch ad to double your points!', watchAdRetry: 'Watch ad to try again!', watchAdSkip: 'Watch ad to skip this question!' },
-  ar: { points: 'النقاط', today: 'اليوم', weekly: 'أسبوعي', convert: 'تحويل', timeRemaining: 'الوقت المتبقي', doublePoints: 'مضاعفة النقاط', retry: 'إعادة المحاولة', skip: 'تخطي السؤال', next: 'السؤال التالي', leaderboard: 'المتصدرون أسبوعياً', correct: 'إجابة صحيحة! 🎉', wrong: 'إجابة خاطئة 😔', timeUp: 'انتهى الوقت! ⏰', watchAdDouble: 'شاهد إعلاناً لمضاعفة نقاطك!', watchAdRetry: 'شاهد إعلاناً لإعادة المحاولة!', watchAdSkip: 'شاهد إعلاناً لتخطي هذا السؤال!' },
-  fr: { points: 'Points', today: 'Aujourd\'hui', weekly: 'Hebdo', convert: 'Convertir', timeRemaining: 'Temps restant', doublePoints: 'Doubler les points', retry: 'Réessayer', skip: 'Passer', next: 'Suivant', leaderboard: 'Classement Hebdo', correct: 'Correct ! 🎉', wrong: 'Faux 😔', timeUp: 'Temps écoulé ! ⏰', watchAdDouble: 'Regardez une pub pour doubler !', watchAdRetry: 'Regardez une pub pour réessayer !', watchAdSkip: 'Regardez une pub pour passer !' },
-  es: { points: 'Puntos', today: 'Hoy', weekly: 'Semanal', convert: 'Convertir', timeRemaining: 'Tiempo restante', doublePoints: 'Duplicar puntos', retry: 'Reintentar', skip: 'Saltar', next: 'Siguiente', leaderboard: 'Clasificación Semanal', correct: '¡Correcto! 🎉', wrong: 'Incorrecto 😔', timeUp: '¡Tiempo agotado! ⏰', watchAdDouble: '¡Mira un anuncio para duplicar!', watchAdRetry: '¡Mira un anuncio para reintentar!', watchAdSkip: '¡Mira un anuncio para saltar!' }
+
+  en: {
+    points: 'Points',
+    today: 'Today',
+    weekly: 'Weekly',
+    convert: 'Convert Points',
+    convertTitle: 'Convert Points',
+    convertInfo: 'Convert your quiz points to your account balance.',
+    availablePoints: 'Available Points',
+    youWillReceive: 'You will receive:',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    enterPoints: 'Enter points',
+    minimumPoints: 'Minimum conversion is 1000 points.',
+    insufficientPoints: 'You do not have enough points.',
+    invalidPoints: 'Enter a valid number of points.',
+    conversionSuccess: 'Points converted successfully.',
+    conversionFailed: 'Conversion failed.',
+    timeRemaining: 'Time Remaining',
+    doublePoints: 'Double Points',
+    retry: 'Retry Question',
+    skip: 'Skip Question',
+    next: 'Next Question',
+    leaderboard: 'Weekly Leaderboard',
+    correct: 'Correct! 🎉',
+    wrong: 'Wrong Answer 😔',
+    timeUp: "Time's Up! ⏰",
+    watchAdDouble: 'Watch ad to double your points!',
+    watchAdRetry: 'Watch ad to try again!',
+    watchAdSkip: 'Watch ad to skip this question!'
+  },
+
+  ar: {
+    points: 'النقاط',
+    today: 'اليوم',
+    weekly: 'أسبوعي',
+    convert: 'تحويل النقاط',
+    convertTitle: 'تحويل النقاط',
+    convertInfo: 'حوّل نقاط المسابقة إلى رصيد حسابك.',
+    availablePoints: 'النقاط المتاحة',
+    youWillReceive: 'ستحصل على:',
+    cancel: 'إلغاء',
+    confirm: 'تأكيد التحويل',
+    enterPoints: 'أدخل النقاط',
+    minimumPoints: 'الحد الأدنى للتحويل هو 1000 نقطة.',
+    insufficientPoints: 'لا توجد نقاط كافية في حسابك.',
+    invalidPoints: 'أدخل عددًا صحيحًا من النقاط.',
+    conversionSuccess: 'تم تحويل النقاط بنجاح.',
+    conversionFailed: 'فشل تحويل النقاط.',
+    timeRemaining: 'الوقت المتبقي',
+    doublePoints: 'مضاعفة النقاط',
+    retry: 'إعادة المحاولة',
+    skip: 'تخطي السؤال',
+    next: 'السؤال التالي',
+    leaderboard: 'المتصدرون أسبوعياً',
+    correct: 'إجابة صحيحة! 🎉',
+    wrong: 'إجابة خاطئة 😔',
+    timeUp: 'انتهى الوقت! ⏰',
+    watchAdDouble: 'شاهد إعلاناً لمضاعفة نقاطك!',
+    watchAdRetry: 'شاهد إعلاناً لإعادة المحاولة!',
+    watchAdSkip: 'شاهد إعلاناً لتخطي هذا السؤال!'
+  },
+
+  fr: {
+    points: 'Points',
+    today: "Aujourd'hui",
+    weekly: 'Hebdomadaire',
+    convert: 'Convertir les points',
+    convertTitle: 'Convertir les points',
+    convertInfo: 'Convertissez vos points en solde de votre compte.',
+    availablePoints: 'Points disponibles',
+    youWillReceive: 'Vous recevrez :',
+    cancel: 'Annuler',
+    confirm: 'Confirmer',
+    enterPoints: 'Entrez les points',
+    minimumPoints: 'Le minimum est de 1000 points.',
+    insufficientPoints: 'Vous n’avez pas assez de points.',
+    invalidPoints: 'Entrez un nombre valide.',
+    conversionSuccess: 'Points convertis avec succès.',
+    conversionFailed: 'Échec de la conversion.',
+    timeRemaining: 'Temps restant',
+    doublePoints: 'Doubler les points',
+    retry: 'Réessayer',
+    skip: 'Passer',
+    next: 'Question suivante',
+    leaderboard: 'Classement hebdomadaire',
+    correct: 'Correct ! 🎉',
+    wrong: 'Mauvaise réponse 😔',
+    timeUp: 'Temps écoulé ! ⏰',
+    watchAdDouble: 'Regardez une publicité pour doubler vos points !',
+    watchAdRetry: 'Regardez une publicité pour réessayer !',
+    watchAdSkip: 'Regardez une publicité pour passer !'
+  },
+
+  es: {
+    points: 'Puntos',
+    today: 'Hoy',
+    weekly: 'Semanal',
+    convert: 'Convertir puntos',
+    convertTitle: 'Convertir puntos',
+    convertInfo: 'Convierte tus puntos en el saldo de tu cuenta.',
+    availablePoints: 'Puntos disponibles',
+    youWillReceive: 'Recibirás:',
+    cancel: 'Cancelar',
+    confirm: 'Confirmar',
+    enterPoints: 'Introduce los puntos',
+    minimumPoints: 'El mínimo es de 1000 puntos.',
+    insufficientPoints: 'No tienes suficientes puntos.',
+    invalidPoints: 'Introduce un número válido.',
+    conversionSuccess: 'Puntos convertidos correctamente.',
+    conversionFailed: 'Error al convertir los puntos.',
+    timeRemaining: 'Tiempo restante',
+    doublePoints: 'Duplicar puntos',
+    retry: 'Reintentar',
+    skip: 'Saltar',
+    next: 'Siguiente pregunta',
+    leaderboard: 'Clasificación semanal',
+    correct: '¡Correcto! 🎉',
+    wrong: 'Respuesta incorrecta 😔',
+    timeUp: '¡Se acabó el tiempo! ⏰',
+    watchAdDouble: '¡Mira un anuncio para duplicar tus puntos!',
+    watchAdRetry: '¡Mira un anuncio para volver a intentarlo!',
+    watchAdSkip: '¡Mira un anuncio para saltar la pregunta!'
+  },
+
+  pt: {
+    points: 'Pontos',
+    today: 'Hoje',
+    weekly: 'Semanal',
+    convert: 'Converter pontos',
+    convertTitle: 'Converter pontos',
+    convertInfo: 'Converta seus pontos em saldo da sua conta.',
+    availablePoints: 'Pontos disponíveis',
+    youWillReceive: 'Você receberá:',
+    cancel: 'Cancelar',
+    confirm: 'Confirmar',
+    enterPoints: 'Digite os pontos',
+    minimumPoints: 'O mínimo para conversão é 1000 pontos.',
+    insufficientPoints: 'Você não possui pontos suficientes.',
+    invalidPoints: 'Digite um número válido.',
+    conversionSuccess: 'Pontos convertidos com sucesso.',
+    conversionFailed: 'Falha na conversão.',
+    timeRemaining: 'Tempo restante',
+    doublePoints: 'Dobrar pontos',
+    retry: 'Tentar novamente',
+    skip: 'Pular pergunta',
+    next: 'Próxima pergunta',
+    leaderboard: 'Classificação semanal',
+    correct: 'Correto! 🎉',
+    wrong: 'Resposta errada 😔',
+    timeUp: 'Tempo esgotado! ⏰',
+    watchAdDouble: 'Assista ao anúncio para dobrar seus pontos!',
+    watchAdRetry: 'Assista ao anúncio para tentar novamente!',
+    watchAdSkip: 'Assista ao anúncio para pular esta pergunta!'
+  },
+
+  de: {
+    points: 'Punkte',
+    today: 'Heute',
+    weekly: 'Wöchentlich',
+    convert: 'Punkte umwandeln',
+    convertTitle: 'Punkte umwandeln',
+    convertInfo: 'Wandle deine Punkte in dein Kontoguthaben um.',
+    availablePoints: 'Verfügbare Punkte',
+    youWillReceive: 'Du erhältst:',
+    cancel: 'Abbrechen',
+    confirm: 'Bestätigen',
+    enterPoints: 'Punkte eingeben',
+    minimumPoints: 'Die Mindestumwandlung beträgt 1000 Punkte.',
+    insufficientPoints: 'Du hast nicht genügend Punkte.',
+    invalidPoints: 'Gib eine gültige Zahl ein.',
+    conversionSuccess: 'Punkte erfolgreich umgewandelt.',
+    conversionFailed: 'Umwandlung fehlgeschlagen.',
+    timeRemaining: 'Verbleibende Zeit',
+    doublePoints: 'Punkte verdoppeln',
+    retry: 'Erneut versuchen',
+    skip: 'Frage überspringen',
+    next: 'Nächste Frage',
+    leaderboard: 'Wöchentliche Rangliste',
+    correct: 'Richtig! 🎉',
+    wrong: 'Falsche Antwort 😔',
+    timeUp: 'Zeit abgelaufen! ⏰',
+    watchAdDouble: 'Werbung ansehen, um Punkte zu verdoppeln!',
+    watchAdRetry: 'Werbung ansehen, um es erneut zu versuchen!',
+    watchAdSkip: 'Werbung ansehen, um diese Frage zu überspringen!'
+  },
+
+  ja: {
+    points: 'ポイント',
+    today: '今日',
+    weekly: '週間',
+    convert: 'ポイント交換',
+    convertTitle: 'ポイント交換',
+    convertInfo: 'クイズポイントをアカウント残高に交換します。',
+    availablePoints: '利用可能なポイント',
+    youWillReceive: '受け取る金額:',
+    cancel: 'キャンセル',
+    confirm: '交換する',
+    enterPoints: 'ポイントを入力',
+    minimumPoints: '交換には最低1000ポイントが必要です。',
+    insufficientPoints: 'ポイントが不足しています。',
+    invalidPoints: '有効なポイント数を入力してください。',
+    conversionSuccess: 'ポイントの交換が完了しました。',
+    conversionFailed: 'ポイントの交換に失敗しました。',
+    timeRemaining: '残り時間',
+    doublePoints: 'ポイント2倍',
+    retry: 'もう一度挑戦',
+    skip: '問題をスキップ',
+    next: '次の問題',
+    leaderboard: '週間ランキング',
+    correct: '正解！ 🎉',
+    wrong: '不正解 😔',
+    timeUp: '時間切れ！ ⏰',
+    watchAdDouble: '広告を見てポイントを2倍にする！',
+    watchAdRetry: '広告を見てもう一度挑戦！',
+    watchAdSkip: '広告を見てこの問題をスキップ！'
+  }
 };
 
 // ================= INITIALIZATION =================
@@ -511,10 +941,318 @@ function renderLeaderboard(data) {
   `).join('');
 }
 
-function convertPoints() {
-  // يمكن ربط هذا بـ Modal أو توجيه لصفحة التحويل
-  alert('Conversion feature: 1000 points = $0.10 (Configurable by Admin)');
+// ================= CONVERT POINTS =================
+
+let currentQuizPoints = 0;
+let quizConversionRate = 0.10;
+let quizMinimumConversionPoints = 1000;
+
+async function convertPoints() {
+
+  const modal = document.getElementById('convertModal');
+
+  if (!modal) {
+    console.error('Convert modal not found');
+    return;
+  }
+
+  // تحميل أحدث بيانات النقاط قبل فتح النافذة
+  try {
+
+    const res = await fetch(
+      `${API_BASE}/api/quiz/points?user_id=${quizUserId}`
+    );
+
+    const data = await res.json();
+
+    if (data.success) {
+
+      currentQuizPoints =
+        Number(data.points || 0);
+
+      if (data.settings) {
+
+        quizConversionRate =
+          Number(
+            data.settings.points_per_1000 ?? 0.10
+          );
+
+        quizMinimumConversionPoints =
+          Number(
+            data.settings.min_conversion_points ?? 1000
+          );
+
+      }
+
+    }
+
+  } catch (err) {
+
+    console.error(
+      'Failed to load quiz points:',
+      err
+    );
+
+    currentQuizPoints =
+      Number(
+        document.getElementById('statPoints')?.textContent || 0
+      );
+  }
+
+  document.getElementById(
+    'convertAvailablePoints'
+  ).textContent =
+    currentQuizPoints;
+
+  const input =
+    document.getElementById(
+      'convertPointsInput'
+    );
+
+  input.value = '';
+
+  input.min =
+    quizMinimumConversionPoints;
+
+  document.getElementById(
+    'convertUsdAmount'
+  ).textContent =
+    '$0.00';
+
+  document.getElementById(
+    'convertError'
+  ).style.display =
+    'none';
+
+  modal.style.display = 'flex';
+
+  setTimeout(() => {
+    input.focus();
+  }, 100);
 }
+
+function updateConvertAmount() {
+
+  const input =
+    document.getElementById(
+      'convertPointsInput'
+    );
+
+  const amount =
+    document.getElementById(
+      'convertUsdAmount'
+    );
+
+  const requested =
+    Number(input.value || 0);
+
+  if (
+    !Number.isFinite(requested) ||
+    requested <= 0
+  ) {
+    amount.textContent =
+      '$0.00';
+
+    return;
+  }
+
+  const usd =
+    (requested / 1000) *
+    quizConversionRate;
+
+  amount.textContent =
+    '$' +
+    usd.toFixed(2);
+ }
+
+ function closeConvertModal() {
+
+  const modal =
+    document.getElementById(
+      'convertModal'
+    );
+
+  if (modal) {
+    modal.style.display = 'none';
+  }
+
+  const error =
+    document.getElementById(
+      'convertError'
+    );
+
+  if (error) {
+    error.style.display = 'none';
+  }
+} 
+
+async function submitPointsConversion() {
+
+  const input =
+    document.getElementById(
+      'convertPointsInput'
+    );
+
+  const errorBox =
+    document.getElementById(
+      'convertError'
+    );
+
+  const confirmBtn =
+    document.getElementById(
+      'convertConfirmBtn'
+    );
+
+  const requested =
+    Number(
+      input.value
+    );
+
+  const t =
+    translations[currentLang] ||
+    translations.en;
+
+  errorBox.style.display =
+    'none';
+
+  // =========================
+  // VALIDATION
+  // =========================
+
+  if (
+    !Number.isInteger(requested) ||
+    requested <= 0
+  ) {
+
+    errorBox.textContent =
+      t.invalidPoints;
+
+    errorBox.style.display =
+      'block';
+
+    return;
+  }
+
+  if (
+    requested <
+    quizMinimumConversionPoints
+  ) {
+
+    errorBox.textContent =
+      t.minimumPoints;
+
+    errorBox.style.display =
+      'block';
+
+    return;
+  }
+
+  if (
+    requested >
+    currentQuizPoints
+  ) {
+
+    errorBox.textContent =
+      t.insufficientPoints;
+
+    errorBox.style.display =
+      'block';
+
+    return;
+  }
+
+  // منع الضغط المتكرر
+  confirmBtn.disabled = true;
+
+  try {
+
+    const response =
+      await fetch(
+        `${API_BASE}/api/quiz/convert`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+            userId:
+              quizUserId,
+
+            pointsToConvert:
+              requested
+          })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (!response.ok ||
+        !data.success) {
+
+      errorBox.textContent =
+        data.message ||
+        t.conversionFailed;
+
+      errorBox.style.display =
+        'block';
+
+      return;
+    }
+
+    // تحديث النقاط المحلية
+    currentQuizPoints =
+      Number(
+        data.remaining_points || 0
+      );
+
+    document.getElementById(
+      'statPoints'
+    ).textContent =
+      currentQuizPoints;
+
+    document.getElementById(
+      'convertAvailablePoints'
+    ).textContent =
+      currentQuizPoints;
+
+    input.value = '';
+
+    document.getElementById(
+      'convertUsdAmount'
+    ).textContent =
+      '$0.00';
+
+    // إغلاق النافذة بعد النجاح
+    closeConvertModal();
+
+    // تحديث بيانات الصفحة
+    await loadUserDataAndQuestion();
+
+  } catch (err) {
+
+    console.error(
+      'Quiz conversion error:',
+      err
+    );
+
+    errorBox.textContent =
+      t.conversionFailed;
+
+    errorBox.style.display =
+      'block';
+
+  } finally {
+
+    confirmBtn.disabled =
+      false;
+  }
+}
+
+  
 </script>
 </body>
 </html>
