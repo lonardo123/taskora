@@ -275,10 +275,38 @@
   <!-- Action Area (Hidden by default) -->
   <div class="action-area" id="actionArea">
     <h3 id="actionTitle" style="margin-bottom: 15px; font-size: 18px;"></h3>
-    <button id="btnDouble" class="action-btn btn-double" onclick="requestReward('double')">🎬 <span data-i18n="doublePoints">Double Points</span></button>
-    <button id="btnRetry" class="action-btn btn-retry" onclick="requestReward('retry')">🔄 <span data-i18n="retry">Retry Question</span></button>
-    <button id="btnSkip" class="action-btn btn-skip" onclick="requestReward('skip')">⏭️ <span data-i18n="skip">Skip Question</span></button>
-    <button id="btnNext" class="action-btn btn-next" onclick="loadQuestion()" style="display:none;">➡️ <span data-i18n="next">Next Question</span></button>
+     <button
+  id="btnDouble"
+  class="action-btn btn-double"
+  onclick="requestReward('double')"
+>
+  🎬 <span data-i18n="doublePoints">Double Points</span>
+</button>
+
+<button
+  id="btnNext"
+  class="action-btn btn-next"
+  onclick="loadQuestion()"
+  style="display:none;"
+>
+  ➡️ <span data-i18n="next">Next Question</span>
+</button>
+
+<button
+  id="btnRetry"
+  class="action-btn btn-retry"
+  onclick="requestReward('retry')"
+>
+  🔄 <span data-i18n="retry">Retry Question</span>
+</button>
+
+<button
+  id="btnSkip"
+  class="action-btn btn-skip"
+  onclick="requestReward('skip')"
+>
+  ⏭️ <span data-i18n="skip">Skip Question</span>
+</button>
   </div>
 </div>
 
@@ -687,32 +715,103 @@ function handleTimeUp() {
 async function submitAnswer(answerIndex) {
   clearInterval(timerInterval);
   disableAnswers();
-  
+
   try {
-    const res = await fetch(`${API_BASE}/api/quiz/answer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: quizUserId, questionId: currentQuestionId, answerIndex })
-    });
+    const res = await fetch(
+      `${API_BASE}/api/quiz/answer`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: quizUserId,
+          questionId: currentQuestionId,
+          answerIndex
+        })
+      }
+    );
+
     const data = await res.json();
-    
-    const btns = document.querySelectorAll('.answer-btn');
-    btns[data.correctIndex].classList.add('correct');
-    
-    if (data.correct) {
-      showActionArea('correct', 'double');
-    } else {
-      btns[answerIndex].classList.add('wrong');
-      showActionArea('wrong', 'retry');
+
+    if (!res.ok || !data.success) {
+      throw new Error(
+        data.message || 'Answer failed'
+      );
     }
-    
-    // تحديث النقاط في الواجهة فوراً
-    const ptsRes = await fetch(`${API_BASE}/api/quiz/points?user_id=${quizUserId}`);
-    const ptsData = await ptsRes.json();
-    if (ptsData.success) document.getElementById('statPoints').textContent = ptsData.points;
+
+    const btns =
+      document.querySelectorAll('.answer-btn');
+
+    if (
+      data.correctIndex !== undefined &&
+      btns[data.correctIndex]
+    ) {
+      btns[data.correctIndex]
+        .classList.add('correct');
+    }
+
+    if (data.correct) {
+
+      // المستخدم حصل بالفعل على +1
+      // من السيرفر في /api/quiz/answer
+      showActionArea(
+        'correct',
+        'double'
+      );
+
+      // تحديث النقاط في الخلفية
+      // حتى لا نؤخر ظهور الأزرار
+      fetch(
+        `${API_BASE}/api/quiz/points?user_id=${quizUserId}`
+      )
+        .then(res => res.json())
+        .then(ptsData => {
+
+          if (ptsData.success) {
+
+            document.getElementById(
+              'statPoints'
+            ).textContent =
+              ptsData.points;
+
+            document.getElementById(
+              'statToday'
+            ).textContent =
+              ptsData.questions_today;
+
+            document.getElementById(
+              'statWeekly'
+            ).textContent =
+              ptsData.weekly_score;
+          }
+
+        })
+        .catch(err => {
+          console.warn(
+            'Background points update failed:',
+            err
+          );
+        });
+
+    } else {
+
+      btns[answerIndex]
+        ?.classList.add('wrong');
+
+      showActionArea(
+        'wrong',
+        'retry'
+      );
+    }
 
   } catch (err) {
-    console.error('Submit error:', err);
+
+    console.error(
+      'Submit error:',
+      err
+    );
+
     loadQuestion();
   }
 }
@@ -729,11 +828,25 @@ function showActionArea(resultKey, primaryAction) {
   const area = document.getElementById('actionArea');
   const title = document.getElementById('actionTitle');
   
-  document.getElementById('btnDouble').style.display = primaryAction === 'double' ? 'flex' : 'none';
-  document.getElementById('btnRetry').style.display = primaryAction === 'retry' ? 'flex' : 'none';
-  document.getElementById('btnSkip').style.display = primaryAction === 'skip' ? 'flex' : 'none';
-  document.getElementById('btnNext').style.display = 'none'; // يظهر بعد اكتمال المكافأة
+  document.getElementById('btnDouble').style.display =
+  primaryAction === 'double'
+    ? 'flex'
+    : 'none';
 
+document.getElementById('btnRetry').style.display =
+  primaryAction === 'retry'
+    ? 'flex'
+    : 'none';
+
+document.getElementById('btnSkip').style.display =
+  primaryAction === 'skip'
+    ? 'flex'
+    : 'none';
+
+document.getElementById('btnNext').style.display =
+  resultKey === 'correct'
+    ? 'flex'
+    : 'none';
   if (resultKey === 'correct') {
     title.textContent = t.correct;
     title.style.color = 'var(--success)';
@@ -867,10 +980,38 @@ function resetAndRetry() {
     <div class="answers-grid" id="answersGrid"></div>
     <div class="action-area" id="actionArea">
       <h3 id="actionTitle" style="margin-bottom: 15px; font-size: 18px;"></h3>
-      <button id="btnDouble" class="action-btn btn-double" onclick="requestReward('double')">🎬 <span data-i18n="doublePoints">Double Points</span></button>
-      <button id="btnRetry" class="action-btn btn-retry" onclick="requestReward('retry')">🔄 <span data-i18n="retry">Retry Question</span></button>
-      <button id="btnSkip" class="action-btn btn-skip" onclick="requestReward('skip')">⏭️ <span data-i18n="skip">Skip Question</span></button>
-      <button id="btnNext" class="action-btn btn-next" onclick="loadQuestion()" style="display:none;">➡️ <span data-i18n="next">Next Question</span></button>
+      <button
+  id="btnDouble"
+  class="action-btn btn-double"
+  onclick="requestReward('double')"
+>
+  🎬 <span data-i18n="doublePoints">Double Points</span>
+</button>
+
+<button
+  id="btnNext"
+  class="action-btn btn-next"
+  onclick="loadQuestion()"
+  style="display:none;"
+>
+  ➡️ <span data-i18n="next">Next Question</span>
+</button>
+
+<button
+  id="btnRetry"
+  class="action-btn btn-retry"
+  onclick="requestReward('retry')"
+>
+  🔄 <span data-i18n="retry">Retry Question</span>
+</button>
+
+<button
+  id="btnSkip"
+  class="action-btn btn-skip"
+  onclick="requestReward('skip')"
+>
+  ⏭️ <span data-i18n="skip">Skip Question</span>
+</button>
     </div>
   `;
   applyTranslations();
