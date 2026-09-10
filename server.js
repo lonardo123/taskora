@@ -6230,60 +6230,63 @@ app.get('/api/quiz/question', async (c) => {
 
     }
 
-    // ------------------------------------------------------------
-    // التأكد من وجود المستخدم
-    // ------------------------------------------------------------
+   // ------------------------------------------------------------
+// حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط
+// ------------------------------------------------------------
 
-    const userCheck =
-      await pool.query(
-        `
-        SELECT telegram_id
-        FROM users
-        WHERE telegram_id = $1
-        `,
-        [userId]
-      );
+const quizStateResult =
+  await pool.query(
+    `
+    WITH settings AS (
+      SELECT
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'points_per_1000'
+          ),
+          '0.10'
+        ) AS points_per_1000,
 
-    if (
-      userCheck.rows.length === 0
-    ) {
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'min_conversion_points'
+          ),
+          '1000'
+        ) AS min_conversion_points,
 
-      return c.json({
-        success: false,
-        message: 'USER_NOT_FOUND'
-      }, 404);
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'max_questions_per_day'
+          ),
+          '200'
+        ) AS max_questions_per_day
+      FROM quiz_settings
+    ),
 
-    }
-
-    // ------------------------------------------------------------
-    // إعدادات Quiz
-    // ------------------------------------------------------------
-
-    const settings =
-      await getQuizSettings();
-
-    // ------------------------------------------------------------
-    // تهيئة أو تحديث نقاط المستخدم
-    // ------------------------------------------------------------
-
-    await pool.query(
-      `
+    upsert_quiz_points AS (
       INSERT INTO quiz_points (
         user_id,
         points,
+        total_earned,
+        total_converted,
         questions_today,
         last_reset_date,
         weekly_score,
         last_weekly_reset
       )
-      VALUES (
-        $1,
+
+      SELECT
+        u.telegram_id,
+        0,
+        0,
         0,
         0,
         CURRENT_DATE,
         0,
         CURRENT_DATE
-      )
+
+      FROM users u
+
+      WHERE u.telegram_id = $1
 
       ON CONFLICT (user_id)
 
@@ -6318,52 +6321,119 @@ app.get('/api/quiz/question', async (c) => {
             THEN CURRENT_DATE
             ELSE quiz_points.last_weekly_reset
           END
-      `,
-      [userId]
-    );
 
-    // ------------------------------------------------------------
-    // قراءة نقاط المستخدم
-    // ------------------------------------------------------------
+      RETURNING
+        user_id,
+        points,
+        total_earned,
+        total_converted,
+        questions_today,
+        weekly_score
+    )
 
-    const userPoints =
-      await pool.query(
-        `
-        SELECT
-          questions_today,
-          points,
-          weekly_score
-        FROM quiz_points
-        WHERE user_id = $1
-        `,
-        [userId]
-      );
+    SELECT
+      q.user_id,
+      q.points,
+      q.total_earned,
+      q.total_converted,
+      q.questions_today,
+      q.weekly_score,
 
-    const qToday =
-      Number(
-        userPoints.rows[0]?.questions_today || 0
-      );
+      s.points_per_1000,
+      s.min_conversion_points,
+      s.max_questions_per_day
 
-    // ------------------------------------------------------------
-    // الحد اليومي
-    // ------------------------------------------------------------
+    FROM upsert_quiz_points q
+    CROSS JOIN settings s
+    `,
+    [userId]
+  );
 
-    if (
-      qToday >=
-      settings.max_questions_per_day
-    ) {
+if (
+  quizStateResult.rows.length === 0
+) {
 
-      return c.json({
-        success: false,
-        message: 'DAILY_LIMIT',
+  return c.json({
+    success: false,
+    message: 'USER_NOT_FOUND'
+  }, 404);
 
-        points:
-          Number(
-            userPoints.rows[0]?.points || 0
-          )
-      });
+}
 
-    }
+const quizState =
+  quizStateResult.rows[0];
+
+const qToday =
+  Number(
+    quizState.questions_today
+  );
+
+const points =
+  Number(
+    quizState.points
+  );
+
+const weeklyScore =
+  Number(
+    quizState.weekly_score
+  );
+
+const pointsPer1000 =
+  Number(
+    quizState.points_per_1000
+  );
+
+const minConversionPoints =
+  Number(
+    quizState.min_conversion_points
+  );
+
+const maxQuestionsPerDay =
+  Number(
+    quizState.max_questions_per_day
+  );
+
+// ------------------------------------------------------------
+// التحقق من صحة إعدادات Quiz
+// ------------------------------------------------------------
+
+if (
+  !Number.isFinite(pointsPer1000) ||
+  pointsPer1000 <= 0 ||
+  !Number.isInteger(minConversionPoints) ||
+  minConversionPoints <= 0 ||
+  !Number.isInteger(maxQuestionsPerDay) ||
+  maxQuestionsPerDay <= 0
+) {
+
+  throw new Error(
+    'INVALID_QUIZ_SETTINGS'
+  );
+
+}
+
+// ------------------------------------------------------------
+// الحد اليومي
+// ------------------------------------------------------------
+
+if (
+  qToday >=
+  maxQuestionsPerDay
+) {
+
+  return c.json({
+    success: false,
+    message: 'DAILY_LIMIT',
+
+    points,
+
+    weekly_score:
+      weeklyScore,
+
+    questionsLeft: 0
+  });
+
+}
 
     // ------------------------------------------------------------
     // تحديد الصعوبة الداخلية
@@ -7346,14 +7416,10 @@ app.get('/api/quiz/question', async (c) => {
         questionData.difficulty,
 
       points:
-        Number(
-          userPoints.rows[0]?.points || 0
-        ),
+  points,
 
-      weekly_score:
-        Number(
-          userPoints.rows[0]?.weekly_score || 0
-        ),
+weekly_score:
+  weeklyScore,
 
       questionsLeft
 
