@@ -405,7 +405,7 @@ let quizUserId = null;
 let currentQuestionId = null;
 let currentLang = localStorage.getItem('quiz_language') || 'en';
 let timerInterval = null;
-let timeLeft = 60;
+let timeLeft = 30;
 
 // ================= TRANSLATIONS =================
 const translations = {
@@ -685,7 +685,7 @@ async function loadUserDataAndQuestion() {
 // ================= TIMER LOGIC =================
 function startTimer() {
   clearInterval(timerInterval);
-  timeLeft = 60;
+  timeLeft = 30;
   updateTimerUI();
   
   timerInterval = setInterval(() => {
@@ -940,9 +940,34 @@ async function loadQuestion() {
       btn.onclick = () => submitAnswer(idx);
       grid.appendChild(btn);
     });
+let answerUnlockTimeout = null;
 
+function lockAnswersForInitialDelay() {
+    clearTimeout(answerUnlockTimeout);
+
+    const buttons = document.querySelectorAll('.answer-btn');
+
+    buttons.forEach(btn => {
+        btn.disabled = true;
+        btn.style.cursor = 'not-allowed';
+    });
+
+    answerUnlockTimeout = setTimeout(() => {
+        if (!currentQuestionId || timeLeft <= 0) {
+            return;
+        }
+
+        document.querySelectorAll('.answer-btn').forEach(btn => {
+            btn.disabled = false;
+            btn.style.cursor = 'pointer';
+        });
+
+    }, 10000);
+}
     if (overlay) overlay.style.display = 'none';
-    startTimer();
+
+lockAnswersForInitialDelay();
+startTimer();
 
   } catch (err) {
     console.warn(`Attempt ${questionLoadAttempts} failed:`, err.message);
