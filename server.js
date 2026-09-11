@@ -7453,9 +7453,14 @@ app.post('/api/quiz/answer', async (c) => {
       userId
     } = await c.req.json();
 
+    // ============================================================
+    // التحقق من البيانات
+    // ============================================================
+
     if (
       !questionId ||
       answerIndex === undefined ||
+      answerIndex === null ||
       !userId
     ) {
       return c.json({
@@ -7464,7 +7469,7 @@ app.post('/api/quiz/answer', async (c) => {
       }, 400);
     }
 
-    if (!/^\d+$/.test(userId.toString())) {
+    if (!/^\d+$/.test(String(userId))) {
       return c.json({
         success: false,
         message: 'Invalid user_id'
@@ -7524,12 +7529,12 @@ app.post('/api/quiz/answer', async (c) => {
     const question = questionRes.rows[0];
 
     // ============================================================
-    // منع الإجابة بعد المعالجة
+    // منع معالجة السؤال أكثر من مرة
     // ============================================================
 
     if (
-      question.answered ||
-      question.skipped
+      question.answered === true ||
+      question.skipped === true
     ) {
       await client.query('ROLLBACK');
 
@@ -7540,14 +7545,14 @@ app.post('/api/quiz/answer', async (c) => {
     }
 
     // ============================================================
-    // منع الإجابة السريعة
-    // أول 10 ثوانٍ ممنوعة
+    // منع الإجابة خلال أول 10 ثوانٍ
     // ============================================================
 
     const createdAt =
       new Date(question.created_at).getTime();
 
     if (
+      !Number.isFinite(createdAt) ||
       Date.now() - createdAt < 10000
     ) {
       await client.query('ROLLBACK');
@@ -7562,12 +7567,14 @@ app.post('/api/quiz/answer', async (c) => {
     // التحقق من الإجابة
     // ============================================================
 
-    const isCorrect =
-      numericAnswerIndex ===
+    const correctIndex =
       Number(question.correct_index);
 
+    const isCorrect =
+      numericAnswerIndex === correctIndex;
+
     // ============================================================
-    // هل هذه Retry؟
+    // هل هذه محاولة Retry؟
     // ============================================================
 
     const isRetryAttempt =
@@ -7577,25 +7584,24 @@ app.post('/api/quiz/answer', async (c) => {
     // تسجيل الإجابة
     // ============================================================
 
-    const updateResult =
-      await client.query(
-        `
-        UPDATE quiz_question_sessions
-        SET
-          answered = true,
-          is_correct = $1
-        WHERE question_id = $2
-          AND user_id = $3
-          AND answered = false
-          AND skipped = false
-        RETURNING question_id
-        `,
-        [
-          isCorrect,
-          questionId,
-          userId
-        ]
-      );
+    const updateResult = await client.query(
+      `
+      UPDATE quiz_question_sessions
+      SET
+        answered = true,
+        is_correct = $1
+      WHERE question_id = $2
+        AND user_id = $3
+        AND answered = false
+        AND skipped = false
+      RETURNING question_id
+      `,
+      [
+        isCorrect,
+        questionId,
+        userId
+      ]
+    );
 
     if (updateResult.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -7607,79 +7613,80 @@ app.post('/api/quiz/answer', async (c) => {
     }
 
     // ============================================================
-    // تحديث النقاط + questions_today + weekly_score
+    // تحديث إحصائيات المستخدم في عملية UPDATE واحدة
     //
-    // نجمعها في UPDATE واحدة فقط
-    // بدل:
-    // 1) UPDATE questions_today
-    // 2) UPDATE points
-    // 3) SELECT stats
+    // الإجابة الأصلية:
+    // questions_today +1
+    //
+    // Retry:
+    // لا يزيد questions_today
+    //
+    // الإجابة الصحيحة:
+    // points +1
+    // total_earned +1
+    // weekly_score +1
     // ============================================================
 
-    const statsResult =
-      await client.query(
-        `
-        UPDATE quiz_points
-        SET
-          questions_today =
-            questions_today +
-            CASE
-              WHEN $2 = true
-              THEN 1
-              ELSE 0
-            END,
+    const statsResult = await client.query(
+      `
+      UPDATE quiz_points
+      SET
+        questions_today =
+          questions_today +
+          CASE
+            WHEN $2 = true THEN 1
+            ELSE 0
+          END,
 
-          points =
-            points +
-            CASE
-              WHEN $1 = true
-              THEN 1
-              ELSE 0
-            END,
+        points =
+          points +
+          CASE
+            WHEN $1 = true THEN 1
+            ELSE 0
+          END,
 
-          total_earned =
-            total_earned +
-            CASE
-              WHEN $1 = true
-              THEN 1
-              ELSE 0
-            END,
+        total_earned =
+          total_earned +
+          CASE
+            WHEN $1 = true THEN 1
+            ELSE 0
+          END,
 
-          weekly_score =
-            weekly_score +
-            CASE
-              WHEN $1 = true
-              THEN 1
-              ELSE 0
-            END
+        weekly_score =
+          weekly_score +
+          CASE
+            WHEN $1 = true THEN 1
+            ELSE 0
+          END
 
-        WHERE user_id = $3
+      WHERE user_id = $3
 
-        RETURNING
-          points,
-          questions_today,
-          weekly_score
-        `,
-        [
-          isCorrect,
-          !isRetryAttempt,
-          userId
-        ]
-      );
+      RETURNING
+        points,
+        questions_today,
+        weekly_score
+      `,
+      [
+        isCorrect,
+        !isRetryAttempt,
+        userId
+      ]
+    );
 
     if (statsResult.rows.length === 0) {
-      throw new Error(
-        'QUIZ_POINTS_NOT_FOUND'
-      );
+      throw new Error('QUIZ_POINTS_NOT_FOUND');
     }
 
-    const stats =
-      statsResult.rows[0];
+    const stats = statsResult.rows[0];
 
     const pointsEarned =
       isCorrect ? 1 : 0;
 
     await client.query('COMMIT');
+
+    // ============================================================
+    // الرد للصفحة
+    // ============================================================
 
     return c.json({
       success: true,
@@ -7688,7 +7695,7 @@ app.post('/api/quiz/answer', async (c) => {
         isCorrect,
 
       correctIndex:
-        Number(question.correct_index),
+        correctIndex,
 
       pointsEarned,
 
@@ -8414,23 +8421,26 @@ app.get('/api/quiz/points', async (c) => {
     const userId =
       c.req.query('user_id');
 
+    // ============================================================
+    // التحقق من user_id
+    // ============================================================
 
     if (
       !userId ||
-      !/^\d+$/.test(userId)
+      !/^\d+$/.test(String(userId))
     ) {
-
       return c.json({
         success: false,
         message: 'Invalid user_id'
       }, 400);
     }
 
-
     // ============================================================
-    // إنشاء سجل النقاط للمستخدم إذا لم يكن موجودًا
-    // + تصفير الأسئلة اليومية عند بداية يوم جديد
-    // + تصفير الترتيب الأسبوعي بعد 7 أيام
+    // إنشاء سجل النقاط إذا لم يكن موجودًا
+    //
+    // وتصفير:
+    // - الأسئلة اليومية عند يوم جديد
+    // - الترتيب الأسبوعي بعد 7 أيام
     // ============================================================
 
     await pool.query(
@@ -8451,8 +8461,10 @@ app.get('/api/quiz/points', async (c) => {
         0,
         CURRENT_DATE
       )
+
       ON CONFLICT (user_id)
       DO UPDATE SET
+
         questions_today =
           CASE
             WHEN quiz_points.last_reset_date < CURRENT_DATE
@@ -8470,7 +8482,7 @@ app.get('/api/quiz/points', async (c) => {
         weekly_score =
           CASE
             WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
+                 CURRENT_DATE - INTERVAL '7 days'
             THEN 0
             ELSE quiz_points.weekly_score
           END,
@@ -8478,7 +8490,7 @@ app.get('/api/quiz/points', async (c) => {
         last_weekly_reset =
           CASE
             WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
+                 CURRENT_DATE - INTERVAL '7 days'
             THEN CURRENT_DATE
             ELSE quiz_points.last_weekly_reset
           END
@@ -8486,10 +8498,16 @@ app.get('/api/quiz/points', async (c) => {
       [userId]
     );
 
+    // ============================================================
+    // إعدادات Quiz
+    // ============================================================
 
     const settings =
       await getQuizSettings();
 
+    // ============================================================
+    // بيانات المستخدم
+    // ============================================================
 
     const res = await pool.query(
       `
@@ -8505,7 +8523,6 @@ app.get('/api/quiz/points', async (c) => {
       [userId]
     );
 
-
     const data =
       res.rows[0] || {
         points: 0,
@@ -8515,6 +8532,9 @@ app.get('/api/quiz/points', async (c) => {
         weekly_score: 0
       };
 
+    // ============================================================
+    // Weekly Leaderboard
+    // ============================================================
 
     const leaderboard =
       await pool.query(
@@ -8537,6 +8557,9 @@ app.get('/api/quiz/points', async (c) => {
         `
       );
 
+    // ============================================================
+    // الرد
+    // ============================================================
 
     return c.json({
 
@@ -8561,8 +8584,8 @@ app.get('/api/quiz/points', async (c) => {
 
       leaderboard:
         leaderboard.rows
-    });
 
+    });
 
   } catch (err) {
 
