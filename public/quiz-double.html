@@ -42,7 +42,7 @@
       
       // إذا كانت البيانات مفقودة، نعود لصفحة الكويز فوراً وبصمت تام (بدون أي رسائل)
       if (!userId || !rewardId) {
-        window.location.href = 'quiz.html';
+        window.location.href = 'go:quiz';
         return;
       }
 
@@ -60,12 +60,12 @@
         // ملاحظة: نحتفظ بـ quiz_user_id في localStorage لأنه قد يحتاجه لاحقاً
         
         // العودة إلى صفحة الكويز الرئيسية
-        window.location.href = `quiz.html?user_id=${userId}`;
+        window.location.href = `go:quiz`;
         
       } catch (e) {
         console.error(e);
         // في حال فشل الاتصال، نعود أيضاً لصفحة الكويز بصمت
-        window.location.href = `quiz.html?user_id=${userId}`;
+        window.location.href = `go:quiz`;
       }
     }
     
