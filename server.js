@@ -6171,7 +6171,7 @@ const quizFetching = new Map();
 const QUIZ_CACHE_DURATION =
   60 * 60 * 1000; // ساعة واحدة
 
-const QUIZ_BATCH_SIZE = 50;
+const QUIZ_BATCH_SIZE = 20;
 
 const QUIZ_SUPPORTED_LANGUAGES = [
   'en',
@@ -7496,7 +7496,6 @@ app.post('/api/quiz/answer', async (c) => {
         question_id,
         user_id,
         correct_index,
-        is_correct,
         created_at,
         answered,
         skipped,
@@ -7542,13 +7541,14 @@ app.post('/api/quiz/answer', async (c) => {
 
     // ============================================================
     // منع الإجابة السريعة
+    // أول 10 ثوانٍ ممنوعة
     // ============================================================
 
     const createdAt =
       new Date(question.created_at).getTime();
 
     if (
-      Date.now() - createdAt < 2000
+      Date.now() - createdAt < 10000
     ) {
       await client.query('ROLLBACK');
 
@@ -7567,7 +7567,7 @@ app.post('/api/quiz/answer', async (c) => {
       Number(question.correct_index);
 
     // ============================================================
-    // تحديد هل هذه أول إجابة أم Retry
+    // هل هذه Retry؟
     // ============================================================
 
     const isRetryAttempt =
@@ -7577,24 +7577,25 @@ app.post('/api/quiz/answer', async (c) => {
     // تسجيل الإجابة
     // ============================================================
 
-    const updateResult = await client.query(
-      `
-      UPDATE quiz_question_sessions
-      SET
-        answered = true,
-        is_correct = $1
-      WHERE question_id = $2
-        AND user_id = $3
-        AND answered = false
-        AND skipped = false
-      RETURNING question_id
-      `,
-      [
-        isCorrect,
-        questionId,
-        userId
-      ]
-    );
+    const updateResult =
+      await client.query(
+        `
+        UPDATE quiz_question_sessions
+        SET
+          answered = true,
+          is_correct = $1
+        WHERE question_id = $2
+          AND user_id = $3
+          AND answered = false
+          AND skipped = false
+        RETURNING question_id
+        `,
+        [
+          isCorrect,
+          questionId,
+          userId
+        ]
+      );
 
     if (updateResult.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -7606,64 +7607,77 @@ app.post('/api/quiz/answer', async (c) => {
     }
 
     // ============================================================
-    // احتساب السؤال اليومي
+    // تحديث النقاط + questions_today + weekly_score
     //
-    // Retry لا يزيد questions_today مرة ثانية
+    // نجمعها في UPDATE واحدة فقط
+    // بدل:
+    // 1) UPDATE questions_today
+    // 2) UPDATE points
+    // 3) SELECT stats
     // ============================================================
 
-    if (!isRetryAttempt) {
-      const questionCountResult =
-        await client.query(
-          `
-          UPDATE quiz_points
-          SET questions_today =
-            questions_today + 1
-          WHERE user_id = $1
-          RETURNING questions_today
-          `,
-          [userId]
-        );
+    const statsResult =
+      await client.query(
+        `
+        UPDATE quiz_points
+        SET
+          questions_today =
+            questions_today +
+            CASE
+              WHEN $2 = true
+              THEN 1
+              ELSE 0
+            END,
 
-      if (questionCountResult.rows.length === 0) {
-        throw new Error(
-          'QUIZ_POINTS_NOT_FOUND'
-        );
-      }
+          points =
+            points +
+            CASE
+              WHEN $1 = true
+              THEN 1
+              ELSE 0
+            END,
+
+          total_earned =
+            total_earned +
+            CASE
+              WHEN $1 = true
+              THEN 1
+              ELSE 0
+            END,
+
+          weekly_score =
+            weekly_score +
+            CASE
+              WHEN $1 = true
+              THEN 1
+              ELSE 0
+            END
+
+        WHERE user_id = $3
+
+        RETURNING
+          points,
+          questions_today,
+          weekly_score
+        `,
+        [
+          isCorrect,
+          !isRetryAttempt,
+          userId
+        ]
+      );
+
+    if (statsResult.rows.length === 0) {
+      throw new Error(
+        'QUIZ_POINTS_NOT_FOUND'
+      );
     }
 
-    // ============================================================
-    // النقاط
-    //
-    // Correct = +1
-    // Wrong   = 0
-    // Retry   = +1 فقط إذا كانت الإجابة صحيحة
-    // ============================================================
+    const stats =
+      statsResult.rows[0];
 
-    let pointsEarned = 0;
-
-    if (isCorrect) {
-      const pointsResult =
-        await client.query(
-          `
-          UPDATE quiz_points
-          SET
-            points = points + 1,
-            total_earned = total_earned + 1,
-            weekly_score = weekly_score + 1
-          WHERE user_id = $1
-          RETURNING points
-          `,
-          [userId]
-        );
-
-      if (pointsResult.rows.length === 0) {
-        throw new Error(
-          'QUIZ_POINTS_NOT_FOUND'
-        );
-      }
-
-      pointsEarned = 1;
-    }
+    const pointsEarned =
+      isCorrect ? 1 : 0;
 
     await client.query('COMMIT');
 
@@ -7677,6 +7691,15 @@ app.post('/api/quiz/answer', async (c) => {
         Number(question.correct_index),
 
       pointsEarned,
+
+      points:
+        Number(stats.points || 0),
+
+      questions_today:
+        Number(stats.questions_today || 0),
+
+      weekly_score:
+        Number(stats.weekly_score || 0),
 
       isRetryAttempt
     });
