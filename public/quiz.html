@@ -247,6 +247,7 @@
     <option value="pt">🇵🇹 Português</option>
     <option value="de">🇩🇪 Deutsch</option>
     <option value="ja">🇯🇵 日本語</option>
+    <option value="tr">🇹🇷 Türkçe</option>
   </select>
   <button class="convert-btn" onclick="convertPoints()" data-i18n="convert">Convert Points</button>
 </div>
@@ -270,6 +271,19 @@
     <span class="badge" id="qLeft">Left: 200</span>
   </div>
   <div class="q-text" id="qText">Loading question...</div>
+  <div
+  id="errorMessage"
+  style="
+    display:none;
+    margin:10px 0;
+    padding:12px;
+    border-radius:10px;
+    background:rgba(127,29,29,0.35);
+    color:#fca5a5;
+    text-align:center;
+    font-size:14px;
+  "
+></div>
   <div class="answers-grid" id="answersGrid"></div>
   
   <!-- Action Area (Hidden by default) -->
@@ -654,9 +668,20 @@ function applyTranslations() {
 
 function changeLanguage(lang) {
   currentLang = lang;
-  localStorage.setItem('quiz_language', lang);
+
+  localStorage.setItem(
+    'quiz_language',
+    lang
+  );
+
+  clearInterval(timerInterval);
+
+  clearTimeout(answerUnlockTimeout);
+  answerUnlockTimeout = null;
+
   applyTranslations();
-  loadQuestion(); // إعادة تحميل السؤال باللغة الجديدة
+
+  loadQuestion();
 }
 
 async function loadUserDataAndQuestion() {
@@ -874,7 +899,6 @@ document.getElementById('btnNext').style.display =
 }
 
 // ================= دالة تحميل السؤال (سريعة ومترجمة) =================
-```js
 let questionLoadAttempts = 0;
 const MAX_LOAD_ATTEMPTS = 2;
 
@@ -911,10 +935,41 @@ async function loadQuestion() {
   clearTimeout(answerUnlockTimeout);
   answerUnlockTimeout = null;
 
-  const overlay = document.getElementById('loadingOverlay');
+  clearInterval(timerInterval);
+
+  const overlay =
+    document.getElementById('loadingOverlay');
+
+  const loadingText =
+    document.getElementById('loadingText');
+
+  const errorMessage =
+    document.getElementById('errorMessage');
+
+  const questionText =
+    document.getElementById('qText');
+
+  const answersGrid =
+    document.getElementById('answersGrid');
+
+  const actionArea =
+    document.getElementById('actionArea');
 
   if (overlay) {
     overlay.style.display = 'flex';
+  }
+
+  if (loadingText) {
+    loadingText.textContent = 'Loading question...';
+  }
+
+  if (errorMessage) {
+    errorMessage.style.display = 'none';
+    errorMessage.textContent = '';
+  }
+
+  if (actionArea) {
+    actionArea.style.display = 'none';
   }
 
   let timeoutId = null;
@@ -922,92 +977,298 @@ async function loadQuestion() {
   questionLoadAttempts++;
 
   try {
-    localStorage.setItem('quiz_user_id', quizUserId);
 
-    const controller = new AbortController();
-
-    timeoutId = setTimeout(() => {
-      controller.abort();
-    }, 10000);
-
-    const res = await fetch(
-      `${API_BASE}/api/quiz/question?userId=${encodeURIComponent(quizUserId)}`,
-      {
-        method: 'GET',
-        signal: controller.signal,
-        cache: 'no-store'
-      }
+    localStorage.setItem(
+      'quiz_user_id',
+      quizUserId
     );
+
+    const controller =
+      new AbortController();
+
+    timeoutId =
+      setTimeout(() => {
+        controller.abort();
+      }, 10000);
+
+    // ============================================================
+    // IMPORTANT:
+    // السيرفر ينتظر user_id و lang
+    // ============================================================
+
+    const url =
+      `${API_BASE}/api/quiz/question` +
+      `?user_id=${encodeURIComponent(quizUserId)}` +
+      `&lang=${encodeURIComponent(currentLang)}`;
+
+    const res =
+      await fetch(
+        url,
+        {
+          method: 'GET',
+          signal: controller.signal,
+          cache: 'no-store'
+        }
+      );
 
     clearTimeout(timeoutId);
     timeoutId = null;
 
-    const data = await res.json();
+    const data =
+      await res.json();
 
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || 'تعذر تحميل السؤال');
+    if (
+      !res.ok ||
+      !data.success
+    ) {
+
+      if (data.message === 'DAILY_LIMIT') {
+
+        if (questionText) {
+          questionText.textContent =
+            'Daily question limit reached.';
+        }
+
+        if (answersGrid) {
+          answersGrid.innerHTML = '';
+        }
+
+        if (document.getElementById('qLeft')) {
+          document.getElementById('qLeft').textContent =
+            'Left: 0';
+        }
+
+        if (document.getElementById('statPoints')) {
+          document.getElementById('statPoints').textContent =
+            data.points ?? 0;
+        }
+
+        if (document.getElementById('statWeekly')) {
+          document.getElementById('statWeekly').textContent =
+            data.weekly_score ?? 0;
+        }
+
+        if (overlay) {
+          overlay.style.display = 'none';
+        }
+
+        return;
+      }
+
+      throw new Error(
+        data.message ||
+        'تعذر تحميل السؤال'
+      );
     }
 
-    currentQuestionId = data.questionId;
+    // ============================================================
+    // Question ID
+    // ============================================================
 
-    const questionText = document.getElementById('questionText');
+    currentQuestionId =
+      data.questionId;
+
+    // ============================================================
+    // Question text
+    // ============================================================
 
     if (questionText) {
-      questionText.textContent = data.question;
+      questionText.textContent =
+        data.question || '';
     }
 
-    const answersContainer = document.getElementById('answersContainer');
+    // ============================================================
+    // Hide previous error
+    // ============================================================
 
-    if (!answersContainer) {
-      throw new Error('answersContainer غير موجود');
+    if (errorMessage) {
+      errorMessage.style.display = 'none';
+      errorMessage.textContent = '';
     }
 
-    answersContainer.innerHTML = '';
+    // ============================================================
+    // Category
+    // ============================================================
 
-    data.answers.forEach((ans, idx) => {
-      const button = document.createElement('button');
+    const category =
+      document.getElementById('qCategory');
 
-      button.className = 'answer-btn';
-      button.type = 'button';
-      button.textContent = ans;
+    if (category) {
+      category.textContent =
+        data.category || 'General';
+    }
 
-      button.disabled = true;
-      button.style.cursor = 'not-allowed';
+    // ============================================================
+    // Difficulty
+    // ============================================================
 
-      button.addEventListener('click', () => {
-        if (button.disabled) return;
-        submitAnswer(idx);
-      });
+    const difficulty =
+      document.getElementById('qDifficulty');
 
-      answersContainer.appendChild(button);
-    });
+    if (difficulty) {
 
-    if (data.points !== undefined) {
-      const statPoints = document.getElementById('statPoints');
+      const difficultyValue =
+        data.difficulty || 'easy';
+
+      difficulty.textContent =
+        difficultyValue === 'hard'
+          ? '⭐⭐⭐ Hard'
+          : difficultyValue === 'medium'
+            ? '⭐⭐ Medium'
+            : '⭐ Easy';
+    }
+
+    // ============================================================
+    // Questions left
+    // ============================================================
+
+    const questionsLeft =
+      document.getElementById('qLeft');
+
+    if (questionsLeft) {
+      questionsLeft.textContent =
+        `Left: ${Number(data.questionsLeft ?? 0)}`;
+    }
+
+    // ============================================================
+    // Answers
+    // ============================================================
+
+    if (!answersGrid) {
+      throw new Error(
+        'answersGrid غير موجود'
+      );
+    }
+
+    answersGrid.innerHTML = '';
+
+    if (
+      !Array.isArray(data.answers) ||
+      data.answers.length !== 4
+    ) {
+      throw new Error(
+        'Invalid answers received from server'
+      );
+    }
+
+    data.answers.forEach(
+      (ans, idx) => {
+
+        const button =
+          document.createElement('button');
+
+        button.className =
+          'answer-btn';
+
+        button.type =
+          'button';
+
+        button.textContent =
+          ans;
+
+        // ========================================================
+        // الإجابات مقفلة أول 10 ثواني
+        // ========================================================
+
+        button.disabled = true;
+
+        button.style.cursor =
+          'not-allowed';
+
+        button.addEventListener(
+          'click',
+          () => {
+
+            if (button.disabled) {
+              return;
+            }
+
+            submitAnswer(idx);
+          }
+        );
+
+        answersGrid.appendChild(button);
+      }
+    );
+
+    // ============================================================
+    // تحديث النقاط
+    // ============================================================
+
+    if (
+      data.points !== undefined
+    ) {
+
+      const statPoints =
+        document.getElementById(
+          'statPoints'
+        );
+
       if (statPoints) {
-        statPoints.textContent = data.points;
+        statPoints.textContent =
+          data.points;
       }
     }
 
-    if (data.questions_today !== undefined) {
-      const statToday = document.getElementById('statToday');
+    // ============================================================
+    // تحديث الأسئلة اليوم
+    // ============================================================
+
+    if (
+      data.questions_today !== undefined
+    ) {
+
+      const statToday =
+        document.getElementById(
+          'statToday'
+        );
+
       if (statToday) {
-        statToday.textContent = data.questions_today;
+        statToday.textContent =
+          data.questions_today;
       }
     }
 
-    if (data.weekly_score !== undefined) {
-      const statWeekly = document.getElementById('statWeekly');
+    // ============================================================
+    // تحديث Weekly
+    // ============================================================
+
+    if (
+      data.weekly_score !== undefined
+    ) {
+
+      const statWeekly =
+        document.getElementById(
+          'statWeekly'
+        );
+
       if (statWeekly) {
-        statWeekly.textContent = data.weekly_score;
+        statWeekly.textContent =
+          data.weekly_score;
       }
     }
+
+    // ============================================================
+    // إخفاء منطقة النتائج القديمة
+    // ============================================================
+
+    if (actionArea) {
+      actionArea.style.display =
+        'none';
+    }
+
+    // ============================================================
+    // إخفاء Loading
+    // ============================================================
 
     if (overlay) {
-      overlay.style.display = 'none';
+      overlay.style.display =
+        'none';
     }
 
-    questionLoadAttempts = 0;
+    // ============================================================
+    // إعادة المؤقت إلى 30 ثانية
+    // ============================================================
 
     timeLeft = 30;
 
@@ -1015,45 +1276,72 @@ async function loadQuestion() {
 
     startTimer();
 
+    // ============================================================
+    // قفل الإجابات أول 10 ثواني
+    // ============================================================
+
     lockAnswersForInitialDelay();
 
+    // ============================================================
+    // نجاح التحميل
+    // ============================================================
+
+    questionLoadAttempts = 0;
+
   } catch (err) {
+
     if (timeoutId) {
       clearTimeout(timeoutId);
       timeoutId = null;
     }
 
-    console.error('Question load error:', err);
+    console.error(
+      'Question load error:',
+      err
+    );
 
     if (overlay) {
-      overlay.style.display = 'none';
+      overlay.style.display =
+        'none';
     }
 
-    if (questionLoadAttempts >= MAX_LOAD_ATTEMPTS) {
+    if (
+      questionLoadAttempts >=
+      MAX_LOAD_ATTEMPTS
+    ) {
+
       questionLoadAttempts = 0;
 
-      const errorMessage = document.getElementById('errorMessage');
-
       if (errorMessage) {
+
         errorMessage.textContent =
           err.name === 'AbortError'
             ? 'انتهى وقت تحميل السؤال. حاول مرة أخرى.'
-            : (err.message || 'تعذر تحميل السؤال');
-        errorMessage.style.display = 'block';
+            : (
+                err.message ||
+                'تعذر تحميل السؤال'
+              );
+
+        errorMessage.style.display =
+          'block';
       }
 
       return;
     }
 
-    setTimeout(() => {
-      loadQuestion();
-    }, 1000);
+    setTimeout(
+      () => {
+        loadQuestion();
+      },
+      1000
+    );
 
   } finally {
-    isLoadingQuestion = false;
+
+    isLoadingQuestion =
+      false;
   }
 }
-```
 
 // ================= دالة طلب المكافأة (بدون أي رسائل مزعجة) =================
 async function requestReward(action) {
