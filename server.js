@@ -10050,6 +10050,25 @@ const totalCost =
         `);
 
         // ============================================================
+// 9️⃣ تنظيف Quiz Question Sessions
+// الاحتفاظ لمدة 30 يومًا
+// ============================================================
+
+const deletedQuizQuestionSessions = await client.query(`
+  DELETE FROM quiz_question_sessions
+  WHERE created_at < NOW() - INTERVAL '30 days'
+`);
+
+// ============================================================
+// 🔟 تنظيف Quiz Reward Sessions
+// الاحتفاظ لمدة 30 يومًا
+// ============================================================
+
+const deletedQuizRewardSessions = await client.query(`
+  DELETE FROM quiz_reward_sessions
+  WHERE created_at < NOW() - INTERVAL '30 days'
+`);
+        // ============================================================
         // 9️⃣ تنظيف deposits
         // بعد 6 أشهر
         // pending لا يُحذف
