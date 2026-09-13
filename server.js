@@ -2,7 +2,19 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { pool, initDb } from './db.js'; // <-- لاحظ إضافة initDb هنا
+import { pool, initDb } from './db.js'; 
+
+// ============================================================
+// ✅ تعريف متغيرات الـ Quiz (مرة واحدة فقط في أعلى الملف)
+// ============================================================
+const quizQuestionCache = new Map();
+const quizFetching = new Map();
+
+const QUIZ_CACHE_DURATION = 60 * 60 * 1000; // ساعة واحدة
+const QUIZ_BATCH_SIZE = 20;
+const QUIZ_SUPPORTED_LANGUAGES = [
+  'en', 'ar', 'fr', 'es', 'pt', 'de', 'ja', 'tr'
+];
 
 const app = new Hono();
 
@@ -6160,29 +6172,7 @@ async function getQuizSettings() {
   };
 }
 
-// ================================================================
-// QUIZ QUESTION CACHE / SOURCES
-// ================================================================
 
-const quizQuestionCache = new Map();
-
-const quizFetching = new Map();
-
-const QUIZ_CACHE_DURATION =
-  60 * 60 * 1000; // ساعة واحدة
-
-const QUIZ_BATCH_SIZE = 20;
-
-const QUIZ_SUPPORTED_LANGUAGES = [
-  'en',
-  'ar',
-  'fr',
-  'es',
-  'pt',
-  'de',
-  'ja',
-  'tr'
-];
 // ================================================================
 // 1️⃣ GET QUIZ QUESTION
 // ================================================================
@@ -10246,15 +10236,15 @@ const deletedQuizRewardSessions = await client.query(`
         `released=${releasedTotal.toFixed(6)}`
       );
 
-    } catch (err) {
 
-      console.error(
-        '❌ Scheduled task error:',
-        err.message
-      );
-
-    } finally {
-      client.release();
+      } catch (err) {
+        console.error("❌ Scheduled cleanup error:", err);
+      } finally {
+        // ✅ هذا السطر هو الحل الجذري لاستنزاف الاتصالات
+        if (client) {
+          client.release();
+        }
+      }
     }
   }
 };
