@@ -10246,5 +10246,5 @@ const deletedQuizRewardSessions = await client.query(`
         }
       }
     }
-  }
+ 
 };
