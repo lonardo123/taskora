@@ -3,7 +3,7 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 neonConfig.webSocketConstructor = WebSocket;
 
 let poolInstance = null;
-
+ 
 export function initDb(env) {
   if (!env || !env.DATABASE_URL) {
     throw new Error('DATABASE_URL is missing');
