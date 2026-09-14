@@ -16,7 +16,9 @@ export function initDb(env) {
   const connectionString = _env?.DATABASE_URL;
 
   if (!connectionString) {
-    throw new Error('No database connection: DATABASE_URL is missing in environment variables');
+    throw new Error(
+      'No database connection: DATABASE_URL is missing in environment variables'
+    );
   }
 
   return true;
@@ -26,7 +28,10 @@ function getConnectionString() {
   if (_env?.DATABASE_URL) {
     return _env.DATABASE_URL;
   }
-  throw new Error('No database connection: DATABASE_URL is missing in environment variables');
+
+  throw new Error(
+    'No database connection: DATABASE_URL is missing in environment variables'
+  );
 }
 
 function createPool() {
@@ -38,9 +43,13 @@ function createPool() {
 export const pool = {
   query: async (...args) => {
     if (!_env) {
-      throw new Error('Database not initialized. Call initDb(env) before using pool.');
+      throw new Error(
+        'Database not initialized. Call initDb(env) before using pool.'
+      );
     }
+
     const db = createPool();
+
     try {
       return await db.query(...args);
     } finally {
@@ -52,26 +61,36 @@ export const pool = {
 
   connect: async () => {
     if (!_env) {
-      throw new Error('Database not initialized. Call initDb(env) before using pool.');
+      throw new Error(
+        'Database not initialized. Call initDb(env) before using pool.'
+      );
     }
+
     const db = createPool();
     const client = await db.connect();
+
     const originalRelease = client.release.bind(client);
 
-    client.release = async () => {
+    client.release = () => {
       try {
         originalRelease();
       } finally {
+        // لا نجعل release() يرجع Promise
+        // حتى لا توجد Promise معلقة في server.js
         try {
-          await db.end();
+          db.end();
         } catch {}
       }
     };
+
     return client;
   },
 
   on: (event, callback) => {
+    // إذا لم تتم تهيئة قاعدة البيانات بعد،
+    // لا نحاول إنشاء Pool هنا.
     if (!_env) return;
+
     try {
       const db = createPool();
       db.on(event, callback);
