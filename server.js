@@ -6179,7 +6179,1263 @@ const QUIZ_SUPPORTED_LANGUAGES = [
   'ja',
   'tr'
 ];
-================================================================ // 1️⃣ GET QUIZ QUESTION // ================================================================ app.get('/api/quiz/question', async (c) => { try { const userId = c.req.query('user_id'); const lang = (c.req.query('lang') || 'en') .toLowerCase() .trim(); // ------------------------------------------------------------ // التحقق من user_id // ------------------------------------------------------------ if ( !userId || !/^\d+$/.test(userId) ) { return c.json({ success: false, message: 'Invalid user_id' }, 400); } // ------------------------------------------------------------ // اللغة // ------------------------------------------------------------ if ( !QUIZ_SUPPORTED_LANGUAGES.includes(lang) ) { return c.json({ success: false, message: 'UNSUPPORTED_LANGUAGE' }, 400); } // ------------------------------------------------------------ // حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط // ------------------------------------------------------------ const quizStateResult = await pool.query( WITH settings AS ( SELECT COALESCE( MAX(value) FILTER ( WHERE key = 'points_per_1000' ), '0.10' ) AS points_per_1000, COALESCE( MAX(value) FILTER ( WHERE key = 'min_conversion_points' ), '1000' ) AS min_conversion_points, COALESCE( MAX(value) FILTER ( WHERE key = 'max_questions_per_day' ), '200' ) AS max_questions_per_day FROM quiz_settings ), upsert_quiz_points AS ( INSERT INTO quiz_points ( user_id, points, total_earned, total_converted, questions_today, last_reset_date, weekly_score, last_weekly_reset ) SELECT u.telegram_id, 0, 0, 0, 0, CURRENT_DATE, 0, CURRENT_DATE FROM users u WHERE u.telegram_id = $1 ON CONFLICT (user_id) DO UPDATE SET questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END, last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END, weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END, last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END RETURNING user_id, points, total_earned, total_converted, questions_today, weekly_score ) SELECT q.user_id, q.points, q.total_earned, q.total_converted, q.questions_today, q.weekly_score, s.points_per_1000, s.min_conversion_points, s.max_questions_per_day FROM upsert_quiz_points q CROSS JOIN settings s , [userId] ); if ( quizStateResult.rows.length === 0 ) { return c.json({ success: false, message: 'USER_NOT_FOUND' }, 404); } const quizState = quizStateResult.rows[0]; const qToday = Number( quizState.questions_today ); const points = Number( quizState.points ); const weeklyScore = Number( quizState.weekly_score ); const pointsPer1000 = Number( quizState.points_per_1000 ); const minConversionPoints = Number( quizState.min_conversion_points ); const maxQuestionsPerDay = Number( quizState.max_questions_per_day ); // ------------------------------------------------------------ // التحقق من صحة إعدادات Quiz // ------------------------------------------------------------ if ( !Number.isFinite(pointsPer1000) || pointsPer1000 <= 0 || !Number.isInteger(minConversionPoints) || minConversionPoints <= 0 || !Number.isInteger(maxQuestionsPerDay) || maxQuestionsPerDay <= 0 ) { throw new Error( 'INVALID_QUIZ_SETTINGS' ); } // ------------------------------------------------------------ // الحد اليومي // ------------------------------------------------------------ if ( qToday >= maxQuestionsPerDay ) { return c.json({ success: false, message: 'DAILY_LIMIT', points, weekly_score: weeklyScore, questionsLeft: 0 }); } // ------------------------------------------------------------ // تحديد الصعوبة الداخلية // ------------------------------------------------------------ let difficulty = 'easy'; if (qToday > 50) { difficulty = 'medium'; } if (qToday > 100) { difficulty = 'hard'; } // ------------------------------------------------------------ // Cache key // ------------------------------------------------------------ const cacheKey = ${lang}:${difficulty}; // ------------------------------------------------------------ // قراءة Cache // ------------------------------------------------------------ let cached = quizQuestionCache.get(cacheKey); const now = Date.now(); if ( cached && cached.expiresAt > now && Array.isArray(cached.questions) && cached.questions.length > 0 ) { console.log( ✅ Quiz cache hit: ${cacheKey} (${cached.questions.length}) ); } else { // ---------------------------------------------------------- // Cache غير موجود أو منتهي // ---------------------------------------------------------- quizQuestionCache.delete( cacheKey ); cached = null; // ---------------------------------------------------------- // منع الطلبات المتزامنة // ---------------------------------------------------------- if ( quizFetching.has(cacheKey) ) { try { await quizFetching.get( cacheKey ); } catch (waitErr) { console.error( ❌ Waiting for quiz batch failed (${cacheKey}):, waitErr ); } } else { // -------------------------------------------------------- // إنشاء عملية جلب واحدة // -------------------------------------------------------- const fetchPromise = (async () => { // ==================================================== // ENGLISH // ==================================================== if (lang === 'en') { const controller = new AbortController(); const timeoutId = setTimeout( () => { controller.abort(); }, 8000 ); try { console.log( 🌐 Fetching ${QUIZ_BATCH_SIZE} English questions from OpenTDB ); const apiRes = await fetch( https://opentdb.com/api.php + ?amount=${QUIZ_BATCH_SIZE} + &type=multiple + &difficulty=${difficulty} + &encode=url3986, { signal: controller.signal } ); if (!apiRes.ok) { throw new Error( OpenTDB HTTP ${apiRes.status} ); } const apiData = await apiRes.json(); if ( apiData.response_code !== 0 ) { throw new Error( OpenTDB response_code: ${apiData.response_code} ); } if ( !Array.isArray( apiData.results ) || apiData.results.length === 0 ) { throw new Error( 'OpenTDB returned no questions' ); } const questions = []; for ( const q of apiData.results ) { try { const question = decodeURIComponent( q.question ); const correctAnswer = decodeURIComponent( q.correct_answer ); const incorrectAnswers = q.incorrect_answers.map( answer => decodeURIComponent( answer ) ); if ( !question || !correctAnswer || !Array.isArray( incorrectAnswers ) || incorrectAnswers.length !== 3 ) { continue; } questions.push({ question, correctAnswer, incorrectAnswers, category: decodeURIComponent( q.category ), difficulty: q.difficulty }); } catch (decodeErr) { console.error( '❌ OpenTDB decode error:', decodeErr ); } } if ( questions.length === 0 ) { throw new Error( 'No valid OpenTDB questions' ); } quizQuestionCache.set( cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION } ); console.log( ✅ English batch cached: ${questions.length} ); } finally { clearTimeout( timeoutId ); } } // ==================================================== // POLYFACT // // ar / fr / es / pt / de / ja // ==================================================== else if ( [ 'ar', 'fr', 'es', 'pt', 'de', 'ja' ].includes(lang) ) { const controller = new AbortController(); const timeoutId = setTimeout( () => { controller.abort(); }, 10000 ); try { console.log( 🌐 Fetching ${QUIZ_BATCH_SIZE} ${lang} questions from PolyFact ); // ------------------------------------------------ // الحصول على عدد الصفوف // ------------------------------------------------ const statsRes = await fetch( 'https://datasets-server.huggingface.co/statistics' + ?dataset=jvonrad%2FPolyFact + &config=${encodeURIComponent(lang)} + &split=train, { signal: controller.signal } ); if ( !statsRes.ok ) { throw new Error( PolyFact statistics HTTP ${statsRes.status} ); } const statsData = await statsRes.json(); const totalRows = Number( statsData.num_examples || statsData.num_rows || statsData.statistics?.num_examples || 0 ); if ( !Number.isInteger(totalRows) || totalRows < QUIZ_BATCH_SIZE ) { throw new Error( Invalid PolyFact row count: ${totalRows} ); } // ------------------------------------------------ // اختيار موضع عشوائي // ------------------------------------------------ const maxOffset = totalRows - QUIZ_BATCH_SIZE; const offset = Math.floor( Math.random() * (maxOffset + 1) ); // ------------------------------------------------ // جلب 50 سؤال // ------------------------------------------------ const rowsRes = await fetch( 'https://datasets-server.huggingface.co/rows' + ?dataset=jvonrad%2FPolyFact + &config=${encodeURIComponent(lang)} + &split=train + &offset=${offset} + &length=${QUIZ_BATCH_SIZE}, { signal: controller.signal } ); if ( !rowsRes.ok ) { throw new Error( PolyFact rows HTTP ${rowsRes.status} ); } const rowsData = await rowsRes.json(); if ( !Array.isArray( rowsData.rows ) ) { throw new Error( 'PolyFact returned invalid rows' ); } const questions = []; for ( const item of rowsData.rows ) { const row = item.row; if (!row) { continue; } const options = [ row.option_a, row.option_b, row.option_c, row.option_d ]; const answerIndex = Number( row.answer_index ); if ( !row.question || options.some( option => typeof option !== 'string' || !option.trim() ) || !Number.isInteger( answerIndex ) || answerIndex < 0 || answerIndex > 3 ) { continue; } const correctAnswer = options[answerIndex]; questions.push({ question: row.question, correctAnswer, incorrectAnswers: options.filter( (_, index) => index !== answerIndex ), category: row.relation || 'General', difficulty }); } if ( questions.length === 0 ) { throw new Error( No valid PolyFact questions for ${lang} ); } quizQuestionCache.set( cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION } ); console.log( ✅ PolyFact ${lang} batch cached: ${questions.length} ); } finally { clearTimeout( timeoutId ); } } // ==================================================== // TURKISH // // malhajar/mmlu-tr // global_facts // ==================================================== else if (lang === 'tr') { const controller = new AbortController(); const timeoutId = setTimeout( () => { controller.abort(); }, 10000 ); try { console.log( 🌐 Fetching ${QUIZ_BATCH_SIZE} Turkish questions ); // ------------------------------------------------ // عدد global_facts معروف من Dataset. // // نستخدم statistics للتأكد من العدد الحالي. // ------------------------------------------------ const statsRes = await fetch( 'https://datasets-server.huggingface.co/statistics' + ?dataset=malhajar%2Fmmlu-tr + &config=global_facts + &split=test, { signal: controller.signal } ); if ( !statsRes.ok ) { throw new Error( Turkish statistics HTTP ${statsRes.status} ); } const statsData = await statsRes.json(); const totalRows = Number( statsData.num_examples || statsData.num_rows || statsData.statistics?.num_examples || 0 ); if ( !Number.isInteger(totalRows) || totalRows < QUIZ_BATCH_SIZE ) { throw new Error( Invalid Turkish row count: ${totalRows} ); } const maxOffset = totalRows - QUIZ_BATCH_SIZE; const offset = Math.floor( Math.random() * (maxOffset + 1) ); // ------------------------------------------------ // جلب 50 سؤالًا تركيًا // ------------------------------------------------ const rowsRes = await fetch( 'https://datasets-server.huggingface.co/rows' + ?dataset=malhajar%2Fmmlu-tr + &config=global_facts + &split=test + &offset=${offset} + &length=${QUIZ_BATCH_SIZE}, { signal: controller.signal } ); if ( !rowsRes.ok ) { throw new Error( Turkish rows HTTP ${rowsRes.status} ); } const rowsData = await rowsRes.json(); if ( !Array.isArray( rowsData.rows ) ) { throw new Error( 'Turkish dataset returned invalid rows' ); } const questions = []; for ( const item of rowsData.rows ) { const row = item.row; if (!row) { continue; } const options = Array.isArray( row.choices ) ? row.choices : []; const answerIndex = Number( row.answer ); if ( !row.question || options.length !== 4 || options.some( option => typeof option !== 'string' || !option.trim() ) || !Number.isInteger( answerIndex ) || answerIndex < 0 || answerIndex > 3 ) { continue; } const correctAnswer = options[answerIndex]; questions.push({ question: row.question, correctAnswer, incorrectAnswers: options.filter( (_, index) => index !== answerIndex ), category: 'General', difficulty }); } if ( questions.length === 0 ) { throw new Error( 'No valid Turkish questions' ); } quizQuestionCache.set( cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION } ); console.log( ✅ Turkish batch cached: ${questions.length} ); } finally { clearTimeout( timeoutId ); } } })(); // -------------------------------------------------------- // حفظ عملية الجلب الحالية // -------------------------------------------------------- quizFetching.set( cacheKey, fetchPromise ); try { await fetchPromise; } catch (fetchErr) { console.error( ❌ Quiz batch fetch failed (${cacheKey}):, fetchErr ); return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503); } finally { quizFetching.delete( cacheKey ); } } // ---------------------------------------------------------- // قراءة Cache بعد اكتمال الجلب // ---------------------------------------------------------- cached = quizQuestionCache.get( cacheKey ); } // ------------------------------------------------------------ // التأكد من وجود Cache // ------------------------------------------------------------ if ( !cached || !Array.isArray( cached.questions ) || cached.questions.length === 0 ) { return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503); } // ------------------------------------------------------------ // أخذ سؤال واحد // ------------------------------------------------------------ const questionData = cached.questions.shift(); // ------------------------------------------------------------ // تحديث Cache // ------------------------------------------------------------ if ( cached.questions.length === 0 ) { quizQuestionCache.delete( cacheKey ); console.log( ♻️ Quiz batch exhausted: ${cacheKey} ); } else { quizQuestionCache.set( cacheKey, cached ); } // ------------------------------------------------------------ // التحقق من السؤال // ------------------------------------------------------------ if ( !questionData || !questionData.question || !questionData.correctAnswer || !Array.isArray( questionData.incorrectAnswers ) || questionData.incorrectAnswers.length !== 3 ) { return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503); } // ------------------------------------------------------------ // خلط الإجابات // ------------------------------------------------------------ const allAnswers = [ questionData.correctAnswer, ...questionData.incorrectAnswers ]; for ( let i = allAnswers.length - 1; i > 0; i-- ) { const j = Math.floor( Math.random() * (i + 1) ); [ allAnswers[i], allAnswers[j] ] = [ allAnswers[j], allAnswers[i] ]; } const shuffledAnswers = allAnswers; // ------------------------------------------------------------ // تحديد الإجابة الصحيحة // ------------------------------------------------------------ const correctIndex = shuffledAnswers.indexOf( questionData.correctAnswer ); if ( correctIndex === -1 ) { return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503); } // ------------------------------------------------------------ // إنشاء Question ID // ------------------------------------------------------------ const questionId = crypto.randomUUID(); // ------------------------------------------------------------ // حفظ جلسة السؤال // ------------------------------------------------------------ await pool.query( INSERT INTO quiz_question_sessions ( question_id, user_id, correct_index, is_correct, created_at, answered, skipped, retry_used, double_used ) VALUES ( $1, $2, $3, false, NOW(), false, false, false, false ) , [ questionId, userId, correctIndex ] ); // ------------------------------------------------------------ // الأسئلة المتبقية اليوم // ------------------------------------------------------------ const questionsLeft = Math.max( 0, maxQuestionsPerDay - qToday - 1 ); // ------------------------------------------------------------ // Response // ------------------------------------------------------------ return c.json({ success: true, questionId, question: questionData.question, answers: shuffledAnswers, category: questionData.category, difficulty: questionData.difficulty, points: points, weekly_score: weeklyScore, questionsLeft }); } catch (err) { console.error( '❌ /api/quiz/question:', err ); return c.json({ success: false, message: 'Server error' }, 500); } });
+// ================================================================
+// 1️⃣ GET QUIZ QUESTION
+// ================================================================
+
+app.get('/api/quiz/question', async (c) => {
+
+  try {
+
+    const userId =
+      c.req.query('user_id');
+
+    const lang =
+      (c.req.query('lang') || 'en')
+        .toLowerCase()
+        .trim();
+
+    // ------------------------------------------------------------
+    // التحقق من user_id
+    // ------------------------------------------------------------
+
+    if (
+      !userId ||
+      !/^\d+$/.test(userId)
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'Invalid user_id'
+      }, 400);
+
+    }
+
+    // ------------------------------------------------------------
+    // اللغة
+    // ------------------------------------------------------------
+
+    if (
+      !QUIZ_SUPPORTED_LANGUAGES.includes(lang)
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'UNSUPPORTED_LANGUAGE'
+      }, 400);
+
+    }
+
+   // ------------------------------------------------------------
+// حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط
+// ------------------------------------------------------------
+
+const quizStateResult =
+  await pool.query(
+    `
+    WITH settings AS (
+      SELECT
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'points_per_1000'
+          ),
+          '0.10'
+        ) AS points_per_1000,
+
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'min_conversion_points'
+          ),
+          '1000'
+        ) AS min_conversion_points,
+
+        COALESCE(
+          MAX(value) FILTER (
+            WHERE key = 'max_questions_per_day'
+          ),
+          '200'
+        ) AS max_questions_per_day
+      FROM quiz_settings
+    ),
+
+    upsert_quiz_points AS (
+      INSERT INTO quiz_points (
+        user_id,
+        points,
+        total_earned,
+        total_converted,
+        questions_today,
+        last_reset_date,
+        weekly_score,
+        last_weekly_reset
+      )
+
+      SELECT
+        u.telegram_id,
+        0,
+        0,
+        0,
+        0,
+        CURRENT_DATE,
+        0,
+        CURRENT_DATE
+
+      FROM users u
+
+      WHERE u.telegram_id = $1
+
+      ON CONFLICT (user_id)
+
+      DO UPDATE SET
+
+        questions_today =
+          CASE
+            WHEN quiz_points.last_reset_date < CURRENT_DATE
+            THEN 0
+            ELSE quiz_points.questions_today
+          END,
+
+        last_reset_date =
+          CASE
+            WHEN quiz_points.last_reset_date < CURRENT_DATE
+            THEN CURRENT_DATE
+            ELSE quiz_points.last_reset_date
+          END,
+
+        weekly_score =
+          CASE
+            WHEN quiz_points.last_weekly_reset <
+                 (CURRENT_DATE - INTERVAL '7 days')
+            THEN 0
+            ELSE quiz_points.weekly_score
+          END,
+
+        last_weekly_reset =
+          CASE
+            WHEN quiz_points.last_weekly_reset <
+                 (CURRENT_DATE - INTERVAL '7 days')
+            THEN CURRENT_DATE
+            ELSE quiz_points.last_weekly_reset
+          END
+
+      RETURNING
+        user_id,
+        points,
+        total_earned,
+        total_converted,
+        questions_today,
+        weekly_score
+    )
+
+    SELECT
+      q.user_id,
+      q.points,
+      q.total_earned,
+      q.total_converted,
+      q.questions_today,
+      q.weekly_score,
+
+      s.points_per_1000,
+      s.min_conversion_points,
+      s.max_questions_per_day
+
+    FROM upsert_quiz_points q
+    CROSS JOIN settings s
+    `,
+    [userId]
+  );
+
+if (
+  quizStateResult.rows.length === 0
+) {
+
+  return c.json({
+    success: false,
+    message: 'USER_NOT_FOUND'
+  }, 404);
+
+}
+
+const quizState =
+  quizStateResult.rows[0];
+
+const qToday =
+  Number(
+    quizState.questions_today
+  );
+
+const points =
+  Number(
+    quizState.points
+  );
+
+const weeklyScore =
+  Number(
+    quizState.weekly_score
+  );
+
+const pointsPer1000 =
+  Number(
+    quizState.points_per_1000
+  );
+
+const minConversionPoints =
+  Number(
+    quizState.min_conversion_points
+  );
+
+const maxQuestionsPerDay =
+  Number(
+    quizState.max_questions_per_day
+  );
+
+// ------------------------------------------------------------
+// التحقق من صحة إعدادات Quiz
+// ------------------------------------------------------------
+
+if (
+  !Number.isFinite(pointsPer1000) ||
+  pointsPer1000 <= 0 ||
+  !Number.isInteger(minConversionPoints) ||
+  minConversionPoints <= 0 ||
+  !Number.isInteger(maxQuestionsPerDay) ||
+  maxQuestionsPerDay <= 0
+) {
+
+  throw new Error(
+    'INVALID_QUIZ_SETTINGS'
+  );
+
+}
+
+// ------------------------------------------------------------
+// الحد اليومي
+// ------------------------------------------------------------
+
+if (
+  qToday >=
+  maxQuestionsPerDay
+) {
+
+  return c.json({
+    success: false,
+    message: 'DAILY_LIMIT',
+
+    points,
+
+    weekly_score:
+      weeklyScore,
+
+    questionsLeft: 0
+  });
+
+}
+
+    // ------------------------------------------------------------
+    // تحديد الصعوبة الداخلية
+    // ------------------------------------------------------------
+
+    let difficulty = 'easy';
+
+    if (qToday > 50) {
+      difficulty = 'medium';
+    }
+
+    if (qToday > 100) {
+      difficulty = 'hard';
+    }
+
+    // ------------------------------------------------------------
+    // Cache key
+    // ------------------------------------------------------------
+
+    const cacheKey =
+      `${lang}:${difficulty}`;
+
+    // ------------------------------------------------------------
+    // قراءة Cache
+    // ------------------------------------------------------------
+
+    let cached =
+      quizQuestionCache.get(cacheKey);
+
+    const now =
+      Date.now();
+
+    if (
+      cached &&
+      cached.expiresAt > now &&
+      Array.isArray(cached.questions) &&
+      cached.questions.length > 0
+    ) {
+
+      console.log(
+        `✅ Quiz cache hit: ${cacheKey} (${cached.questions.length})`
+      );
+
+    } else {
+
+      // ----------------------------------------------------------
+      // Cache غير موجود أو منتهي
+      // ----------------------------------------------------------
+
+      quizQuestionCache.delete(
+        cacheKey
+      );
+
+      cached = null;
+
+      // ----------------------------------------------------------
+      // منع الطلبات المتزامنة
+      // ----------------------------------------------------------
+
+      if (
+        quizFetching.has(cacheKey)
+      ) {
+
+        try {
+
+          await quizFetching.get(
+            cacheKey
+          );
+
+        } catch (waitErr) {
+
+          console.error(
+            `❌ Waiting for quiz batch failed (${cacheKey}):`,
+            waitErr
+          );
+
+        }
+
+      } else {
+
+        // --------------------------------------------------------
+        // إنشاء عملية جلب واحدة
+        // --------------------------------------------------------
+
+        const fetchPromise =
+          (async () => {
+
+            // ====================================================
+            // ENGLISH
+            // ====================================================
+
+            if (lang === 'en') {
+
+              const controller =
+                new AbortController();
+
+              const timeoutId =
+                setTimeout(
+                  () => {
+                    controller.abort();
+                  },
+                  8000
+                );
+
+              try {
+
+                console.log(
+                  `🌐 Fetching ${QUIZ_BATCH_SIZE} English questions from OpenTDB`
+                );
+
+                const apiRes =
+                  await fetch(
+                    `https://opentdb.com/api.php` +
+                    `?amount=${QUIZ_BATCH_SIZE}` +
+                    `&type=multiple` +
+                    `&difficulty=${difficulty}` +
+                    `&encode=url3986`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (!apiRes.ok) {
+
+                  throw new Error(
+                    `OpenTDB HTTP ${apiRes.status}`
+                  );
+
+                }
+
+                const apiData =
+                  await apiRes.json();
+
+                if (
+                  apiData.response_code !== 0
+                ) {
+
+                  throw new Error(
+                    `OpenTDB response_code: ${apiData.response_code}`
+                  );
+
+                }
+
+                if (
+                  !Array.isArray(
+                    apiData.results
+                  ) ||
+                  apiData.results.length === 0
+                ) {
+
+                  throw new Error(
+                    'OpenTDB returned no questions'
+                  );
+
+                }
+
+                const questions = [];
+
+                for (
+                  const q
+                  of apiData.results
+                ) {
+
+                  try {
+
+                    const question =
+                      decodeURIComponent(
+                        q.question
+                      );
+
+                    const correctAnswer =
+                      decodeURIComponent(
+                        q.correct_answer
+                      );
+
+                    const incorrectAnswers =
+                      q.incorrect_answers.map(
+                        answer =>
+                          decodeURIComponent(
+                            answer
+                          )
+                      );
+
+                    if (
+                      !question ||
+                      !correctAnswer ||
+                      !Array.isArray(
+                        incorrectAnswers
+                      ) ||
+                      incorrectAnswers.length !== 3
+                    ) {
+
+                      continue;
+
+                    }
+
+                    questions.push({
+
+                      question,
+
+                      correctAnswer,
+
+                      incorrectAnswers,
+
+                      category:
+                        decodeURIComponent(
+                          q.category
+                        ),
+
+                      difficulty:
+                        q.difficulty
+
+                    });
+
+                  } catch (decodeErr) {
+
+                    console.error(
+                      '❌ OpenTDB decode error:',
+                      decodeErr
+                    );
+
+                  }
+
+                }
+
+                if (
+                  questions.length === 0
+                ) {
+
+                  throw new Error(
+                    'No valid OpenTDB questions'
+                  );
+
+                }
+
+                quizQuestionCache.set(
+                  cacheKey,
+                  {
+                    questions,
+                    expiresAt:
+                      Date.now() +
+                      QUIZ_CACHE_DURATION
+                  }
+                );
+
+                console.log(
+                  `✅ English batch cached: ${questions.length}`
+                );
+
+              } finally {
+
+                clearTimeout(
+                  timeoutId
+                );
+
+              }
+
+            }
+
+            // ====================================================
+            // POLYFACT
+            //
+            // ar / fr / es / pt / de / ja
+            // ====================================================
+
+            else if (
+              [
+                'ar',
+                'fr',
+                'es',
+                'pt',
+                'de',
+                'ja'
+              ].includes(lang)
+            ) {
+
+              const controller =
+                new AbortController();
+
+              const timeoutId =
+                setTimeout(
+                  () => {
+                    controller.abort();
+                  },
+                  10000
+                );
+
+              try {
+
+                console.log(
+                  `🌐 Fetching ${QUIZ_BATCH_SIZE} ${lang} questions from PolyFact`
+                );
+
+                // ------------------------------------------------
+                // الحصول على عدد الصفوف
+                // ------------------------------------------------
+
+                const statsRes =
+                  await fetch(
+                    'https://datasets-server.huggingface.co/statistics' +
+                    `?dataset=jvonrad%2FPolyFact` +
+                    `&config=${encodeURIComponent(lang)}` +
+                    `&split=train`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (
+                  !statsRes.ok
+                ) {
+
+                  throw new Error(
+                    `PolyFact statistics HTTP ${statsRes.status}`
+                  );
+
+                }
+
+                const statsData =
+                  await statsRes.json();
+
+                const totalRows =
+                  Number(
+                    statsData.num_examples ||
+                    statsData.num_rows ||
+                    statsData.statistics?.num_examples ||
+                    0
+                  );
+
+                if (
+                  !Number.isInteger(totalRows) ||
+                  totalRows < QUIZ_BATCH_SIZE
+                ) {
+
+                  throw new Error(
+                    `Invalid PolyFact row count: ${totalRows}`
+                  );
+
+                }
+
+                // ------------------------------------------------
+                // اختيار موضع عشوائي
+                // ------------------------------------------------
+
+                const maxOffset =
+                  totalRows -
+                  QUIZ_BATCH_SIZE;
+
+                const offset =
+                  Math.floor(
+                    Math.random() *
+                    (maxOffset + 1)
+                  );
+
+                // ------------------------------------------------
+                // جلب 50 سؤال
+                // ------------------------------------------------
+
+                const rowsRes =
+                  await fetch(
+                    'https://datasets-server.huggingface.co/rows' +
+                    `?dataset=jvonrad%2FPolyFact` +
+                    `&config=${encodeURIComponent(lang)}` +
+                    `&split=train` +
+                    `&offset=${offset}` +
+                    `&length=${QUIZ_BATCH_SIZE}`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (
+                  !rowsRes.ok
+                ) {
+
+                  throw new Error(
+                    `PolyFact rows HTTP ${rowsRes.status}`
+                  );
+
+                }
+
+                const rowsData =
+                  await rowsRes.json();
+
+                if (
+                  !Array.isArray(
+                    rowsData.rows
+                  )
+                ) {
+
+                  throw new Error(
+                    'PolyFact returned invalid rows'
+                  );
+
+                }
+
+                const questions = [];
+
+                for (
+                  const item
+                  of rowsData.rows
+                ) {
+
+                  const row =
+                    item.row;
+
+                  if (!row) {
+                    continue;
+                  }
+
+                  const options = [
+                    row.option_a,
+                    row.option_b,
+                    row.option_c,
+                    row.option_d
+                  ];
+
+                  const answerIndex =
+                    Number(
+                      row.answer_index
+                    );
+
+                  if (
+                    !row.question ||
+                    options.some(
+                      option =>
+                        typeof option !== 'string' ||
+                        !option.trim()
+                    ) ||
+                    !Number.isInteger(
+                      answerIndex
+                    ) ||
+                    answerIndex < 0 ||
+                    answerIndex > 3
+                  ) {
+
+                    continue;
+
+                  }
+
+                  const correctAnswer =
+                    options[answerIndex];
+
+                  questions.push({
+
+                    question:
+                      row.question,
+
+                    correctAnswer,
+
+                    incorrectAnswers:
+                      options.filter(
+                        (_, index) =>
+                          index !== answerIndex
+                      ),
+
+                    category:
+                      row.relation ||
+                      'General',
+
+                    difficulty
+
+                  });
+
+                }
+
+                if (
+                  questions.length === 0
+                ) {
+
+                  throw new Error(
+                    `No valid PolyFact questions for ${lang}`
+                  );
+
+                }
+
+                quizQuestionCache.set(
+                  cacheKey,
+                  {
+                    questions,
+                    expiresAt:
+                      Date.now() +
+                      QUIZ_CACHE_DURATION
+                  }
+                );
+
+                console.log(
+                  `✅ PolyFact ${lang} batch cached: ${questions.length}`
+                );
+
+              } finally {
+
+                clearTimeout(
+                  timeoutId
+                );
+
+              }
+
+            }
+
+            // ====================================================
+            // TURKISH
+            //
+            // malhajar/mmlu-tr
+            // global_facts
+            // ====================================================
+
+            else if (lang === 'tr') {
+
+              const controller =
+                new AbortController();
+
+              const timeoutId =
+                setTimeout(
+                  () => {
+                    controller.abort();
+                  },
+                  10000
+                );
+
+              try {
+
+                console.log(
+                  `🌐 Fetching ${QUIZ_BATCH_SIZE} Turkish questions`
+                );
+
+                // ------------------------------------------------
+                // عدد global_facts معروف من Dataset.
+                //
+                // نستخدم statistics للتأكد من العدد الحالي.
+                // ------------------------------------------------
+
+                const statsRes =
+                  await fetch(
+                    'https://datasets-server.huggingface.co/statistics' +
+                    `?dataset=malhajar%2Fmmlu-tr` +
+                    `&config=global_facts` +
+                    `&split=test`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (
+                  !statsRes.ok
+                ) {
+
+                  throw new Error(
+                    `Turkish statistics HTTP ${statsRes.status}`
+                  );
+
+                }
+
+                const statsData =
+                  await statsRes.json();
+
+                const totalRows =
+                  Number(
+                    statsData.num_examples ||
+                    statsData.num_rows ||
+                    statsData.statistics?.num_examples ||
+                    0
+                  );
+
+                if (
+                  !Number.isInteger(totalRows) ||
+                  totalRows < QUIZ_BATCH_SIZE
+                ) {
+
+                  throw new Error(
+                    `Invalid Turkish row count: ${totalRows}`
+                  );
+
+                }
+
+                const maxOffset =
+                  totalRows -
+                  QUIZ_BATCH_SIZE;
+
+                const offset =
+                  Math.floor(
+                    Math.random() *
+                    (maxOffset + 1)
+                  );
+
+                // ------------------------------------------------
+                // جلب 50 سؤالًا تركيًا
+                // ------------------------------------------------
+
+                const rowsRes =
+                  await fetch(
+                    'https://datasets-server.huggingface.co/rows' +
+                    `?dataset=malhajar%2Fmmlu-tr` +
+                    `&config=global_facts` +
+                    `&split=test` +
+                    `&offset=${offset}` +
+                    `&length=${QUIZ_BATCH_SIZE}`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (
+                  !rowsRes.ok
+                ) {
+
+                  throw new Error(
+                    `Turkish rows HTTP ${rowsRes.status}`
+                  );
+
+                }
+
+                const rowsData =
+                  await rowsRes.json();
+
+                if (
+                  !Array.isArray(
+                    rowsData.rows
+                  )
+                ) {
+
+                  throw new Error(
+                    'Turkish dataset returned invalid rows'
+                  );
+
+                }
+
+                const questions = [];
+
+                for (
+                  const item
+                  of rowsData.rows
+                ) {
+
+                  const row =
+                    item.row;
+
+                  if (!row) {
+                    continue;
+                  }
+
+                  const options =
+                    Array.isArray(
+                      row.choices
+                    )
+                      ? row.choices
+                      : [];
+
+                  const answerIndex =
+                    Number(
+                      row.answer
+                    );
+
+                  if (
+                    !row.question ||
+                    options.length !== 4 ||
+                    options.some(
+                      option =>
+                        typeof option !== 'string' ||
+                        !option.trim()
+                    ) ||
+                    !Number.isInteger(
+                      answerIndex
+                    ) ||
+                    answerIndex < 0 ||
+                    answerIndex > 3
+                  ) {
+
+                    continue;
+
+                  }
+
+                  const correctAnswer =
+                    options[answerIndex];
+
+                  questions.push({
+
+                    question:
+                      row.question,
+
+                    correctAnswer,
+
+                    incorrectAnswers:
+                      options.filter(
+                        (_, index) =>
+                          index !== answerIndex
+                      ),
+
+                    category:
+                      'General',
+
+                    difficulty
+
+                  });
+
+                }
+
+                if (
+                  questions.length === 0
+                ) {
+
+                  throw new Error(
+                    'No valid Turkish questions'
+                  );
+
+                }
+
+                quizQuestionCache.set(
+                  cacheKey,
+                  {
+                    questions,
+                    expiresAt:
+                      Date.now() +
+                      QUIZ_CACHE_DURATION
+                  }
+                );
+
+                console.log(
+                  `✅ Turkish batch cached: ${questions.length}`
+                );
+
+              } finally {
+
+                clearTimeout(
+                  timeoutId
+                );
+
+              }
+
+            }
+
+          })();
+
+        // --------------------------------------------------------
+        // حفظ عملية الجلب الحالية
+        // --------------------------------------------------------
+
+        quizFetching.set(
+          cacheKey,
+          fetchPromise
+        );
+
+        try {
+
+          await fetchPromise;
+
+        } catch (fetchErr) {
+
+          console.error(
+            `❌ Quiz batch fetch failed (${cacheKey}):`,
+            fetchErr
+          );
+
+          return c.json({
+            success: false,
+            message: 'API_UNAVAILABLE'
+          }, 503);
+
+        } finally {
+
+          quizFetching.delete(
+            cacheKey
+          );
+
+        }
+
+      }
+
+      // ----------------------------------------------------------
+      // قراءة Cache بعد اكتمال الجلب
+      // ----------------------------------------------------------
+
+      cached =
+        quizQuestionCache.get(
+          cacheKey
+        );
+
+    }
+
+    // ------------------------------------------------------------
+    // التأكد من وجود Cache
+    // ------------------------------------------------------------
+
+    if (
+      !cached ||
+      !Array.isArray(
+        cached.questions
+      ) ||
+      cached.questions.length === 0
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'API_UNAVAILABLE'
+      }, 503);
+
+    }
+
+    // ------------------------------------------------------------
+    // أخذ سؤال واحد
+    // ------------------------------------------------------------
+
+    const questionData =
+      cached.questions.shift();
+
+    // ------------------------------------------------------------
+    // تحديث Cache
+    // ------------------------------------------------------------
+
+    if (
+      cached.questions.length === 0
+    ) {
+
+      quizQuestionCache.delete(
+        cacheKey
+      );
+
+      console.log(
+        `♻️ Quiz batch exhausted: ${cacheKey}`
+      );
+
+    } else {
+
+      quizQuestionCache.set(
+        cacheKey,
+        cached
+      );
+
+    }
+
+    // ------------------------------------------------------------
+    // التحقق من السؤال
+    // ------------------------------------------------------------
+
+    if (
+      !questionData ||
+      !questionData.question ||
+      !questionData.correctAnswer ||
+      !Array.isArray(
+        questionData.incorrectAnswers
+      ) ||
+      questionData.incorrectAnswers.length !== 3
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'API_UNAVAILABLE'
+      }, 503);
+
+    }
+
+    // ------------------------------------------------------------
+    // خلط الإجابات
+    // ------------------------------------------------------------
+
+    const allAnswers = [
+      questionData.correctAnswer,
+      ...questionData.incorrectAnswers
+    ];
+
+    for (
+      let i = allAnswers.length - 1;
+      i > 0;
+      i--
+    ) {
+
+      const j =
+        Math.floor(
+          Math.random() * (i + 1)
+        );
+
+      [
+        allAnswers[i],
+        allAnswers[j]
+      ] = [
+        allAnswers[j],
+        allAnswers[i]
+      ];
+
+    }
+
+    const shuffledAnswers =
+      allAnswers;
+
+    // ------------------------------------------------------------
+    // تحديد الإجابة الصحيحة
+    // ------------------------------------------------------------
+
+    const correctIndex =
+      shuffledAnswers.indexOf(
+        questionData.correctAnswer
+      );
+
+    if (
+      correctIndex === -1
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'API_UNAVAILABLE'
+      }, 503);
+
+    }
+
+    // ------------------------------------------------------------
+    // إنشاء Question ID
+    // ------------------------------------------------------------
+
+    const questionId =
+      crypto.randomUUID();
+
+    // ------------------------------------------------------------
+    // حفظ جلسة السؤال
+    // ------------------------------------------------------------
+
+    await pool.query(
+      `
+      INSERT INTO quiz_question_sessions (
+        question_id,
+        user_id,
+        correct_index,
+        is_correct,
+        created_at,
+        answered,
+        skipped,
+        retry_used,
+        double_used
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        false,
+        NOW(),
+        false,
+        false,
+        false,
+        false
+      )
+      `,
+      [
+        questionId,
+        userId,
+        correctIndex
+      ]
+    );
+
+    // ------------------------------------------------------------
+    // الأسئلة المتبقية اليوم
+    // ------------------------------------------------------------
+
+    const questionsLeft =
+  Math.max(
+    0,
+    maxQuestionsPerDay -
+    qToday -
+    1
+  );
+    // ------------------------------------------------------------
+    // Response
+    // ------------------------------------------------------------
+
+    return c.json({
+
+      success: true,
+
+      questionId,
+
+      question:
+        questionData.question,
+
+      answers:
+        shuffledAnswers,
+
+      category:
+        questionData.category,
+
+      difficulty:
+        questionData.difficulty,
+
+      points:
+  points,
+
+weekly_score:
+  weeklyScore,
+
+      questionsLeft
+
+    });
+
+  } catch (err) {
+
+    console.error(
+      '❌ /api/quiz/question:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: 'Server error'
+    }, 500);
+
+  }
+
+});
+
 // ================================================================
 // 2️⃣ ANSWER QUESTION
 // ================================================================
