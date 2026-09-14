@@ -6226,210 +6226,210 @@ app.get('/api/quiz/question', async (c) => {
 
     }
 
-   // ------------------------------------------------------------
-// حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط
-// ------------------------------------------------------------
+    // ------------------------------------------------------------
+    // حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط
+    // ------------------------------------------------------------
 
-const quizStateResult =
-  await pool.query(
-    `
-    WITH settings AS (
-      SELECT
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'points_per_1000'
-          ),
-          '0.10'
-        ) AS points_per_1000,
+    const quizStateResult =
+      await pool.query(
+        `
+        WITH settings AS (
+          SELECT
+            COALESCE(
+              MAX(value) FILTER (
+                WHERE key = 'points_per_1000'
+              ),
+              '0.10'
+            ) AS points_per_1000,
 
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'min_conversion_points'
-          ),
-          '1000'
-        ) AS min_conversion_points,
+            COALESCE(
+              MAX(value) FILTER (
+                WHERE key = 'min_conversion_points'
+              ),
+              '1000'
+            ) AS min_conversion_points,
 
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'max_questions_per_day'
-          ),
-          '200'
-        ) AS max_questions_per_day
-      FROM quiz_settings
-    ),
+            COALESCE(
+              MAX(value) FILTER (
+                WHERE key = 'max_questions_per_day'
+              ),
+              '200'
+            ) AS max_questions_per_day
+          FROM quiz_settings
+        ),
 
-    upsert_quiz_points AS (
-      INSERT INTO quiz_points (
-        user_id,
+        upsert_quiz_points AS (
+          INSERT INTO quiz_points (
+            user_id,
+            points,
+            total_earned,
+            total_converted,
+            questions_today,
+            last_reset_date,
+            weekly_score,
+            last_weekly_reset
+          )
+
+          SELECT
+            u.telegram_id,
+            0,
+            0,
+            0,
+            0,
+            CURRENT_DATE,
+            0,
+            CURRENT_DATE
+
+          FROM users u
+
+          WHERE u.telegram_id = $1
+
+          ON CONFLICT (user_id)
+
+          DO UPDATE SET
+
+            questions_today =
+              CASE
+                WHEN quiz_points.last_reset_date < CURRENT_DATE
+                THEN 0
+                ELSE quiz_points.questions_today
+              END,
+
+            last_reset_date =
+              CASE
+                WHEN quiz_points.last_reset_date < CURRENT_DATE
+                THEN CURRENT_DATE
+                ELSE quiz_points.last_reset_date
+              END,
+
+            weekly_score =
+              CASE
+                WHEN quiz_points.last_weekly_reset <
+                     (CURRENT_DATE - INTERVAL '7 days')
+                THEN 0
+                ELSE quiz_points.weekly_score
+              END,
+
+            last_weekly_reset =
+              CASE
+                WHEN quiz_points.last_weekly_reset <
+                     (CURRENT_DATE - INTERVAL '7 days')
+                THEN CURRENT_DATE
+                ELSE quiz_points.last_weekly_reset
+              END
+
+          RETURNING
+            user_id,
+            points,
+            total_earned,
+            total_converted,
+            questions_today,
+            weekly_score
+        )
+
+        SELECT
+          q.user_id,
+          q.points,
+          q.total_earned,
+          q.total_converted,
+          q.questions_today,
+          q.weekly_score,
+
+          s.points_per_1000,
+          s.min_conversion_points,
+          s.max_questions_per_day
+
+        FROM upsert_quiz_points q
+        CROSS JOIN settings s
+        `,
+        [userId]
+      );
+
+    if (
+      quizStateResult.rows.length === 0
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'USER_NOT_FOUND'
+      }, 404);
+
+    }
+
+    const quizState =
+      quizStateResult.rows[0];
+
+    const qToday =
+      Number(
+        quizState.questions_today
+      );
+
+    const points =
+      Number(
+        quizState.points
+      );
+
+    const weeklyScore =
+      Number(
+        quizState.weekly_score
+      );
+
+    const pointsPer1000 =
+      Number(
+        quizState.points_per_1000
+      );
+
+    const minConversionPoints =
+      Number(
+        quizState.min_conversion_points
+      );
+
+    const maxQuestionsPerDay =
+      Number(
+        quizState.max_questions_per_day
+      );
+
+    // ------------------------------------------------------------
+    // التحقق من صحة إعدادات Quiz
+    // ------------------------------------------------------------
+
+    if (
+      !Number.isFinite(pointsPer1000) ||
+      pointsPer1000 <= 0 ||
+      !Number.isInteger(minConversionPoints) ||
+      minConversionPoints <= 0 ||
+      !Number.isInteger(maxQuestionsPerDay) ||
+      maxQuestionsPerDay <= 0
+    ) {
+
+      throw new Error(
+        'INVALID_QUIZ_SETTINGS'
+      );
+
+    }
+
+    // ------------------------------------------------------------
+    // الحد اليومي
+    // ------------------------------------------------------------
+
+    if (
+      qToday >=
+      maxQuestionsPerDay
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'DAILY_LIMIT',
+
         points,
-        total_earned,
-        total_converted,
-        questions_today,
-        last_reset_date,
-        weekly_score,
-        last_weekly_reset
-      )
 
-      SELECT
-        u.telegram_id,
-        0,
-        0,
-        0,
-        0,
-        CURRENT_DATE,
-        0,
-        CURRENT_DATE
+        weekly_score:
+          weeklyScore,
 
-      FROM users u
+        questionsLeft: 0
+      });
 
-      WHERE u.telegram_id = $1
-
-      ON CONFLICT (user_id)
-
-      DO UPDATE SET
-
-        questions_today =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN 0
-            ELSE quiz_points.questions_today
-          END,
-
-        last_reset_date =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_reset_date
-          END,
-
-        weekly_score =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN 0
-            ELSE quiz_points.weekly_score
-          END,
-
-        last_weekly_reset =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_weekly_reset
-          END
-
-      RETURNING
-        user_id,
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        weekly_score
-    )
-
-    SELECT
-      q.user_id,
-      q.points,
-      q.total_earned,
-      q.total_converted,
-      q.questions_today,
-      q.weekly_score,
-
-      s.points_per_1000,
-      s.min_conversion_points,
-      s.max_questions_per_day
-
-    FROM upsert_quiz_points q
-    CROSS JOIN settings s
-    `,
-    [userId]
-  );
-
-if (
-  quizStateResult.rows.length === 0
-) {
-
-  return c.json({
-    success: false,
-    message: 'USER_NOT_FOUND'
-  }, 404);
-
-}
-
-const quizState =
-  quizStateResult.rows[0];
-
-const qToday =
-  Number(
-    quizState.questions_today
-  );
-
-const points =
-  Number(
-    quizState.points
-  );
-
-const weeklyScore =
-  Number(
-    quizState.weekly_score
-  );
-
-const pointsPer1000 =
-  Number(
-    quizState.points_per_1000
-  );
-
-const minConversionPoints =
-  Number(
-    quizState.min_conversion_points
-  );
-
-const maxQuestionsPerDay =
-  Number(
-    quizState.max_questions_per_day
-  );
-
-// ------------------------------------------------------------
-// التحقق من صحة إعدادات Quiz
-// ------------------------------------------------------------
-
-if (
-  !Number.isFinite(pointsPer1000) ||
-  pointsPer1000 <= 0 ||
-  !Number.isInteger(minConversionPoints) ||
-  minConversionPoints <= 0 ||
-  !Number.isInteger(maxQuestionsPerDay) ||
-  maxQuestionsPerDay <= 0
-) {
-
-  throw new Error(
-    'INVALID_QUIZ_SETTINGS'
-  );
-
-}
-
-// ------------------------------------------------------------
-// الحد اليومي
-// ------------------------------------------------------------
-
-if (
-  qToday >=
-  maxQuestionsPerDay
-) {
-
-  return c.json({
-    success: false,
-    message: 'DAILY_LIMIT',
-
-    points,
-
-    weekly_score:
-      weeklyScore,
-
-    questionsLeft: 0
-  });
-
-}
+    }
 
     // ------------------------------------------------------------
     // تحديد الصعوبة الداخلية
@@ -6446,11 +6446,35 @@ if (
     }
 
     // ------------------------------------------------------------
+    // اختيار مصدر السؤال
+    //
+    // العربية فقط:
+    //
+    // 50% -> PolyFact
+    // 50% -> IslamicQuizAPI
+    //
+    // باقي اللغات:
+    // المصدر الحالي بدون تغيير
+    // ------------------------------------------------------------
+
+    const questionSource =
+      lang === 'ar'
+        ? (
+            Math.random() < 0.5
+              ? 'islamic'
+              : 'current'
+          )
+        : 'current';
+
+    // ------------------------------------------------------------
     // Cache key
+    //
+    // فصل Cache الخاص بالمصدر الإسلامي
+    // عن Cache الخاص بالمصدر الحالي
     // ------------------------------------------------------------
 
     const cacheKey =
-      `${lang}:${difficulty}`;
+      `${lang}:${difficulty}:${questionSource}`;
 
     // ------------------------------------------------------------
     // قراءة Cache
@@ -6518,10 +6542,208 @@ if (
           (async () => {
 
             // ====================================================
+            // ISLAMIC QUIZ API
+            //
+            // العربية فقط
+            //
+            // 1 إجابة صحيحة
+            // + 2 إجابات خاطئة
+            // = 3 اختيارات
+            // ====================================================
+
+            if (
+              lang === 'ar' &&
+              questionSource === 'islamic'
+            ) {
+
+              const controller =
+                new AbortController();
+
+              const timeoutId =
+                setTimeout(
+                  () => {
+                    controller.abort();
+                  },
+                  10000
+                );
+
+              try {
+
+                console.log(
+                  `☪️ Fetching ${QUIZ_BATCH_SIZE} Arabic Islamic questions from IslamicQuizAPI`
+                );
+
+                const apiRes =
+                  await fetch(
+                    `https://islamicquiz.i8x.net/api/questions/random?count=${QUIZ_BATCH_SIZE}`,
+                    {
+                      signal: controller.signal
+                    }
+                  );
+
+                if (
+                  !apiRes.ok
+                ) {
+
+                  throw new Error(
+                    `IslamicQuizAPI HTTP ${apiRes.status}`
+                  );
+
+                }
+
+                const apiData =
+                  await apiRes.json();
+
+                if (
+                  !Array.isArray(apiData)
+                ) {
+
+                  throw new Error(
+                    'IslamicQuizAPI returned invalid data'
+                  );
+
+                }
+
+                const questions = [];
+
+                for (
+                  const q
+                  of apiData
+                ) {
+
+                  try {
+
+                    if (
+                      !q ||
+                      typeof q.q !== 'string' ||
+                      !q.q.trim() ||
+                      !Array.isArray(q.answers)
+                    ) {
+
+                      continue;
+
+                    }
+
+                    // ------------------------------------------------
+                    // IslamicQuizAPI:
+                    //
+                    // 3 اختيارات فقط:
+                    // 1 صحيحة + 2 خاطئة
+                    // ------------------------------------------------
+
+                    if (
+                      q.answers.length !== 3
+                    ) {
+
+                      continue;
+
+                    }
+
+                    const correctAnswers =
+                      q.answers.filter(
+                        answer =>
+                          answer &&
+                          Number(answer.t) === 1 &&
+                          typeof answer.answer === 'string' &&
+                          answer.answer.trim()
+                      );
+
+                    const incorrectAnswers =
+                      q.answers.filter(
+                        answer =>
+                          answer &&
+                          Number(answer.t) === 0 &&
+                          typeof answer.answer === 'string' &&
+                          answer.answer.trim()
+                      );
+
+                    if (
+                      correctAnswers.length !== 1 ||
+                      incorrectAnswers.length !== 2
+                    ) {
+
+                      continue;
+
+                    }
+
+                    const correctAnswer =
+                      correctAnswers[0].answer.trim();
+
+                    questions.push({
+
+                      question:
+                        q.q.trim(),
+
+                      correctAnswer,
+
+                      incorrectAnswers:
+                        incorrectAnswers.map(
+                          answer =>
+                            answer.answer.trim()
+                        ),
+
+                      category:
+                        q.category ||
+                        q.topic ||
+                        'إسلاميات',
+
+                      difficulty,
+
+                      source:
+                        'islamic'
+
+                    });
+
+                  } catch (questionErr) {
+
+                    console.error(
+                      '❌ IslamicQuizAPI question parse error:',
+                      questionErr
+                    );
+
+                  }
+
+                }
+
+                if (
+                  questions.length === 0
+                ) {
+
+                  throw new Error(
+                    'No valid IslamicQuizAPI questions'
+                  );
+
+                }
+
+                quizQuestionCache.set(
+                  cacheKey,
+                  {
+                    questions,
+                    expiresAt:
+                      Date.now() +
+                      QUIZ_CACHE_DURATION
+                  }
+                );
+
+                console.log(
+                  `✅ Islamic Arabic batch cached: ${questions.length}`
+                );
+
+              } finally {
+
+                clearTimeout(
+                  timeoutId
+                );
+
+              }
+
+            }
+
+            // ====================================================
             // ENGLISH
             // ====================================================
 
-            if (lang === 'en') {
+            else if (lang === 'en') {
 
               const controller =
                 new AbortController();
@@ -6639,8 +6861,7 @@ if (
                           q.category
                         ),
 
-                      difficulty:
-                        q.difficulty
+                      difficulty
 
                     });
 
@@ -6693,6 +6914,9 @@ if (
             // POLYFACT
             //
             // ar / fr / es / pt / de / ja
+            //
+            // العربية تصل هنا فقط عندما:
+            // questionSource === 'current'
             // ====================================================
 
             else if (
@@ -7261,7 +7485,7 @@ if (
     }
 
     // ------------------------------------------------------------
-    // التحقق من السؤال
+    // التأكد من وجود السؤال
     // ------------------------------------------------------------
 
     if (
@@ -7270,8 +7494,34 @@ if (
       !questionData.correctAnswer ||
       !Array.isArray(
         questionData.incorrectAnswers
-      ) ||
-      questionData.incorrectAnswers.length !== 3
+      )
+    ) {
+
+      return c.json({
+        success: false,
+        message: 'API_UNAVAILABLE'
+      }, 503);
+
+    }
+
+    // ------------------------------------------------------------
+    // تحديد عدد الإجابات الخاطئة المطلوب
+    //
+    // المصادر الحالية:
+    // 1 صحيحة + 3 خاطئة = 4 اختيارات
+    //
+    // المصدر الإسلامي:
+    // 1 صحيحة + 2 خاطئة = 3 اختيارات
+    // ------------------------------------------------------------
+
+    const requiredIncorrectAnswers =
+      questionData.source === 'islamic'
+        ? 2
+        : 3;
+
+    if (
+      questionData.incorrectAnswers.length !==
+      requiredIncorrectAnswers
     ) {
 
       return c.json({
@@ -7382,12 +7632,13 @@ if (
     // ------------------------------------------------------------
 
     const questionsLeft =
-  Math.max(
-    0,
-    maxQuestionsPerDay -
-    qToday -
-    1
-  );
+      Math.max(
+        0,
+        maxQuestionsPerDay -
+        qToday -
+        1
+      );
+
     // ------------------------------------------------------------
     // Response
     // ------------------------------------------------------------
@@ -7411,10 +7662,10 @@ if (
         questionData.difficulty,
 
       points:
-  points,
+        points,
 
-weekly_score:
-  weeklyScore,
+      weekly_score:
+        weeklyScore,
 
       questionsLeft
 
