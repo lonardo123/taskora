@@ -6574,26 +6574,36 @@ app.get('/api/quiz/question', async (c) => {
                 );
 
                 const apiRes =
-                  await fetch(
-                    `https://islamicquiz.i8x.net/api/questions/random?count=${QUIZ_BATCH_SIZE}`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
+  await fetch(
+    `https://islamicquiz.i8x.net/api/questions/random?count=${QUIZ_BATCH_SIZE}`,
+    {
+      signal: controller.signal
+    }
+  );
 
-                if (
-                  !apiRes.ok
-                ) {
+console.log(
+  '☪️ IslamicQuizAPI status:',
+  apiRes.status,
+  apiRes.statusText
+);
 
-                  throw new Error(
-                    `IslamicQuizAPI HTTP ${apiRes.status}`
-                  );
+if (
+  !apiRes.ok
+) {
 
-                }
+  throw new Error(
+    `IslamicQuizAPI HTTP ${apiRes.status}`
+  );
 
-                const apiData =
-                  await apiRes.json();
+}
 
+const apiData =
+  await apiRes.json();
+
+console.log(
+  '☪️ IslamicQuizAPI response:',
+  JSON.stringify(apiData).slice(0, 2000)
+);
                 if (
                   !Array.isArray(apiData)
                 ) {
