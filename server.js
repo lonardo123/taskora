@@ -8527,26 +8527,29 @@ app.get('/api/quiz/points', async (c) => {
     // ============================================================
 
     const leaderboard =
-      await pool.query(
-        `
-        SELECT
-          u.username,
-          qp.weekly_score
+  await pool.query(
+    `
+    SELECT
+      u.username,
+      qp.weekly_score
 
-        FROM quiz_points qp
+    FROM (
+      SELECT
+        user_id,
+        weekly_score
+      FROM quiz_points
+      WHERE weekly_score > 0
+      ORDER BY weekly_score DESC
+      LIMIT 5
+    ) qp
 
-        JOIN users u
-          ON qp.user_id = u.telegram_id
+    JOIN users u
+      ON qp.user_id = u.telegram_id
 
-        WHERE qp.weekly_score > 0
-
-        ORDER BY
-          qp.weekly_score DESC
-
-        LIMIT 5
-        `
-      );
-
+    ORDER BY
+      qp.weekly_score DESC
+    `
+  );
     // ============================================================
     // الرد
     // ============================================================
