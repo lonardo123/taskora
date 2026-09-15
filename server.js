@@ -8145,7 +8145,7 @@ app.post('/api/quiz/reward/complete', async (c) => {
       questionRes.rows[0];
 
     let pointsEarned = 0;
-
+    let updatedPoints = null;
     // ============================================================
     // DOUBLE
     //
@@ -8183,17 +8183,33 @@ app.post('/api/quiz/reward/complete', async (c) => {
         }, 409);
       }
 
-      await client.query(
-        `
-        UPDATE quiz_points
-        SET
-          points = points + 1,
-          total_earned = total_earned + 1,
-          weekly_score = weekly_score + 1
-        WHERE user_id = $1
-        `,
-        [userId]
-      );
+      const doublePointsResult =
+  await client.query(
+    `
+    UPDATE quiz_points
+    SET
+      points = points + 1,
+      total_earned = total_earned + 1,
+      weekly_score = weekly_score + 1
+    WHERE user_id = $1
+    RETURNING
+      points,
+      total_earned,
+      total_converted,
+      questions_today,
+      weekly_score
+    `,
+    [userId]
+  );
+
+if (doublePointsResult.rows.length === 0) {
+  throw new Error(
+    'QUIZ_POINTS_NOT_FOUND'
+  );
+}
+
+updatedPoints =
+  doublePointsResult.rows[0];
 
       await client.query(
         `
@@ -8290,22 +8306,31 @@ app.post('/api/quiz/reward/complete', async (c) => {
       );
 
       const skipCountResult =
-        await client.query(
-          `
-          UPDATE quiz_points
-          SET questions_today =
-            questions_today + 1
-          WHERE user_id = $1
-          RETURNING questions_today
-          `,
-          [userId]
-        );
+  await client.query(
+    `
+    UPDATE quiz_points
+    SET
+      questions_today =
+        questions_today + 1
+    WHERE user_id = $1
+    RETURNING
+      points,
+      total_earned,
+      total_converted,
+      questions_today,
+      weekly_score
+    `,
+    [userId]
+  );
 
-      if (skipCountResult.rows.length === 0) {
-        throw new Error(
-          'QUIZ_POINTS_NOT_FOUND'
-        );
-      }
+if (skipCountResult.rows.length === 0) {
+  throw new Error(
+    'QUIZ_POINTS_NOT_FOUND'
+  );
+}
+
+updatedPoints =
+  skipCountResult.rows[0];
 
       pointsEarned = 0;
     }
@@ -8342,29 +8367,35 @@ app.post('/api/quiz/reward/complete', async (c) => {
     // النقاط الحالية
     // ============================================================
 
-    const pointsRes =
-      await client.query(
-        `
-        SELECT
-          points,
-          total_earned,
-          total_converted,
-          questions_today,
-          weekly_score
-        FROM quiz_points
-        WHERE user_id = $1
-        `,
-        [userId]
-      );
+   if (!updatedPoints) {
 
-    if (pointsRes.rows.length === 0) {
-      throw new Error(
-        'QUIZ_POINTS_NOT_FOUND'
-      );
-    }
+  const pointsRes =
+    await client.query(
+      `
+      SELECT
+        points,
+        total_earned,
+        total_converted,
+        questions_today,
+        weekly_score
+      FROM quiz_points
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
 
-    const points =
-      pointsRes.rows[0];
+  if (pointsRes.rows.length === 0) {
+    throw new Error(
+      'QUIZ_POINTS_NOT_FOUND'
+    );
+  }
+
+  updatedPoints =
+    pointsRes.rows[0];
+}
+
+const points =
+  updatedPoints;
 
     await client.query('COMMIT');
 
