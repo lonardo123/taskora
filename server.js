@@ -6074,94 +6074,87 @@ const totalCost =
 // ======================= 🧠 QUIZ SYSTEM =======================
 
 // ================================================================
-// Quiz helpers
+// Quiz helpers (Optimized for CPU)
 // ================================================================
 
 function generateQuizId() {
   return crypto.randomUUID();
 }
 
+// ✅ تحسين: استبدال واحد بدلاً من 13 استبدالاً متسلسلاً
 function decodeHTML(text) {
   if (!text) return '';
-
-  return text
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&rsquo;/g, "'")
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
-    .replace(/&eacute;/g, 'é')
-    .replace(/&egrave;/g, 'è')
-    .replace(/&ecirc;/g, 'ê')
-    .replace(/&aacute;/g, 'á')
-    .replace(/&agrave;/g, 'à');
+  return text.replace(/&(quot|#039|amp|lt|gt|rsquo|ldquo|rdquo|eacute|egrave|ecirc|aacute|agrave);/g, m => {
+    switch (m) {
+      case '&quot;': return '"';
+      case '&#039;': return "'";
+      case '&amp;': return '&';
+      case '&lt;': return '<';
+      case '&gt;': return '>';
+      case '&rsquo;': return "'";
+      case '&ldquo;': return '"';
+      case '&rdquo;': return '"';
+      case '&eacute;': return 'é';
+      case '&egrave;': return 'è';
+      case '&ecirc;': return 'ê';
+      case '&aacute;': return 'á';
+      case '&agrave;': return 'à';
+      default: return m;
+    }
+  });
 }
 
+// ✅ تحسين: استخدام slice و Bitwise OR و متغير temp لسرعة أعلى في V8
 function shuffleArray(arr) {
-  const a = [...arr];
-
+  const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-
-    [a[i], a[j]] = [a[j], a[i]];
+    const j = (Math.random() * (i + 1)) | 0;
+    const temp = a[i];
+    a[i] = a[j];
+    a[j] = temp;
   }
-
   return a;
 }
 
+// ✅ تحسين: إضافة Cache لمدة 60 ثانية لتجنب استعلامات DB المتكررة غير الضرورية
+let cachedSettings = null;
+let settingsCacheExpiry = 0;
+
 async function getQuizSettings() {
+  const now = Date.now();
+  if (cachedSettings && now < settingsCacheExpiry) {
+    return cachedSettings;
+  }
+
   const res = await pool.query(
-    `
-    SELECT key, value
-    FROM quiz_settings
-    WHERE key IN (
-      'points_per_1000',
-      'min_conversion_points',
-      'max_questions_per_day'
-    )
-    `
+    `SELECT key, value FROM quiz_settings WHERE key IN ('points_per_1000', 'min_conversion_points', 'max_questions_per_day')`
   );
 
   const settings = {};
-
   for (const row of res.rows) {
     settings[row.key] = row.value;
   }
 
-  const pointsPer1000 =
-    settings.points_per_1000 === undefined
-      ? 0.10
-      : Number(settings.points_per_1000);
-
-  const minConversionPoints =
-    settings.min_conversion_points === undefined
-      ? 1000
-      : Number(settings.min_conversion_points);
-
-  const maxQuestionsPerDay =
-    settings.max_questions_per_day === undefined
-      ? 200
-      : Number(settings.max_questions_per_day);
+  const pointsPer1000 = settings.points_per_1000 === undefined ? 0.10 : Number(settings.points_per_1000);
+  const minConversionPoints = settings.min_conversion_points === undefined ? 1000 : Number(settings.min_conversion_points);
+  const maxQuestionsPerDay = settings.max_questions_per_day === undefined ? 200 : Number(settings.max_questions_per_day);
 
   if (
-    !Number.isFinite(pointsPer1000) ||
-    pointsPer1000 <= 0 ||
-    !Number.isInteger(minConversionPoints) ||
-    minConversionPoints <= 0 ||
-    !Number.isInteger(maxQuestionsPerDay) ||
-    maxQuestionsPerDay <= 0
+    !Number.isFinite(pointsPer1000) || pointsPer1000 <= 0 ||
+    !Number.isInteger(minConversionPoints) || minConversionPoints <= 0 ||
+    !Number.isInteger(maxQuestionsPerDay) || maxQuestionsPerDay <= 0
   ) {
     throw new Error('INVALID_QUIZ_SETTINGS');
   }
 
-  return {
+  cachedSettings = {
     points_per_1000: pointsPer1000,
     min_conversion_points: minConversionPoints,
     max_questions_per_day: maxQuestionsPerDay
   };
+  settingsCacheExpiry = now + 60000; // 60 ثانية
+
+  return cachedSettings;
 }
 
 // ================================================================
@@ -6169,1275 +6162,295 @@ async function getQuizSettings() {
 // ================================================================
 
 const quizQuestionCache = new Map();
-
 const quizFetching = new Map();
-
-const QUIZ_CACHE_DURATION =
-  60 * 60 * 1000; // ساعة واحدة
-
+const QUIZ_CACHE_DURATION = 60 * 60 * 1000; // ساعة واحدة
 const QUIZ_BATCH_SIZE = 20;
+const QUIZ_SUPPORTED_LANGUAGES = ['en', 'ar', 'fr', 'es', 'pt', 'de', 'ja', 'tr'];
 
-const QUIZ_SUPPORTED_LANGUAGES = [
-  'en',
-  'ar',
-  'fr',
-  'es',
-  'pt',
-  'de',
-  'ja',
-  'tr'
-];
 // ================================================================
 // 1️⃣ GET QUIZ QUESTION
 // ================================================================
 
 app.get('/api/quiz/question', async (c) => {
-
   try {
+    const userId = c.req.query('user_id');
+    const lang = (c.req.query('lang') || 'en').toLowerCase().trim();
 
-    const userId =
-      c.req.query('user_id');
-
-    const lang =
-      (c.req.query('lang') || 'en')
-        .toLowerCase()
-        .trim();
-
-    // ------------------------------------------------------------
-    // التحقق من user_id
-    // ------------------------------------------------------------
-
-    if (
-      !userId ||
-      !/^\d+$/.test(userId)
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
-
+    if (!userId || !/^\d+$/.test(userId)) {
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-    // ------------------------------------------------------------
-    // اللغة
-    // ------------------------------------------------------------
-
-    if (
-      !QUIZ_SUPPORTED_LANGUAGES.includes(lang)
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'UNSUPPORTED_LANGUAGE'
-      }, 400);
-
+    if (!QUIZ_SUPPORTED_LANGUAGES.includes(lang)) {
+      return c.json({ success: false, message: 'UNSUPPORTED_LANGUAGE' }, 400);
     }
 
-   // ------------------------------------------------------------
-// حالة المستخدم + إعدادات Quiz + تهيئة/تحديث النقاط
-// ------------------------------------------------------------
-
-const quizStateResult =
-  await pool.query(
-    `
-    WITH settings AS (
-      SELECT
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'points_per_1000'
-          ),
-          '0.10'
-        ) AS points_per_1000,
-
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'min_conversion_points'
-          ),
-          '1000'
-        ) AS min_conversion_points,
-
-        COALESCE(
-          MAX(value) FILTER (
-            WHERE key = 'max_questions_per_day'
-          ),
-          '200'
-        ) AS max_questions_per_day
-      FROM quiz_settings
-    ),
-
-    upsert_quiz_points AS (
-      INSERT INTO quiz_points (
-        user_id,
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        last_reset_date,
-        weekly_score,
-        last_weekly_reset
-      )
-
-      SELECT
-        u.telegram_id,
-        0,
-        0,
-        0,
-        0,
-        CURRENT_DATE,
-        0,
-        CURRENT_DATE
-
-      FROM users u
-
-      WHERE u.telegram_id = $1
-
-      ON CONFLICT (user_id)
-
-      DO UPDATE SET
-
-        questions_today =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN 0
-            ELSE quiz_points.questions_today
-          END,
-
-        last_reset_date =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_reset_date
-          END,
-
-        weekly_score =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN 0
-            ELSE quiz_points.weekly_score
-          END,
-
-        last_weekly_reset =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 (CURRENT_DATE - INTERVAL '7 days')
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_weekly_reset
-          END
-
-RETURNING
-  points,
-  questions_today,
-  weekly_score
-
-    )
-
-SELECT
-  q.points,
-  q.questions_today,
-  q.weekly_score,
-
-  s.points_per_1000,
-  s.min_conversion_points,
-  s.max_questions_per_day
-
-
-    FROM upsert_quiz_points q
-    CROSS JOIN settings s
-    `,
-    [userId]
-  );
-
-if (
-  quizStateResult.rows.length === 0
-) {
-
-  return c.json({
-    success: false,
-    message: 'USER_NOT_FOUND'
-  }, 404);
-
-}
-
-const quizState =
-  quizStateResult.rows[0];
-
-const qToday =
-  Number(
-    quizState.questions_today
-  );
-
-const points =
-  Number(
-    quizState.points
-  );
-
-const weeklyScore =
-  Number(
-    quizState.weekly_score
-  );
-
-const pointsPer1000 =
-  Number(
-    quizState.points_per_1000
-  );
-
-const minConversionPoints =
-  Number(
-    quizState.min_conversion_points
-  );
-
-const maxQuestionsPerDay =
-  Number(
-    quizState.max_questions_per_day
-  );
-
-// ------------------------------------------------------------
-// التحقق من صحة إعدادات Quiz
-// ------------------------------------------------------------
-
-if (
-  !Number.isFinite(pointsPer1000) ||
-  pointsPer1000 <= 0 ||
-  !Number.isInteger(minConversionPoints) ||
-  minConversionPoints <= 0 ||
-  !Number.isInteger(maxQuestionsPerDay) ||
-  maxQuestionsPerDay <= 0
-) {
-
-  throw new Error(
-    'INVALID_QUIZ_SETTINGS'
-  );
-
-}
-
-// ------------------------------------------------------------
-// الحد اليومي
-// ------------------------------------------------------------
-
-if (
-  qToday >=
-  maxQuestionsPerDay
-) {
-
-  return c.json({
-    success: false,
-    message: 'DAILY_LIMIT',
-
-    points,
-
-    weekly_score:
-      weeklyScore,
-
-    questionsLeft: 0
-  });
-
-}
-
-    // ------------------------------------------------------------
-    // تحديد الصعوبة الداخلية
-    // ------------------------------------------------------------
-
-    let difficulty = 'easy';
-
-    if (qToday > 50) {
-      difficulty = 'medium';
-    }
-
-    if (qToday > 100) {
-      difficulty = 'hard';
-    }
-
-    // ------------------------------------------------------------
-    // Cache key
-    // ------------------------------------------------------------
-
-    const cacheKey =
-      `${lang}:${difficulty}`;
-
-    // ------------------------------------------------------------
-    // قراءة Cache
-    // ------------------------------------------------------------
-
-    let cached =
-      quizQuestionCache.get(cacheKey);
-
-    const now =
-      Date.now();
-
-    if (
-      cached &&
-      cached.expiresAt > now &&
-      Array.isArray(cached.questions) &&
-      cached.questions.length > 0
-    ) {
-
-      console.log(
-        `✅ Quiz cache hit: ${cacheKey} (${cached.questions.length})`
-      );
-
-    } else {
-
-      // ----------------------------------------------------------
-      // Cache غير موجود أو منتهي
-      // ----------------------------------------------------------
-
-      quizQuestionCache.delete(
-        cacheKey
-      );
-
-      cached = null;
-
-      // ----------------------------------------------------------
-      // منع الطلبات المتزامنة
-      // ----------------------------------------------------------
-
-      if (
-        quizFetching.has(cacheKey)
-      ) {
-
-        try {
-
-          await quizFetching.get(
-            cacheKey
-          );
-
-        } catch (waitErr) {
-
-          console.error(
-            `❌ Waiting for quiz batch failed (${cacheKey}):`,
-            waitErr
-          );
-
-        }
-
-      } else {
-
-        // --------------------------------------------------------
-        // إنشاء عملية جلب واحدة
-        // --------------------------------------------------------
-
-        const fetchPromise =
-          (async () => {
-
-            // ====================================================
-            // ENGLISH
-            // ====================================================
-
-            if (lang === 'en') {
-
-              const controller =
-                new AbortController();
-
-              const timeoutId =
-                setTimeout(
-                  () => {
-                    controller.abort();
-                  },
-                  8000
-                );
-
-              try {
-
-                console.log(
-                  `🌐 Fetching ${QUIZ_BATCH_SIZE} English questions from OpenTDB`
-                );
-
-                const apiRes =
-                  await fetch(
-                    `https://opentdb.com/api.php` +
-                    `?amount=${QUIZ_BATCH_SIZE}` +
-                    `&type=multiple` +
-                    `&difficulty=${difficulty}` +
-                    `&encode=url3986`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
-
-                if (!apiRes.ok) {
-
-                  throw new Error(
-                    `OpenTDB HTTP ${apiRes.status}`
-                  );
-
-                }
-
-                const apiData =
-                  await apiRes.json();
-
-                if (
-                  apiData.response_code !== 0
-                ) {
-
-                  throw new Error(
-                    `OpenTDB response_code: ${apiData.response_code}`
-                  );
-
-                }
-
-                if (
-                  !Array.isArray(
-                    apiData.results
-                  ) ||
-                  apiData.results.length === 0
-                ) {
-
-                  throw new Error(
-                    'OpenTDB returned no questions'
-                  );
-
-                }
-
-                const questions = [];
-
-                for (
-                  const q
-                  of apiData.results
-                ) {
-
-                  try {
-
-                    const question =
-                      decodeURIComponent(
-                        q.question
-                      );
-
-                    const correctAnswer =
-                      decodeURIComponent(
-                        q.correct_answer
-                      );
-
-                    const incorrectAnswers =
-                      q.incorrect_answers.map(
-                        answer =>
-                          decodeURIComponent(
-                            answer
-                          )
-                      );
-
-                    if (
-                      !question ||
-                      !correctAnswer ||
-                      !Array.isArray(
-                        incorrectAnswers
-                      ) ||
-                      incorrectAnswers.length !== 3
-                    ) {
-
-                      continue;
-
-                    }
-
-                    questions.push({
-
-                      question,
-
-                      correctAnswer,
-
-                      incorrectAnswers,
-
-                      category:
-                        decodeURIComponent(
-                          q.category
-                        ),
-
-                      difficulty:
-                        q.difficulty
-
-                    });
-
-                  } catch (decodeErr) {
-
-                    console.error(
-                      '❌ OpenTDB decode error:',
-                      decodeErr
-                    );
-
-                  }
-
-                }
-
-                if (
-                  questions.length === 0
-                ) {
-
-                  throw new Error(
-                    'No valid OpenTDB questions'
-                  );
-
-                }
-
-                quizQuestionCache.set(
-                  cacheKey,
-                  {
-                    questions,
-                    expiresAt:
-                      Date.now() +
-                      QUIZ_CACHE_DURATION
-                  }
-                );
-
-                console.log(
-                  `✅ English batch cached: ${questions.length}`
-                );
-
-              } finally {
-
-                clearTimeout(
-                  timeoutId
-                );
-
-              }
-
-            }
-
-            // ====================================================
-            // POLYFACT
-            //
-            // ar / fr / es / pt / de / ja
-            // ====================================================
-
-            else if (
-              [
-                'ar',
-                'fr',
-                'es',
-                'pt',
-                'de',
-                'ja'
-              ].includes(lang)
-            ) {
-
-              const controller =
-                new AbortController();
-
-              const timeoutId =
-                setTimeout(
-                  () => {
-                    controller.abort();
-                  },
-                  10000
-                );
-
-              try {
-
-                console.log(
-                  `🌐 Fetching ${QUIZ_BATCH_SIZE} ${lang} questions from PolyFact`
-                );
-
-                // ------------------------------------------------
-                // الحصول على عدد الصفوف
-                // ------------------------------------------------
-
-                const statsRes =
-                  await fetch(
-                    'https://datasets-server.huggingface.co/statistics' +
-                    `?dataset=jvonrad%2FPolyFact` +
-                    `&config=${encodeURIComponent(lang)}` +
-                    `&split=train`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
-
-                if (
-                  !statsRes.ok
-                ) {
-
-                  throw new Error(
-                    `PolyFact statistics HTTP ${statsRes.status}`
-                  );
-
-                }
-
-                const statsData =
-                  await statsRes.json();
-
-                const totalRows =
-                  Number(
-                    statsData.num_examples ||
-                    statsData.num_rows ||
-                    statsData.statistics?.num_examples ||
-                    0
-                  );
-
-                if (
-                  !Number.isInteger(totalRows) ||
-                  totalRows < QUIZ_BATCH_SIZE
-                ) {
-
-                  throw new Error(
-                    `Invalid PolyFact row count: ${totalRows}`
-                  );
-
-                }
-
-                // ------------------------------------------------
-                // اختيار موضع عشوائي
-                // ------------------------------------------------
-
-                const maxOffset =
-                  totalRows -
-                  QUIZ_BATCH_SIZE;
-
-                const offset =
-                  Math.floor(
-                    Math.random() *
-                    (maxOffset + 1)
-                  );
-
-                // ------------------------------------------------
-                // جلب 50 سؤال
-                // ------------------------------------------------
-
-                const rowsRes =
-                  await fetch(
-                    'https://datasets-server.huggingface.co/rows' +
-                    `?dataset=jvonrad%2FPolyFact` +
-                    `&config=${encodeURIComponent(lang)}` +
-                    `&split=train` +
-                    `&offset=${offset}` +
-                    `&length=${QUIZ_BATCH_SIZE}`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
-
-                if (
-                  !rowsRes.ok
-                ) {
-
-                  throw new Error(
-                    `PolyFact rows HTTP ${rowsRes.status}`
-                  );
-
-                }
-
-                const rowsData =
-                  await rowsRes.json();
-
-                if (
-                  !Array.isArray(
-                    rowsData.rows
-                  )
-                ) {
-
-                  throw new Error(
-                    'PolyFact returned invalid rows'
-                  );
-
-                }
-
-                const questions = [];
-
-                for (
-                  const item
-                  of rowsData.rows
-                ) {
-
-                  const row =
-                    item.row;
-
-                  if (!row) {
-                    continue;
-                  }
-
-                  const options = [
-                    row.option_a,
-                    row.option_b,
-                    row.option_c,
-                    row.option_d
-                  ];
-
-                  const answerIndex =
-                    Number(
-                      row.answer_index
-                    );
-
-                  if (
-                    !row.question ||
-                    options.some(
-                      option =>
-                        typeof option !== 'string' ||
-                        !option.trim()
-                    ) ||
-                    !Number.isInteger(
-                      answerIndex
-                    ) ||
-                    answerIndex < 0 ||
-                    answerIndex > 3
-                  ) {
-
-                    continue;
-
-                  }
-
-                  const correctAnswer =
-                    options[answerIndex];
-
-                  questions.push({
-
-                    question:
-                      row.question,
-
-                    correctAnswer,
-
-                    incorrectAnswers:
-                      options.filter(
-                        (_, index) =>
-                          index !== answerIndex
-                      ),
-
-                    category:
-                      row.relation ||
-                      'General',
-
-                    difficulty
-
-                  });
-
-                }
-
-                if (
-                  questions.length === 0
-                ) {
-
-                  throw new Error(
-                    `No valid PolyFact questions for ${lang}`
-                  );
-
-                }
-
-                quizQuestionCache.set(
-                  cacheKey,
-                  {
-                    questions,
-                    expiresAt:
-                      Date.now() +
-                      QUIZ_CACHE_DURATION
-                  }
-                );
-
-                console.log(
-                  `✅ PolyFact ${lang} batch cached: ${questions.length}`
-                );
-
-              } finally {
-
-                clearTimeout(
-                  timeoutId
-                );
-
-              }
-
-            }
-
-            // ====================================================
-            // TURKISH
-            //
-            // malhajar/mmlu-tr
-            // global_facts
-            // ====================================================
-
-            else if (lang === 'tr') {
-
-              const controller =
-                new AbortController();
-
-              const timeoutId =
-                setTimeout(
-                  () => {
-                    controller.abort();
-                  },
-                  10000
-                );
-
-              try {
-
-                console.log(
-                  `🌐 Fetching ${QUIZ_BATCH_SIZE} Turkish questions`
-                );
-
-                // ------------------------------------------------
-                // عدد global_facts معروف من Dataset.
-                //
-                // نستخدم statistics للتأكد من العدد الحالي.
-                // ------------------------------------------------
-
-                const statsRes =
-                  await fetch(
-                    'https://datasets-server.huggingface.co/statistics' +
-                    `?dataset=malhajar%2Fmmlu-tr` +
-                    `&config=global_facts` +
-                    `&split=test`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
-
-                if (
-                  !statsRes.ok
-                ) {
-
-                  throw new Error(
-                    `Turkish statistics HTTP ${statsRes.status}`
-                  );
-
-                }
-
-                const statsData =
-                  await statsRes.json();
-
-                const totalRows =
-                  Number(
-                    statsData.num_examples ||
-                    statsData.num_rows ||
-                    statsData.statistics?.num_examples ||
-                    0
-                  );
-
-                if (
-                  !Number.isInteger(totalRows) ||
-                  totalRows < QUIZ_BATCH_SIZE
-                ) {
-
-                  throw new Error(
-                    `Invalid Turkish row count: ${totalRows}`
-                  );
-
-                }
-
-                const maxOffset =
-                  totalRows -
-                  QUIZ_BATCH_SIZE;
-
-                const offset =
-                  Math.floor(
-                    Math.random() *
-                    (maxOffset + 1)
-                  );
-
-                // ------------------------------------------------
-                // جلب 50 سؤالًا تركيًا
-                // ------------------------------------------------
-
-                const rowsRes =
-                  await fetch(
-                    'https://datasets-server.huggingface.co/rows' +
-                    `?dataset=malhajar%2Fmmlu-tr` +
-                    `&config=global_facts` +
-                    `&split=test` +
-                    `&offset=${offset}` +
-                    `&length=${QUIZ_BATCH_SIZE}`,
-                    {
-                      signal: controller.signal
-                    }
-                  );
-
-                if (
-                  !rowsRes.ok
-                ) {
-
-                  throw new Error(
-                    `Turkish rows HTTP ${rowsRes.status}`
-                  );
-
-                }
-
-                const rowsData =
-                  await rowsRes.json();
-
-                if (
-                  !Array.isArray(
-                    rowsData.rows
-                  )
-                ) {
-
-                  throw new Error(
-                    'Turkish dataset returned invalid rows'
-                  );
-
-                }
-
-                const questions = [];
-
-                for (
-                  const item
-                  of rowsData.rows
-                ) {
-
-                  const row =
-                    item.row;
-
-                  if (!row) {
-                    continue;
-                  }
-
-                  const options =
-                    Array.isArray(
-                      row.choices
-                    )
-                      ? row.choices
-                      : [];
-
-                  const answerIndex =
-                    Number(
-                      row.answer
-                    );
-
-                  if (
-                    !row.question ||
-                    options.length !== 4 ||
-                    options.some(
-                      option =>
-                        typeof option !== 'string' ||
-                        !option.trim()
-                    ) ||
-                    !Number.isInteger(
-                      answerIndex
-                    ) ||
-                    answerIndex < 0 ||
-                    answerIndex > 3
-                  ) {
-
-                    continue;
-
-                  }
-
-                  const correctAnswer =
-                    options[answerIndex];
-
-                  questions.push({
-
-                    question:
-                      row.question,
-
-                    correctAnswer,
-
-                    incorrectAnswers:
-                      options.filter(
-                        (_, index) =>
-                          index !== answerIndex
-                      ),
-
-                    category:
-                      'General',
-
-                    difficulty
-
-                  });
-
-                }
-
-                if (
-                  questions.length === 0
-                ) {
-
-                  throw new Error(
-                    'No valid Turkish questions'
-                  );
-
-                }
-
-                quizQuestionCache.set(
-                  cacheKey,
-                  {
-                    questions,
-                    expiresAt:
-                      Date.now() +
-                      QUIZ_CACHE_DURATION
-                  }
-                );
-
-                console.log(
-                  `✅ Turkish batch cached: ${questions.length}`
-                );
-
-              } finally {
-
-                clearTimeout(
-                  timeoutId
-                );
-
-              }
-
-            }
-
-          })();
-
-        // --------------------------------------------------------
-        // حفظ عملية الجلب الحالية
-        // --------------------------------------------------------
-
-        quizFetching.set(
-          cacheKey,
-          fetchPromise
-        );
-
-        try {
-
-          await fetchPromise;
-
-        } catch (fetchErr) {
-
-          console.error(
-            `❌ Quiz batch fetch failed (${cacheKey}):`,
-            fetchErr
-          );
-
-          return c.json({
-            success: false,
-            message: 'API_UNAVAILABLE'
-          }, 503);
-
-        } finally {
-
-          quizFetching.delete(
-            cacheKey
-          );
-
-        }
-
-      }
-
-      // ----------------------------------------------------------
-      // قراءة Cache بعد اكتمال الجلب
-      // ----------------------------------------------------------
-
-      cached =
-        quizQuestionCache.get(
-          cacheKey
-        );
-
-    }
-
-    // ------------------------------------------------------------
-    // التأكد من وجود Cache
-    // ------------------------------------------------------------
-
-    if (
-      !cached ||
-      !Array.isArray(
-        cached.questions
-      ) ||
-      cached.questions.length === 0
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'API_UNAVAILABLE'
-      }, 503);
-
-    }
-
-    // ------------------------------------------------------------
-    // أخذ سؤال واحد
-    // ------------------------------------------------------------
-
-    const questionData =
-      cached.questions.shift();
-
-    // ------------------------------------------------------------
-    // تحديث Cache
-    // ------------------------------------------------------------
-
-    if (
-      cached.questions.length === 0
-    ) {
-
-      quizQuestionCache.delete(
-        cacheKey
-      );
-
-      console.log(
-        `♻️ Quiz batch exhausted: ${cacheKey}`
-      );
-
-    } else {
-
-      quizQuestionCache.set(
-        cacheKey,
-        cached
-      );
-
-    }
-
-    // ------------------------------------------------------------
-    // التحقق من السؤال
-    // ------------------------------------------------------------
-
-    if (
-      !questionData ||
-      !questionData.question ||
-      !questionData.correctAnswer ||
-      !Array.isArray(
-        questionData.incorrectAnswers
-      ) ||
-      questionData.incorrectAnswers.length !== 3
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'API_UNAVAILABLE'
-      }, 503);
-
-    }
-
-    // ------------------------------------------------------------
-    // خلط الإجابات
-    // ------------------------------------------------------------
-
-    const allAnswers = [
-      questionData.correctAnswer,
-      ...questionData.incorrectAnswers
-    ];
-
-    for (
-      let i = allAnswers.length - 1;
-      i > 0;
-      i--
-    ) {
-
-      const j =
-        Math.floor(
-          Math.random() * (i + 1)
-        );
-
-      [
-        allAnswers[i],
-        allAnswers[j]
-      ] = [
-        allAnswers[j],
-        allAnswers[i]
-      ];
-
-    }
-
-    const shuffledAnswers =
-      allAnswers;
-
-    // ------------------------------------------------------------
-    // تحديد الإجابة الصحيحة
-    // ------------------------------------------------------------
-
-    const correctIndex =
-      shuffledAnswers.indexOf(
-        questionData.correctAnswer
-      );
-
-    if (
-      correctIndex === -1
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'API_UNAVAILABLE'
-      }, 503);
-
-    }
-
-    // ------------------------------------------------------------
-    // إنشاء Question ID
-    // ------------------------------------------------------------
-
-    const questionId =
-      crypto.randomUUID();
-
-    // ------------------------------------------------------------
-    // حفظ جلسة السؤال
-    // ------------------------------------------------------------
-
-    await pool.query(
+    const quizStateResult = await pool.query(
       `
-      INSERT INTO quiz_question_sessions (
-        question_id,
-        user_id,
-        correct_index,
-        is_correct,
-        created_at,
-        answered,
-        skipped,
-        retry_used,
-        double_used
+      WITH settings AS (
+        SELECT
+          COALESCE(MAX(value) FILTER (WHERE key = 'points_per_1000'), '0.10') AS points_per_1000,
+          COALESCE(MAX(value) FILTER (WHERE key = 'min_conversion_points'), '1000') AS min_conversion_points,
+          COALESCE(MAX(value) FILTER (WHERE key = 'max_questions_per_day'), '200') AS max_questions_per_day
+        FROM quiz_settings
+      ),
+      upsert_quiz_points AS (
+        INSERT INTO quiz_points (user_id, points, total_earned, total_converted, questions_today, last_reset_date, weekly_score, last_weekly_reset)
+        SELECT u.telegram_id, 0, 0, 0, 0, CURRENT_DATE, 0, CURRENT_DATE
+        FROM users u WHERE u.telegram_id = $1
+        ON CONFLICT (user_id) DO UPDATE SET
+          questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
+          last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
+          weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
+          last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END
+        RETURNING points, questions_today, weekly_score
       )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        false,
-        NOW(),
-        false,
-        false,
-        false,
-        false
-      )
+      SELECT q.points, q.questions_today, q.weekly_score, s.points_per_1000, s.min_conversion_points, s.max_questions_per_day
+      FROM upsert_quiz_points q CROSS JOIN settings s
       `,
-      [
-        questionId,
-        userId,
-        correctIndex
-      ]
+      [userId]
     );
 
-    // ------------------------------------------------------------
-    // الأسئلة المتبقية اليوم
-    // ------------------------------------------------------------
+    if (quizStateResult.rows.length === 0) {
+      return c.json({ success: false, message: 'USER_NOT_FOUND' }, 404);
+    }
 
-    const questionsLeft =
-  Math.max(
-    0,
-    maxQuestionsPerDay -
-    qToday -
-    1
-  );
-    // ------------------------------------------------------------
-    // Response
-    // ------------------------------------------------------------
+    const quizState = quizStateResult.rows[0];
+    const qToday = Number(quizState.questions_today);
+    const points = Number(quizState.points);
+    const weeklyScore = Number(quizState.weekly_score);
+    const pointsPer1000 = Number(quizState.points_per_1000);
+    const minConversionPoints = Number(quizState.min_conversion_points);
+    const maxQuestionsPerDay = Number(quizState.max_questions_per_day);
+
+    if (!Number.isFinite(pointsPer1000) || pointsPer1000 <= 0 || !Number.isInteger(minConversionPoints) || minConversionPoints <= 0 || !Number.isInteger(maxQuestionsPerDay) || maxQuestionsPerDay <= 0) {
+      throw new Error('INVALID_QUIZ_SETTINGS');
+    }
+
+    if (qToday >= maxQuestionsPerDay) {
+      return c.json({ success: false, message: 'DAILY_LIMIT', points, weekly_score: weeklyScore, questionsLeft: 0 });
+    }
+
+    let difficulty = 'easy';
+    if (qToday > 50) difficulty = 'medium';
+    if (qToday > 100) difficulty = 'hard';
+
+    const cacheKey = `${lang}:${difficulty}`;
+    let cached = quizQuestionCache.get(cacheKey);
+    const now = Date.now();
+
+    if (cached && cached.expiresAt > now && Array.isArray(cached.questions) && cached.questions.length > 0) {
+      console.log(`✅ Quiz cache hit: ${cacheKey} (${cached.questions.length})`);
+    } else {
+      quizQuestionCache.delete(cacheKey);
+      cached = null;
+
+      if (quizFetching.has(cacheKey)) {
+        try {
+          await quizFetching.get(cacheKey);
+        } catch (waitErr) {
+          console.error(`❌ Waiting for quiz batch failed (${cacheKey}):`, waitErr);
+        }
+      } else {
+        const fetchPromise = (async () => {
+          if (lang === 'en') {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            try {
+              console.log(`🌐 Fetching ${QUIZ_BATCH_SIZE} English questions from OpenTDB`);
+              const apiRes = await fetch(`https://opentdb.com/api.php?amount=${QUIZ_BATCH_SIZE}&type=multiple&difficulty=${difficulty}&encode=url3986`, { signal: controller.signal });
+              if (!apiRes.ok) throw new Error(`OpenTDB HTTP ${apiRes.status}`);
+              
+              const apiData = await apiRes.json();
+              if (apiData.response_code !== 0) throw new Error(`OpenTDB response_code: ${apiData.response_code}`);
+              if (!Array.isArray(apiData.results) || apiData.results.length === 0) throw new Error('OpenTDB returned no questions');
+
+              const questions = [];
+              for (const q of apiData.results) {
+                try {
+                  const question = decodeURIComponent(q.question);
+                  const correctAnswer = decodeURIComponent(q.correct_answer);
+                  // ✅ تحسين: استخدام مرجع الدالة مباشرة
+                  const incorrectAnswers = q.incorrect_answers.map(decodeURIComponent);
+
+                  if (!question || !correctAnswer || !Array.isArray(incorrectAnswers) || incorrectAnswers.length !== 3) continue;
+
+                  questions.push({
+                    question,
+                    correctAnswer,
+                    incorrectAnswers,
+                    category: decodeURIComponent(q.category),
+                    difficulty: q.difficulty
+                  });
+                } catch (decodeErr) {
+                  console.error('❌ OpenTDB decode error:', decodeErr);
+                }
+              }
+              if (questions.length === 0) throw new Error('No valid OpenTDB questions');
+
+              quizQuestionCache.set(cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION });
+              console.log(`✅ English batch cached: ${questions.length}`);
+            } finally {
+              clearTimeout(timeoutId);
+            }
+          } else if (['ar', 'fr', 'es', 'pt', 'de', 'ja'].includes(lang)) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+              console.log(`🌐 Fetching ${QUIZ_BATCH_SIZE} ${lang} questions from PolyFact`);
+              const statsRes = await fetch(`https://datasets-server.huggingface.co/statistics?dataset=jvonrad%2FPolyFact&config=${encodeURIComponent(lang)}&split=train`, { signal: controller.signal });
+              if (!statsRes.ok) throw new Error(`PolyFact statistics HTTP ${statsRes.status}`);
+              
+              const statsData = await statsRes.json();
+              const totalRows = Number(statsData.num_examples || statsData.num_rows || statsData.statistics?.num_examples || 0);
+              if (!Number.isInteger(totalRows) || totalRows < QUIZ_BATCH_SIZE) throw new Error(`Invalid PolyFact row count: ${totalRows}`);
+
+              const maxOffset = totalRows - QUIZ_BATCH_SIZE;
+              const offset = (Math.random() * (maxOffset + 1)) | 0;
+
+              const rowsRes = await fetch(`https://datasets-server.huggingface.co/rows?dataset=jvonrad%2FPolyFact&config=${encodeURIComponent(lang)}&split=train&offset=${offset}&length=${QUIZ_BATCH_SIZE}`, { signal: controller.signal });
+              if (!rowsRes.ok) throw new Error(`PolyFact rows HTTP ${rowsRes.status}`);
+              
+              const rowsData = await rowsRes.json();
+              if (!Array.isArray(rowsData.rows)) throw new Error('PolyFact returned invalid rows');
+
+              const questions = [];
+              for (const item of rowsData.rows) {
+                const row = item.row;
+                if (!row) continue;
+
+                const options = [row.option_a, row.option_b, row.option_c, row.option_d];
+                const answerIndex = Number(row.answer_index);
+
+                if (!row.question || options.some(option => typeof option !== 'string' || !option.trim()) || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) continue;
+
+                questions.push({
+                  question: row.question,
+                  correctAnswer: options[answerIndex],
+                  incorrectAnswers: options.filter((_, index) => index !== answerIndex),
+                  category: row.relation || 'General',
+                  difficulty
+                });
+              }
+              if (questions.length === 0) throw new Error(`No valid PolyFact questions for ${lang}`);
+
+              quizQuestionCache.set(cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION });
+              console.log(`✅ PolyFact ${lang} batch cached: ${questions.length}`);
+            } finally {
+              clearTimeout(timeoutId);
+            }
+          } else if (lang === 'tr') {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            try {
+              console.log(`🌐 Fetching ${QUIZ_BATCH_SIZE} Turkish questions`);
+              const statsRes = await fetch(`https://datasets-server.huggingface.co/statistics?dataset=malhajar%2Fmmlu-tr&config=global_facts&split=test`, { signal: controller.signal });
+              if (!statsRes.ok) throw new Error(`Turkish statistics HTTP ${statsRes.status}`);
+              
+              const statsData = await statsRes.json();
+              const totalRows = Number(statsData.num_examples || statsData.num_rows || statsData.statistics?.num_examples || 0);
+              if (!Number.isInteger(totalRows) || totalRows < QUIZ_BATCH_SIZE) throw new Error(`Invalid Turkish row count: ${totalRows}`);
+
+              const maxOffset = totalRows - QUIZ_BATCH_SIZE;
+              const offset = (Math.random() * (maxOffset + 1)) | 0;
+
+              const rowsRes = await fetch(`https://datasets-server.huggingface.co/rows?dataset=malhajar%2Fmmlu-tr&config=global_facts&split=test&offset=${offset}&length=${QUIZ_BATCH_SIZE}`, { signal: controller.signal });
+              if (!rowsRes.ok) throw new Error(`Turkish rows HTTP ${rowsRes.status}`);
+              
+              const rowsData = await rowsRes.json();
+              if (!Array.isArray(rowsData.rows)) throw new Error('Turkish dataset returned invalid rows');
+
+              const questions = [];
+              for (const item of rowsData.rows) {
+                const row = item.row;
+                if (!row) continue;
+
+                const options = Array.isArray(row.choices) ? row.choices : [];
+                const answerIndex = Number(row.answer);
+
+                if (!row.question || options.length !== 4 || options.some(option => typeof option !== 'string' || !option.trim()) || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3) continue;
+
+                questions.push({
+                  question: row.question,
+                  correctAnswer: options[answerIndex],
+                  incorrectAnswers: options.filter((_, index) => index !== answerIndex),
+                  category: 'General',
+                  difficulty
+                });
+              }
+              if (questions.length === 0) throw new Error('No valid Turkish questions');
+
+              quizQuestionCache.set(cacheKey, { questions, expiresAt: Date.now() + QUIZ_CACHE_DURATION });
+              console.log(`✅ Turkish batch cached: ${questions.length}`);
+            } finally {
+              clearTimeout(timeoutId);
+            }
+          }
+        })();
+
+        quizFetching.set(cacheKey, fetchPromise);
+        try {
+          await fetchPromise;
+        } catch (fetchErr) {
+          console.error(`❌ Quiz batch fetch failed (${cacheKey}):`, fetchErr);
+          return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
+        } finally {
+          quizFetching.delete(cacheKey);
+        }
+      }
+      cached = quizQuestionCache.get(cacheKey);
+    }
+
+    if (!cached || !Array.isArray(cached.questions) || cached.questions.length === 0) {
+      return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
+    }
+
+    const questionData = cached.questions.shift();
+
+    if (cached.questions.length === 0) {
+      quizQuestionCache.delete(cacheKey);
+      console.log(`♻️ Quiz batch exhausted: ${cacheKey}`);
+    } else {
+      quizQuestionCache.set(cacheKey, cached);
+    }
+
+    if (!questionData || !questionData.question || !questionData.correctAnswer || !Array.isArray(questionData.incorrectAnswers) || questionData.incorrectAnswers.length !== 3) {
+      return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
+    }
+
+    const allAnswers = [questionData.correctAnswer, ...questionData.incorrectAnswers];
+    const shuffledAnswers = shuffleArray(allAnswers);
+    const correctIndex = shuffledAnswers.indexOf(questionData.correctAnswer);
+
+    if (correctIndex === -1) {
+      return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
+    }
+
+    const questionId = generateQuizId();
+
+    await pool.query(
+      `INSERT INTO quiz_question_sessions (question_id, user_id, correct_index, is_correct, created_at, answered, skipped, retry_used, double_used)
+       VALUES ($1, $2, $3, false, NOW(), false, false, false, false)`,
+      [questionId, userId, correctIndex]
+    );
+
+    const questionsLeft = Math.max(0, maxQuestionsPerDay - qToday - 1);
 
     return c.json({
-
       success: true,
-
       questionId,
-
-      question:
-        questionData.question,
-
-      answers:
-        shuffledAnswers,
-
-      category:
-        questionData.category,
-
-      difficulty:
-        questionData.difficulty,
-
-      points:
-  points,
-
-weekly_score:
-  weeklyScore,
-
+      question: questionData.question,
+      answers: shuffledAnswers,
+      category: questionData.category,
+      difficulty: questionData.difficulty,
+      points,
+      weekly_score: weeklyScore,
       questionsLeft
-
     });
 
   } catch (err) {
-
-    console.error(
-      '❌ /api/quiz/question:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-
+    console.error('❌ /api/quiz/question:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
-
 });
 
 // ================================================================
@@ -7446,229 +6459,68 @@ weekly_score:
 
 app.post('/api/quiz/answer', async (c) => {
   const client = await pool.connect();
-
   try {
-    const {
-      questionId,
-      answerIndex,
-      userId
-    } = await c.req.json();
+    const { questionId, answerIndex, userId } = await c.req.json();
 
-    // ============================================================
-    // التحقق من البيانات
-    // ============================================================
-
-    if (
-      !questionId ||
-      answerIndex === undefined ||
-      answerIndex === null ||
-      !userId
-    ) {
-      return c.json({
-        success: false,
-        message: 'Missing data'
-      }, 400);
+    if (!questionId || answerIndex === undefined || answerIndex === null || !userId) {
+      return c.json({ success: false, message: 'Missing data' }, 400);
     }
-
     if (!/^\d+$/.test(String(userId))) {
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
     const numericAnswerIndex = Number(answerIndex);
-
-    if (
-      !Number.isInteger(numericAnswerIndex) ||
-      numericAnswerIndex < 0 ||
-      numericAnswerIndex > 3
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid answer'
-      }, 400);
+    if (!Number.isInteger(numericAnswerIndex) || numericAnswerIndex < 0 || numericAnswerIndex > 3) {
+      return c.json({ success: false, message: 'Invalid answer' }, 400);
     }
 
     await client.query('BEGIN');
 
-    // ============================================================
-    // قفل جلسة السؤال
-    // ============================================================
-
-   const questionRes = await client.query(
-  `
-  SELECT
-    correct_index,
-    created_at,
-    answered,
-    skipped,
-    retry_used
-  FROM quiz_question_sessions
-  WHERE question_id = $1
-    AND user_id = $2
-  FOR UPDATE
-  `,
-  [
-    questionId,
-    userId
-  ]
-);
+    const questionRes = await client.query(
+      `SELECT correct_index, created_at, answered, skipped, retry_used FROM quiz_question_sessions WHERE question_id = $1 AND user_id = $2 FOR UPDATE`,
+      [questionId, userId]
+    );
 
     if (questionRes.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'EXPIRED'
-      }, 404);
+      return c.json({ success: false, message: 'EXPIRED' }, 404);
     }
 
     const question = questionRes.rows[0];
 
-    // ============================================================
-    // منع معالجة السؤال أكثر من مرة
-    // ============================================================
-
-    if (
-      question.answered === true ||
-      question.skipped === true
-    ) {
+    if (question.answered === true || question.skipped === true) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'ALREADY_PROCESSED'
-      }, 409);
+      return c.json({ success: false, message: 'ALREADY_PROCESSED' }, 409);
     }
 
-    // ============================================================
-    // منع الإجابة خلال أول 10 ثوانٍ
-    // ============================================================
-
-    const createdAt =
-      new Date(question.created_at).getTime();
-
-    if (
-      !Number.isFinite(createdAt) ||
-      Date.now() - createdAt < 10000
-    ) {
+    const createdAt = new Date(question.created_at).getTime();
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt < 10000) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'TOO_FAST'
-      }, 400);
+      return c.json({ success: false, message: 'TOO_FAST' }, 400);
     }
 
-    // ============================================================
-    // التحقق من الإجابة
-    // ============================================================
-
-    const correctIndex =
-      Number(question.correct_index);
-
-    const isCorrect =
-      numericAnswerIndex === correctIndex;
-
-    // ============================================================
-    // هل هذه محاولة Retry؟
-    // ============================================================
-
-    const isRetryAttempt =
-      question.retry_used === true;
-
-    // ============================================================
-    // تسجيل الإجابة
-    // ============================================================
+    const correctIndex = Number(question.correct_index);
+    const isCorrect = numericAnswerIndex === correctIndex;
+    const isRetryAttempt = question.retry_used === true;
 
     const updateResult = await client.query(
-      `
-      UPDATE quiz_question_sessions
-      SET
-        answered = true,
-        is_correct = $1
-      WHERE question_id = $2
-        AND user_id = $3
-        AND answered = false
-        AND skipped = false
-      RETURNING question_id
-      `,
-      [
-        isCorrect,
-        questionId,
-        userId
-      ]
+      `UPDATE quiz_question_sessions SET answered = true, is_correct = $1 WHERE question_id = $2 AND user_id = $3 AND answered = false AND skipped = false RETURNING question_id`,
+      [isCorrect, questionId, userId]
     );
 
     if (updateResult.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'ALREADY_PROCESSED'
-      }, 409);
+      return c.json({ success: false, message: 'ALREADY_PROCESSED' }, 409);
     }
 
-    // ============================================================
-    // تحديث إحصائيات المستخدم في عملية UPDATE واحدة
-    //
-    // الإجابة الأصلية:
-    // questions_today +1
-    //
-    // Retry:
-    // لا يزيد questions_today
-    //
-    // الإجابة الصحيحة:
-    // points +1
-    // total_earned +1
-    // weekly_score +1
-    // ============================================================
-
     const statsResult = await client.query(
-      `
-      UPDATE quiz_points
-      SET
-        questions_today =
-          questions_today +
-          CASE
-            WHEN $2 = true THEN 1
-            ELSE 0
-          END,
-
-        points =
-          points +
-          CASE
-            WHEN $1 = true THEN 1
-            ELSE 0
-          END,
-
-        total_earned =
-          total_earned +
-          CASE
-            WHEN $1 = true THEN 1
-            ELSE 0
-          END,
-
-        weekly_score =
-          weekly_score +
-          CASE
-            WHEN $1 = true THEN 1
-            ELSE 0
-          END
-
-      WHERE user_id = $3
-
-      RETURNING
-        points,
-        questions_today,
-        weekly_score
-      `,
-      [
-        isCorrect,
-        !isRetryAttempt,
-        userId
-      ]
+      `UPDATE quiz_points SET
+        questions_today = questions_today + CASE WHEN $2 = true THEN 1 ELSE 0 END,
+        points = points + CASE WHEN $1 = true THEN 1 ELSE 0 END,
+        total_earned = total_earned + CASE WHEN $1 = true THEN 1 ELSE 0 END,
+        weekly_score = weekly_score + CASE WHEN $1 = true THEN 1 ELSE 0 END
+       WHERE user_id = $3 RETURNING points, questions_today, weekly_score`,
+      [isCorrect, !isRetryAttempt, userId]
     );
 
     if (statsResult.rows.length === 0) {
@@ -7676,55 +6528,23 @@ app.post('/api/quiz/answer', async (c) => {
     }
 
     const stats = statsResult.rows[0];
-
-    const pointsEarned =
-      isCorrect ? 1 : 0;
-
     await client.query('COMMIT');
-
-    // ============================================================
-    // الرد للصفحة
-    // ============================================================
 
     return c.json({
       success: true,
-
-      correct:
-        isCorrect,
-
-      correctIndex:
-        correctIndex,
-
-      pointsEarned,
-
-      points:
-        Number(stats.points || 0),
-
-      questions_today:
-        Number(stats.questions_today || 0),
-
-      weekly_score:
-        Number(stats.weekly_score || 0),
-
+      correct: isCorrect,
+      correctIndex,
+      pointsEarned: isCorrect ? 1 : 0,
+      points: Number(stats.points || 0),
+      questions_today: Number(stats.questions_today || 0),
+      weekly_score: Number(stats.weekly_score || 0),
       isRetryAttempt
     });
 
   } catch (err) {
-
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error(
-      '❌ /api/quiz/answer:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('❌ /api/quiz/answer:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   } finally {
     client.release();
   }
@@ -7736,252 +6556,73 @@ app.post('/api/quiz/answer', async (c) => {
 
 app.post('/api/quiz/reward/create', async (c) => {
   const client = await pool.connect();
-
   try {
-    const {
-      userId,
-      questionId,
-      action
-    } = await c.req.json();
+    const { userId, questionId, action } = await c.req.json();
 
-    if (
-      !userId ||
-      !questionId ||
-      !action
-    ) {
-      return c.json({
-        success: false,
-        message: 'Missing data'
-      }, 400);
+    if (!userId || !questionId || !action) {
+      return c.json({ success: false, message: 'Missing data' }, 400);
     }
-
     if (!/^\d+$/.test(userId.toString())) {
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
-
-    if (
-      !['double', 'retry', 'skip']
-        .includes(action)
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid action'
-      }, 400);
+    if (!['double', 'retry', 'skip'].includes(action)) {
+      return c.json({ success: false, message: 'Invalid action' }, 400);
     }
 
     await client.query('BEGIN');
 
-    // ============================================================
-    // قفل السؤال لمنع إنشاء أكثر من Reward Session في نفس الوقت
-    // ============================================================
-
     const questionRes = await client.query(
-      `
-      SELECT
-        question_id,
-        user_id,
-        answered,
-        is_correct,
-        skipped,
-        retry_used,
-        double_used
-      FROM quiz_question_sessions
-      WHERE question_id = $1
-        AND user_id = $2
-      FOR UPDATE
-      `,
-      [
-        questionId,
-        userId
-      ]
+      `SELECT question_id, user_id, answered, is_correct, skipped, retry_used, double_used FROM quiz_question_sessions WHERE question_id = $1 AND user_id = $2 FOR UPDATE`,
+      [questionId, userId]
     );
 
     if (questionRes.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'QUESTION_NOT_FOUND'
-      }, 404);
+      return c.json({ success: false, message: 'QUESTION_NOT_FOUND' }, 404);
     }
 
-    const question =
-      questionRes.rows[0];
-
-    // ============================================================
-    // DOUBLE
-    // ============================================================
+    const question = questionRes.rows[0];
 
     if (action === 'double') {
-
-      if (!question.answered) {
+      if (!question.answered || !question.is_correct || question.double_used) {
         await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_NOT_ANSWERED'
-        }, 400);
+        return c.json({ success: false, message: question.answered ? (question.is_correct ? 'DOUBLE_ALREADY_USED' : 'DOUBLE_REQUIRES_CORRECT_ANSWER') : 'QUESTION_NOT_ANSWERED' }, question.double_used ? 409 : 400);
       }
-
-      if (!question.is_correct) {
+    } else if (action === 'retry') {
+      if (!question.answered || question.retry_used) {
         await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'DOUBLE_REQUIRES_CORRECT_ANSWER'
-        }, 400);
+        return c.json({ success: false, message: question.answered ? 'RETRY_ALREADY_USED' : 'QUESTION_NOT_ANSWERED' }, question.retry_used ? 409 : 400);
       }
-
-      if (question.double_used) {
+    } else if (action === 'skip') {
+      if (question.answered || question.skipped) {
         await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'DOUBLE_ALREADY_USED'
-        }, 409);
+        return c.json({ success: false, message: 'QUESTION_ALREADY_PROCESSED' }, 409);
       }
     }
 
-    // ============================================================
-    // RETRY
-    // ============================================================
-
-    if (action === 'retry') {
-
-      if (!question.answered) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_NOT_ANSWERED'
-        }, 400);
-      }
-
-      if (question.retry_used) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'RETRY_ALREADY_USED'
-        }, 409);
-      }
-    }
-
-    // ============================================================
-    // SKIP
-    // ============================================================
-
-    if (action === 'skip') {
-
-      if (
-        question.answered ||
-        question.skipped
-      ) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_ALREADY_PROCESSED'
-        }, 409);
-      }
-    }
-
-    // ============================================================
-    // البحث عن Reward Session معلقة
-    // ============================================================
-
-    const pendingReward =
-      await client.query(
-        `
-        SELECT reward_id
-        FROM quiz_reward_sessions
-        WHERE user_id = $1
-          AND question_id = $2
-          AND action = $3
-          AND status = 'pending'
-          AND expires_at > NOW()
-        LIMIT 1
-        `,
-        [
-          userId,
-          questionId,
-          action
-        ]
-      );
+    const pendingReward = await client.query(
+      `SELECT reward_id FROM quiz_reward_sessions WHERE user_id = $1 AND question_id = $2 AND action = $3 AND status = 'pending' AND expires_at > NOW() LIMIT 1`,
+      [userId, questionId, action]
+    );
 
     if (pendingReward.rows.length > 0) {
-
       await client.query('COMMIT');
-
-      return c.json({
-        success: true,
-        rewardId:
-          pendingReward.rows[0].reward_id
-      });
+      return c.json({ success: true, rewardId: pendingReward.rows[0].reward_id });
     }
 
-    // ============================================================
-    // إنشاء Reward Session
-    // ============================================================
-
-    const rewardId =
-      generateQuizId();
-
+    const rewardId = generateQuizId();
     await client.query(
-      `
-      INSERT INTO quiz_reward_sessions (
-        reward_id,
-        user_id,
-        question_id,
-        action,
-        status,
-        created_at,
-        expires_at
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        'pending',
-        NOW(),
-        NOW() + INTERVAL '10 minutes'
-      )
-      `,
-      [
-        rewardId,
-        userId,
-        questionId,
-        action
-      ]
+      `INSERT INTO quiz_reward_sessions (reward_id, user_id, question_id, action, status, created_at, expires_at) VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW() + INTERVAL '10 minutes')`,
+      [rewardId, userId, questionId, action]
     );
 
     await client.query('COMMIT');
-
-    return c.json({
-      success: true,
-      rewardId
-    });
+    return c.json({ success: true, rewardId });
 
   } catch (err) {
-
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error(
-      '❌ /api/quiz/reward/create:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('❌ /api/quiz/reward/create:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   } finally {
     client.release();
   }
@@ -7993,447 +6634,124 @@ app.post('/api/quiz/reward/create', async (c) => {
 
 app.post('/api/quiz/reward/complete', async (c) => {
   const client = await pool.connect();
-
   try {
-    const {
-      rewardId,
-      userId
-    } = await c.req.json();
+    const { rewardId, userId } = await c.req.json();
 
-    if (
-      !rewardId ||
-      !userId
-    ) {
-      return c.json({
-        success: false,
-        message: 'Missing data'
-      }, 400);
+    if (!rewardId || !userId) {
+      return c.json({ success: false, message: 'Missing data' }, 400);
     }
-
     if (!/^\d+$/.test(userId.toString())) {
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
     await client.query('BEGIN');
 
-    // ============================================================
-    // قفل Reward Session
-    // ============================================================
-
     const rewardRes = await client.query(
-      `
-      SELECT
-        reward_id,
-        user_id,
-        question_id,
-        action,
-        status,
-        expires_at
-      FROM quiz_reward_sessions
-      WHERE reward_id = $1
-        AND user_id = $2
-      FOR UPDATE
-      `,
-      [
-        rewardId,
-        userId
-      ]
+      `SELECT reward_id, user_id, question_id, action, status, expires_at FROM quiz_reward_sessions WHERE reward_id = $1 AND user_id = $2 FOR UPDATE`,
+      [rewardId, userId]
     );
 
     if (rewardRes.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'REWARD_NOT_FOUND'
-      }, 404);
+      return c.json({ success: false, message: 'REWARD_NOT_FOUND' }, 404);
     }
 
-    const reward =
-      rewardRes.rows[0];
-
-    // ============================================================
-    // منع الاستخدام الثاني
-    // ============================================================
+    const reward = rewardRes.rows[0];
 
     if (reward.status === 'completed') {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'REWARD_ALREADY_COMPLETED'
-      }, 409);
+      return c.json({ success: false, message: 'REWARD_ALREADY_COMPLETED' }, 409);
     }
-
     if (reward.status !== 'pending') {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'INVALID_REWARD_STATUS'
-      }, 400);
+      return c.json({ success: false, message: 'INVALID_REWARD_STATUS' }, 400);
     }
-
-    // ============================================================
-    // انتهاء Reward Session
-    // ============================================================
-
-    if (
-      new Date(reward.expires_at).getTime()
-      <= Date.now()
-    ) {
-
-      await client.query(
-        `
-        UPDATE quiz_reward_sessions
-        SET status = 'expired'
-        WHERE reward_id = $1
-        `,
-        [rewardId]
-      );
-
+    if (new Date(reward.expires_at).getTime() <= Date.now()) {
+      await client.query(`UPDATE quiz_reward_sessions SET status = 'expired' WHERE reward_id = $1`, [rewardId]);
       await client.query('COMMIT');
-
-      return c.json({
-        success: false,
-        message: 'REWARD_EXPIRED'
-      }, 400);
+      return c.json({ success: false, message: 'REWARD_EXPIRED' }, 400);
     }
 
-    // ============================================================
-    // قفل جلسة السؤال
-    // ============================================================
-
-    const questionRes =
-      await client.query(
-        `
-        SELECT
-          question_id,
-          user_id,
-          answered,
-          is_correct,
-          skipped,
-          retry_used,
-          double_used
-        FROM quiz_question_sessions
-        WHERE question_id = $1
-          AND user_id = $2
-        FOR UPDATE
-        `,
-        [
-          reward.question_id,
-          userId
-        ]
-      );
+    const questionRes = await client.query(
+      `SELECT question_id, user_id, answered, is_correct, skipped, retry_used, double_used FROM quiz_question_sessions WHERE question_id = $1 AND user_id = $2 FOR UPDATE`,
+      [reward.question_id, userId]
+    );
 
     if (questionRes.rows.length === 0) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'QUESTION_NOT_FOUND'
-      }, 404);
+      return c.json({ success: false, message: 'QUESTION_NOT_FOUND' }, 404);
     }
 
-    const question =
-      questionRes.rows[0];
-
+    const question = questionRes.rows[0];
     let pointsEarned = 0;
     let updatedPoints = null;
-    // ============================================================
-    // DOUBLE
-    //
-    // السؤال الصحيح حصل بالفعل على +1 في /answer
-    // لذلك الإعلان يعطي +1 إضافية
-    // الإجمالي = +2
-    // ============================================================
 
     if (reward.action === 'double') {
-
-      if (!question.answered) {
+      if (!question.answered || !question.is_correct || question.double_used) {
         await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_NOT_ANSWERED'
-        }, 400);
+        return c.json({ success: false, message: question.answered ? (question.is_correct ? 'DOUBLE_ALREADY_USED' : 'DOUBLE_REQUIRES_CORRECT_ANSWER') : 'QUESTION_NOT_ANSWERED' }, question.double_used ? 409 : 400);
       }
 
-      if (!question.is_correct) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'DOUBLE_REQUIRES_CORRECT_ANSWER'
-        }, 400);
-      }
-
-      if (question.double_used) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'DOUBLE_ALREADY_USED'
-        }, 409);
-      }
-
-      const doublePointsResult =
-  await client.query(
-    `
-    UPDATE quiz_points
-    SET
-      points = points + 1,
-      total_earned = total_earned + 1,
-      weekly_score = weekly_score + 1
-    WHERE user_id = $1
-    RETURNING
-      points,
-      total_earned,
-      total_converted,
-      questions_today,
-      weekly_score
-    `,
-    [userId]
-  );
-
-if (doublePointsResult.rows.length === 0) {
-  throw new Error(
-    'QUIZ_POINTS_NOT_FOUND'
-  );
-}
-
-updatedPoints =
-  doublePointsResult.rows[0];
-
-      await client.query(
-        `
-        UPDATE quiz_question_sessions
-        SET double_used = true
-        WHERE question_id = $1
-          AND user_id = $2
-        `,
-        [
-          reward.question_id,
-          userId
-        ]
+      const doublePointsResult = await client.query(
+        `UPDATE quiz_points SET points = points + 1, total_earned = total_earned + 1, weekly_score = weekly_score + 1 WHERE user_id = $1 RETURNING points, total_earned, total_converted, questions_today, weekly_score`,
+        [userId]
       );
+      if (doublePointsResult.rows.length === 0) throw new Error('QUIZ_POINTS_NOT_FOUND');
+      updatedPoints = doublePointsResult.rows[0];
 
+      await client.query(`UPDATE quiz_question_sessions SET double_used = true WHERE question_id = $1 AND user_id = $2`, [reward.question_id, userId]);
       pointsEarned = 1;
-    }
 
-    // ============================================================
-    // RETRY
-    // ============================================================
-
-    else if (reward.action === 'retry') {
-
-      if (!question.answered) {
+    } else if (reward.action === 'retry') {
+      if (!question.answered || question.retry_used) {
         await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_NOT_ANSWERED'
-        }, 400);
+        return c.json({ success: false, message: question.answered ? 'RETRY_ALREADY_USED' : 'QUESTION_NOT_ANSWERED' }, question.retry_used ? 409 : 400);
       }
 
-      if (question.retry_used) {
-        await client.query('ROLLBACK');
+      await client.query(`UPDATE quiz_question_sessions SET answered = false, is_correct = false, retry_used = true WHERE question_id = $1 AND user_id = $2`, [reward.question_id, userId]);
+      pointsEarned = 0;
 
-        return c.json({
-          success: false,
-          message: 'RETRY_ALREADY_USED'
-        }, 409);
+    } else if (reward.action === 'skip') {
+      if (question.answered || question.skipped) {
+        await client.query('ROLLBACK');
+        return c.json({ success: false, message: 'QUESTION_ALREADY_PROCESSED' }, 409);
       }
 
-      await client.query(
-        `
-        UPDATE quiz_question_sessions
-        SET
-          answered = false,
-          is_correct = false,
-          retry_used = true
-        WHERE question_id = $1
-          AND user_id = $2
-        `,
-        [
-          reward.question_id,
-          userId
-        ]
+      await client.query(`UPDATE quiz_question_sessions SET skipped = true WHERE question_id = $1 AND user_id = $2`, [reward.question_id, userId]);
+
+      const skipCountResult = await client.query(
+        `UPDATE quiz_points SET questions_today = questions_today + 1 WHERE user_id = $1 RETURNING points, total_earned, total_converted, questions_today, weekly_score`,
+        [userId]
       );
-
+      if (skipCountResult.rows.length === 0) throw new Error('QUIZ_POINTS_NOT_FOUND');
+      updatedPoints = skipCountResult.rows[0];
       pointsEarned = 0;
     }
 
-    // ============================================================
-    // SKIP
-    //
-    // Skip = 0 نقطة
-    // لكنه يستهلك السؤال ويزيد questions_today مرة واحدة
-    // ============================================================
+    await client.query(`UPDATE quiz_reward_sessions SET status = 'completed', completed_at = NOW() WHERE reward_id = $1 AND user_id = $2 AND status = 'pending' RETURNING reward_id`, [rewardId, userId]);
 
-    else if (reward.action === 'skip') {
-
-      if (
-        question.answered ||
-        question.skipped
-      ) {
-        await client.query('ROLLBACK');
-
-        return c.json({
-          success: false,
-          message: 'QUESTION_ALREADY_PROCESSED'
-        }, 409);
-      }
-
-      await client.query(
-        `
-        UPDATE quiz_question_sessions
-        SET
-          skipped = true
-        WHERE question_id = $1
-          AND user_id = $2
-        `,
-        [
-          reward.question_id,
-          userId
-        ]
-      );
-
-      const skipCountResult =
-  await client.query(
-    `
-    UPDATE quiz_points
-    SET
-      questions_today =
-        questions_today + 1
-    WHERE user_id = $1
-    RETURNING
-      points,
-      total_earned,
-      total_converted,
-      questions_today,
-      weekly_score
-    `,
-    [userId]
-  );
-
-if (skipCountResult.rows.length === 0) {
-  throw new Error(
-    'QUIZ_POINTS_NOT_FOUND'
-  );
-}
-
-updatedPoints =
-  skipCountResult.rows[0];
-
-      pointsEarned = 0;
+    if (!updatedPoints) {
+      const pointsRes = await client.query(`SELECT points, total_earned, total_converted, questions_today, weekly_score FROM quiz_points WHERE user_id = $1`, [userId]);
+      if (pointsRes.rows.length === 0) throw new Error('QUIZ_POINTS_NOT_FOUND');
+      updatedPoints = pointsRes.rows[0];
     }
-
-    // ============================================================
-    // إكمال Reward Session
-    // ============================================================
-
-    const completeReward =
-      await client.query(
-        `
-        UPDATE quiz_reward_sessions
-        SET
-          status = 'completed',
-          completed_at = NOW()
-        WHERE reward_id = $1
-          AND user_id = $2
-          AND status = 'pending'
-        RETURNING reward_id
-        `,
-        [
-          rewardId,
-          userId
-        ]
-      );
-
-    if (completeReward.rows.length === 0) {
-      throw new Error(
-        'REWARD_COMPLETION_FAILED'
-      );
-    }
-
-    // ============================================================
-    // النقاط الحالية
-    // ============================================================
-
-   if (!updatedPoints) {
-
-  const pointsRes =
-    await client.query(
-      `
-      SELECT
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        weekly_score
-      FROM quiz_points
-      WHERE user_id = $1
-      `,
-      [userId]
-    );
-
-  if (pointsRes.rows.length === 0) {
-    throw new Error(
-      'QUIZ_POINTS_NOT_FOUND'
-    );
-  }
-
-  updatedPoints =
-    pointsRes.rows[0];
-}
-
-const points =
-  updatedPoints;
 
     await client.query('COMMIT');
 
     return c.json({
       success: true,
-
-      action:
-        reward.action,
-
-      earned:
-        pointsEarned,
-
-      total_points:
-        Number(points.points || 0),
-
-      total_earned:
-        Number(points.total_earned || 0),
-
-      questions_today:
-        Number(points.questions_today || 0),
-
-      weekly_score:
-        Number(points.weekly_score || 0)
+      action: reward.action,
+      earned: pointsEarned,
+      total_points: Number(updatedPoints.points || 0),
+      total_earned: Number(updatedPoints.total_earned || 0),
+      questions_today: Number(updatedPoints.questions_today || 0),
+      weekly_score: Number(updatedPoints.weekly_score || 0)
     });
 
   } catch (err) {
-
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error(
-      '❌ /api/quiz/reward/complete:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('❌ /api/quiz/reward/complete:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   } finally {
     client.release();
   }
@@ -8444,177 +6762,45 @@ const points =
 // ================================================================
 
 app.get('/api/quiz/points', async (c) => {
-
   try {
-
-    const userId =
-      c.req.query('user_id');
-
-    // ============================================================
-    // التحقق من user_id
-    // ============================================================
-
-    if (
-      !userId ||
-      !/^\d+$/.test(String(userId))
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+    const userId = c.req.query('user_id');
+    if (!userId || !/^\d+$/.test(String(userId))) {
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-    // ============================================================
-    // إنشاء سجل النقاط إذا لم يكن موجودًا
-    //
-    // وتصفير:
-    // - الأسئلة اليومية عند يوم جديد
-    // - الترتيب الأسبوعي بعد 7 أيام
-    // ============================================================
-
-        const userResult = await pool.query(
-      `
-      INSERT INTO quiz_points (
-        user_id,
-        points,
-        questions_today,
-        last_reset_date,
-        weekly_score,
-        last_weekly_reset
-      )
-      VALUES (
-        $1,
-        0,
-        0,
-        CURRENT_DATE,
-        0,
-        CURRENT_DATE
-      )
-
-      ON CONFLICT (user_id)
-      DO UPDATE SET
-
-        questions_today =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN 0
-            ELSE quiz_points.questions_today
-          END,
-
-        last_reset_date =
-          CASE
-            WHEN quiz_points.last_reset_date < CURRENT_DATE
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_reset_date
-          END,
-
-        weekly_score =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 CURRENT_DATE - INTERVAL '7 days'
-            THEN 0
-            ELSE quiz_points.weekly_score
-          END,
-
-        last_weekly_reset =
-          CASE
-            WHEN quiz_points.last_weekly_reset <
-                 CURRENT_DATE - INTERVAL '7 days'
-            THEN CURRENT_DATE
-            ELSE quiz_points.last_weekly_reset
-          END
-
-      RETURNING
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        weekly_score
-      `,
+    const userResult = await pool.query(
+      `INSERT INTO quiz_points (user_id, points, questions_today, last_reset_date, weekly_score, last_weekly_reset)
+       VALUES ($1, 0, 0, CURRENT_DATE, 0, CURRENT_DATE)
+       ON CONFLICT (user_id) DO UPDATE SET
+         questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
+         last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
+         weekly_score = CASE WHEN quiz_points.last_weekly_reset < CURRENT_DATE - INTERVAL '7 days' THEN 0 ELSE quiz_points.weekly_score END,
+         last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < CURRENT_DATE - INTERVAL '7 days' THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END
+       RETURNING points, total_earned, total_converted, questions_today, weekly_score`,
       [userId]
     );
 
-    const data =
-      userResult.rows[0] || {
-        points: 0,
-        total_earned: 0,
-        total_converted: 0,
-        questions_today: 0,
-        weekly_score: 0
-      };
-    // ============================================================
-    // إعدادات Quiz
-    // ============================================================
+    const data = userResult.rows[0] || { points: 0, total_earned: 0, total_converted: 0, questions_today: 0, weekly_score: 0 };
+    const settings = await getQuizSettings();
 
-    const settings =
-      await getQuizSettings();
-
-    
-    // ============================================================
-    // Weekly Leaderboard
-    // ============================================================
-
-    const leaderboard =
-  await pool.query(
-    `
-    SELECT
-      u.username,
-      qp.weekly_score
-
-    FROM quiz_points qp
-
-    JOIN users u
-      ON qp.user_id = u.telegram_id
-
-    WHERE qp.weekly_score > 0
-
-    ORDER BY
-      qp.weekly_score DESC
-
-    LIMIT 5
-    `
-  );
-    // ============================================================
-    // الرد
-    // ============================================================
-
-    return c.json({
-
-      success: true,
-
-      points:
-        Number(data.points || 0),
-
-      total_earned:
-        Number(data.total_earned || 0),
-
-      total_converted:
-        Number(data.total_converted || 0),
-
-      questions_today:
-        Number(data.questions_today || 0),
-
-      weekly_score:
-        Number(data.weekly_score || 0),
-
-      settings,
-
-      leaderboard:
-        leaderboard.rows
-
-    });
-
-  } catch (err) {
-
-    console.error(
-      '❌ /api/quiz/points:',
-      err
+    const leaderboard = await pool.query(
+      `SELECT u.username, qp.weekly_score FROM quiz_points qp JOIN users u ON qp.user_id = u.telegram_id WHERE qp.weekly_score > 0 ORDER BY qp.weekly_score DESC LIMIT 5`
     );
 
     return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
+      success: true,
+      points: Number(data.points || 0),
+      total_earned: Number(data.total_earned || 0),
+      total_converted: Number(data.total_converted || 0),
+      questions_today: Number(data.questions_today || 0),
+      weekly_score: Number(data.weekly_score || 0),
+      settings,
+      leaderboard: leaderboard.rows
+    });
+
+  } catch (err) {
+    console.error('❌ /api/quiz/points:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
 });
 
@@ -8623,438 +6809,107 @@ app.get('/api/quiz/points', async (c) => {
 // ================================================================
 
 app.post('/api/quiz/convert', async (c) => {
-
   const client = await pool.connect();
-
   try {
+    const { userId, pointsToConvert } = await c.req.json();
 
-    const {
-      userId,
-      pointsToConvert
-    } = await c.req.json();
-
-
-    if (
-      !userId ||
-      !/^\d+$/.test(userId.toString())
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'Invalid user_id'
-      }, 400);
+    if (!userId || !/^\d+$/.test(userId.toString())) {
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-
-    const requestedPoints =
-      Number(pointsToConvert);
-
-
-    if (
-      !Number.isInteger(requestedPoints) ||
-      requestedPoints <= 0
-    ) {
-
-      return c.json({
-        success: false,
-        message: 'Invalid points'
-      }, 400);
+    const requestedPoints = Number(pointsToConvert);
+    if (!Number.isInteger(requestedPoints) || requestedPoints <= 0) {
+      return c.json({ success: false, message: 'Invalid points' }, 400);
     }
 
-
-    const settings =
-      await getQuizSettings();
-
-
-    if (
-      requestedPoints <
-      settings.min_conversion_points
-    ) {
-
-      return c.json({
-
-        success: false,
-
-        message:
-          `Minimum ${settings.min_conversion_points} points required`
-      });
+    const settings = await getQuizSettings();
+    if (requestedPoints < settings.min_conversion_points) {
+      return c.json({ success: false, message: `Minimum ${settings.min_conversion_points} points required` });
     }
-
 
     await client.query('BEGIN');
 
-
-    // ============================================================
-    // قفل نقاط المستخدم
-    // ============================================================
-
-    const pointsRes =
-      await client.query(
-        `
-        SELECT points
-        FROM quiz_points
-        WHERE user_id = $1
-        FOR UPDATE
-        `,
-        [userId]
-      );
-
-
-    if (
-      pointsRes.rows.length === 0 ||
-      Number(pointsRes.rows[0].points) <
-      requestedPoints
-    ) {
-
+    const pointsRes = await client.query(`SELECT points FROM quiz_points WHERE user_id = $1 FOR UPDATE`, [userId]);
+    if (pointsRes.rows.length === 0 || Number(pointsRes.rows[0].points) < requestedPoints) {
       await client.query('ROLLBACK');
-
-      return c.json({
-        success: false,
-        message: 'Insufficient points'
-      });
+      return c.json({ success: false, message: 'Insufficient points' });
     }
 
+    const usdAmount = (requestedPoints / 1000) * settings.points_per_1000;
 
-    const usdAmount =
-      (
-        requestedPoints / 1000
-      ) * settings.points_per_1000;
+    await client.query(`UPDATE quiz_points SET points = points - $1, total_converted = total_converted + $1 WHERE user_id = $2`, [requestedPoints, userId]);
 
+    const balanceRes = await client.query(`UPDATE users SET balance = COALESCE(balance, 0) + $1 WHERE telegram_id = $2 RETURNING balance`, [usdAmount, userId]);
+    if (balanceRes.rows.length === 0) throw new Error('User not found while converting quiz points');
 
-    // ============================================================
-    // خصم النقاط بشكل ذري
-    // ============================================================
+    await client.query(`INSERT INTO quiz_conversions (user_id, points_converted, usd_amount) VALUES ($1, $2, $3)`, [userId, requestedPoints, usdAmount]);
+    await client.query(`INSERT INTO earnings (user_id, source, amount, description, created_at) VALUES ($1, 'quiz_conversion', $2, $3, NOW())`, [userId, usdAmount, `Quiz points conversion: ${requestedPoints} points`]);
 
-    await client.query(
-      `
-      UPDATE quiz_points
-      SET
-        points =
-          points - $1,
-
-        total_converted =
-          total_converted + $1
-
-      WHERE user_id = $2
-      `,
-      [
-        requestedPoints,
-        userId
-      ]
-    );
-
-
-    // ============================================================
-    // إضافة الرصيد
-    // ============================================================
-
-    const balanceRes =
-      await client.query(
-        `
-        UPDATE users
-        SET balance =
-          COALESCE(balance, 0) + $1
-
-        WHERE telegram_id = $2
-
-        RETURNING balance
-        `,
-        [
-          usdAmount,
-          userId
-        ]
-      );
-
-
-    if (balanceRes.rows.length === 0) {
-
-      throw new Error(
-        'User not found while converting quiz points'
-      );
-    }
-
-
-    // ============================================================
-    // تسجيل التحويل
-    // ============================================================
-
-    await client.query(
-      `
-      INSERT INTO quiz_conversions (
-        user_id,
-        points_converted,
-        usd_amount
-      )
-      VALUES (
-        $1,
-        $2,
-        $3
-      )
-      `,
-      [
-        userId,
-        requestedPoints,
-        usdAmount
-      ]
-    );
-
-
-    // ============================================================
-    // تسجيل الأرباح
-    // ============================================================
-
-    await client.query(
-      `
-      INSERT INTO earnings (
-        user_id,
-        source,
-        amount,
-        description,
-        created_at
-      )
-      VALUES (
-        $1,
-        'quiz_conversion',
-        $2,
-        $3,
-        NOW()
-      )
-      `,
-      [
-        userId,
-        usdAmount,
-        `Quiz points conversion: ${requestedPoints} points`
-      ]
-    );
-
-
-    // ============================================================
-    // النقاط المتبقية
-    // ============================================================
-
-    const remainingRes =
-      await client.query(
-        `
-        SELECT points
-        FROM quiz_points
-        WHERE user_id = $1
-        `,
-        [userId]
-      );
-
+    const remainingRes = await client.query(`SELECT points FROM quiz_points WHERE user_id = $1`, [userId]);
 
     await client.query('COMMIT');
 
-
     return c.json({
-
       success: true,
-
-      usd_added:
-        Number(usdAmount).toFixed(6),
-
-      points_converted:
-        requestedPoints,
-
-      remaining_points:
-        Number(
-          remainingRes.rows[0]?.points || 0
-        )
+      usd_added: Number(usdAmount).toFixed(6),
+      points_converted: requestedPoints,
+      remaining_points: Number(remainingRes.rows[0]?.points || 0)
     });
 
-
   } catch (err) {
-
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {}
-
-    console.error(
-      '❌ /api/quiz/convert:',
-      err
-    );
-
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('❌ /api/quiz/convert:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   } finally {
-
     client.release();
   }
 });
-
 
 // ================================================================
 // 7️⃣ QUIZ SETTINGS - ADMIN
 // ================================================================
 
-app.get(
-  '/api/quiz/settings',
-  verifyAdmin,
-  async (c) => {
-
-    try {
-
-      const settings =
-        await getQuizSettings();
-
-      return c.json({
-        success: true,
-        data: settings
-      });
-
-    } catch (err) {
-
-      console.error(
-        '❌ /api/quiz/settings GET:',
-        err
-      );
-
-      return c.json({
-        success: false,
-        message: 'Server error'
-      }, 500);
-    }
+app.get('/api/quiz/settings', verifyAdmin, async (c) => {
+  try {
+    // ✅ تحسين: إعادة تعيين الكاش عند طلب الأدمن لضمان حصوله على أحدث البيانات
+    cachedSettings = null;
+    const settings = await getQuizSettings();
+    return c.json({ success: true, data: settings });
+  } catch (err) {
+    console.error('❌ /api/quiz/settings GET:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
   }
-);
+});
 
+app.post('/api/quiz/settings', verifyAdmin, async (c) => {
+  try {
+    const { points_per_1000, min_conversion_points, max_questions_per_day } = await c.req.json();
 
-app.post(
-  '/api/quiz/settings',
-  verifyAdmin,
-  async (c) => {
-
-    try {
-
-      const {
-        points_per_1000,
-        min_conversion_points,
-        max_questions_per_day
-      } = await c.req.json();
-
-
-      if (
-        points_per_1000 !== undefined
-      ) {
-
-        const value =
-          Number(points_per_1000);
-
-        if (
-          !Number.isFinite(value) ||
-          value <= 0
-        ) {
-
-          return c.json({
-            success: false,
-            message: 'Invalid points_per_1000'
-          }, 400);
-        }
-
-
-        await pool.query(
-          `
-          UPDATE quiz_settings
-          SET
-            value = $1,
-            updated_at = NOW()
-
-          WHERE key = 'points_per_1000'
-          `,
-          [value.toString()]
-        );
-      }
-
-
-      if (
-        min_conversion_points !== undefined
-      ) {
-
-        const value =
-          Number(min_conversion_points);
-
-        if (
-          !Number.isInteger(value) ||
-          value <= 0
-        ) {
-
-          return c.json({
-            success: false,
-            message: 'Invalid min_conversion_points'
-          }, 400);
-        }
-
-
-        await pool.query(
-          `
-          UPDATE quiz_settings
-          SET
-            value = $1,
-            updated_at = NOW()
-
-          WHERE key = 'min_conversion_points'
-          `,
-          [value.toString()]
-        );
-      }
-
-
-      if (
-        max_questions_per_day !== undefined
-      ) {
-
-        const value =
-          Number(max_questions_per_day);
-
-        if (
-          !Number.isInteger(value) ||
-          value <= 0
-        ) {
-
-          return c.json({
-            success: false,
-            message: 'Invalid max_questions_per_day'
-          }, 400);
-        }
-
-
-        await pool.query(
-          `
-          UPDATE quiz_settings
-          SET
-            value = $1,
-            updated_at = NOW()
-
-          WHERE key = 'max_questions_per_day'
-          `,
-          [value.toString()]
-        );
-      }
-
-
-      return c.json({
-        success: true,
-        message: 'Settings updated'
-      });
-
-
-    } catch (err) {
-
-      console.error(
-        '❌ /api/quiz/settings POST:',
-        err
-      );
-
-      return c.json({
-        success: false,
-        message: 'Server error'
-      }, 500);
+    if (points_per_1000 !== undefined) {
+      const value = Number(points_per_1000);
+      if (!Number.isFinite(value) || value <= 0) return c.json({ success: false, message: 'Invalid points_per_1000' }, 400);
+      await pool.query(`UPDATE quiz_settings SET value = $1, updated_at = NOW() WHERE key = 'points_per_1000'`, [value.toString()]);
     }
-  }
-);
+    if (min_conversion_points !== undefined) {
+      const value = Number(min_conversion_points);
+      if (!Number.isInteger(value) || value <= 0) return c.json({ success: false, message: 'Invalid min_conversion_points' }, 400);
+      await pool.query(`UPDATE quiz_settings SET value = $1, updated_at = NOW() WHERE key = 'min_conversion_points'`, [value.toString()]);
+    }
+    if (max_questions_per_day !== undefined) {
+      const value = Number(max_questions_per_day);
+      if (!Number.isInteger(value) || value <= 0) return c.json({ success: false, message: 'Invalid max_questions_per_day' }, 400);
+      await pool.query(`UPDATE quiz_settings SET value = $1, updated_at = NOW() WHERE key = 'max_questions_per_day'`, [value.toString()]);
+    }
 
+    // ✅ تحسين: إعادة تعيين الكاش بعد تحديث الإعدادات
+    cachedSettings = null;
+
+    return c.json({ success: true, message: 'Settings updated' });
+  } catch (err) {
+    console.error('❌ /api/quiz/settings POST:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
 
 // ======================= END QUIZ SYSTEM =======================
 
