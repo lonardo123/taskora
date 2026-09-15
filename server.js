@@ -7496,27 +7496,24 @@ app.post('/api/quiz/answer', async (c) => {
     // قفل جلسة السؤال
     // ============================================================
 
-    const questionRes = await client.query(
-      `
-      SELECT
-        question_id,
-        user_id,
-        correct_index,
-        created_at,
-        answered,
-        skipped,
-        retry_used,
-        double_used
-      FROM quiz_question_sessions
-      WHERE question_id = $1
-        AND user_id = $2
-      FOR UPDATE
-      `,
-      [
-        questionId,
-        userId
-      ]
-    );
+   const questionRes = await client.query(
+  `
+  SELECT
+    correct_index,
+    created_at,
+    answered,
+    skipped,
+    retry_used
+  FROM quiz_question_sessions
+  WHERE question_id = $1
+    AND user_id = $2
+  FOR UPDATE
+  `,
+  [
+    questionId,
+    userId
+  ]
+);
 
     if (questionRes.rows.length === 0) {
       await client.query('ROLLBACK');
