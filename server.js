@@ -8436,7 +8436,7 @@ app.get('/api/quiz/points', async (c) => {
     // - الترتيب الأسبوعي بعد 7 أيام
     // ============================================================
 
-    await pool.query(
+        const userResult = await pool.query(
       `
       INSERT INTO quiz_points (
         user_id,
@@ -8487,10 +8487,25 @@ app.get('/api/quiz/points', async (c) => {
             THEN CURRENT_DATE
             ELSE quiz_points.last_weekly_reset
           END
+
+      RETURNING
+        points,
+        total_earned,
+        total_converted,
+        questions_today,
+        weekly_score
       `,
       [userId]
     );
 
+    const data =
+      userResult.rows[0] || {
+        points: 0,
+        total_earned: 0,
+        total_converted: 0,
+        questions_today: 0,
+        weekly_score: 0
+      };
     // ============================================================
     // إعدادات Quiz
     // ============================================================
@@ -8498,33 +8513,7 @@ app.get('/api/quiz/points', async (c) => {
     const settings =
       await getQuizSettings();
 
-    // ============================================================
-    // بيانات المستخدم
-    // ============================================================
-
-    const res = await pool.query(
-      `
-      SELECT
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        weekly_score
-      FROM quiz_points
-      WHERE user_id = $1
-      `,
-      [userId]
-    );
-
-    const data =
-      res.rows[0] || {
-        points: 0,
-        total_earned: 0,
-        total_converted: 0,
-        questions_today: 0,
-        weekly_score: 0
-      };
-
+    
     // ============================================================
     // Weekly Leaderboard
     // ============================================================
