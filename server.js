@@ -6184,43 +6184,96 @@ app.get('/api/quiz/question', async (c) => {
       return c.json({ success: false, message: 'UNSUPPORTED_LANGUAGE' }, 400);
     }
 
-    const quizStateResult = await pool.query(
-      `
-      WITH settings AS (
-        SELECT
-          COALESCE(MAX(value) FILTER (WHERE key = 'points_per_1000'), '0.10') AS points_per_1000,
-          COALESCE(MAX(value) FILTER (WHERE key = 'min_conversion_points'), '1000') AS min_conversion_points,
-          COALESCE(MAX(value) FILTER (WHERE key = 'max_questions_per_day'), '200') AS max_questions_per_day
-        FROM quiz_settings
-      ),
-      upsert_quiz_points AS (
-        INSERT INTO quiz_points (user_id, points, total_earned, total_converted, questions_today, last_reset_date, weekly_score, last_weekly_reset)
-        SELECT u.telegram_id, 0, 0, 0, 0, CURRENT_DATE, 0, CURRENT_DATE
-        FROM users u WHERE u.telegram_id = $1
-        ON CONFLICT (user_id) DO UPDATE SET
-          questions_today = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN 0 ELSE quiz_points.questions_today END,
-          last_reset_date = CASE WHEN quiz_points.last_reset_date < CURRENT_DATE THEN CURRENT_DATE ELSE quiz_points.last_reset_date END,
-          weekly_score = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN 0 ELSE quiz_points.weekly_score END,
-          last_weekly_reset = CASE WHEN quiz_points.last_weekly_reset < (CURRENT_DATE - INTERVAL '7 days') THEN CURRENT_DATE ELSE quiz_points.last_weekly_reset END
-        RETURNING points, questions_today, weekly_score
-      )
-      SELECT q.points, q.questions_today, q.weekly_score, s.points_per_1000, s.min_conversion_points, s.max_questions_per_day
-      FROM upsert_quiz_points q CROSS JOIN settings s
-      `,
-      [userId]
-    );
+    const quizStateResult =
+  await pool.query(
+    `
+    INSERT INTO quiz_points (
+      user_id,
+      points,
+      total_earned,
+      total_converted,
+      questions_today,
+      last_reset_date,
+      weekly_score,
+      last_weekly_reset
+    )
+
+    SELECT
+      u.telegram_id,
+      0,
+      0,
+      0,
+      0,
+      CURRENT_DATE,
+      0,
+      CURRENT_DATE
+
+    FROM users u
+
+    WHERE u.telegram_id = $1
+
+    ON CONFLICT (user_id)
+
+    DO UPDATE SET
+
+      questions_today =
+        CASE
+          WHEN quiz_points.last_reset_date < CURRENT_DATE
+          THEN 0
+          ELSE quiz_points.questions_today
+        END,
+
+      last_reset_date =
+        CASE
+          WHEN quiz_points.last_reset_date < CURRENT_DATE
+          THEN CURRENT_DATE
+          ELSE quiz_points.last_reset_date
+        END,
+
+      weekly_score =
+        CASE
+          WHEN quiz_points.last_weekly_reset <
+               (CURRENT_DATE - INTERVAL '7 days')
+          THEN 0
+          ELSE quiz_points.weekly_score
+        END,
+
+      last_weekly_reset =
+        CASE
+          WHEN quiz_points.last_weekly_reset <
+               (CURRENT_DATE - INTERVAL '7 days')
+          THEN CURRENT_DATE
+          ELSE quiz_points.last_weekly_reset
+        END
+
+    RETURNING
+      user_id,
+      points,
+      questions_today,
+      weekly_score
+    `,
+    [userId]
+  );
 
     if (quizStateResult.rows.length === 0) {
       return c.json({ success: false, message: 'USER_NOT_FOUND' }, 404);
     }
 
     const quizState = quizStateResult.rows[0];
+    const quizSettings = await getQuizSettings();
+
+const pointsPer1000 =
+  quizSettings.points_per_1000;
+
+const minConversionPoints =
+  quizSettings.min_conversion_points;
+
+const maxQuestionsPerDay =
+  quizSettings.max_questions_per_day;
     const qToday = Number(quizState.questions_today);
     const points = Number(quizState.points);
     const weeklyScore = Number(quizState.weekly_score);
-    const pointsPer1000 = Number(quizState.points_per_1000);
-    const minConversionPoints = Number(quizState.min_conversion_points);
-    const maxQuestionsPerDay = Number(quizState.max_questions_per_day);
+    
 
     if (!Number.isFinite(pointsPer1000) || pointsPer1000 <= 0 || !Number.isInteger(minConversionPoints) || minConversionPoints <= 0 || !Number.isInteger(maxQuestionsPerDay) || maxQuestionsPerDay <= 0) {
       throw new Error('INVALID_QUIZ_SETTINGS');
@@ -6409,9 +6462,7 @@ app.get('/api/quiz/question', async (c) => {
     if (cached.questions.length === 0) {
       quizQuestionCache.delete(cacheKey);
       console.log(`♻️ Quiz batch exhausted: ${cacheKey}`);
-    } else {
-      quizQuestionCache.set(cacheKey, cached);
-    }
+    } 
 
     if (!questionData || !questionData.question || !questionData.correctAnswer || !Array.isArray(questionData.incorrectAnswers) || questionData.incorrectAnswers.length !== 3) {
       return c.json({ success: false, message: 'API_UNAVAILABLE' }, 503);
