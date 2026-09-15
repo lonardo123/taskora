@@ -6114,14 +6114,22 @@ function shuffleArray(arr) {
 
 async function getQuizSettings() {
   const res = await pool.query(
-    'SELECT key, value FROM quiz_settings'
+    `
+    SELECT key, value
+    FROM quiz_settings
+    WHERE key IN (
+      'points_per_1000',
+      'min_conversion_points',
+      'max_questions_per_day'
+    )
+    `
   );
 
   const settings = {};
 
-  res.rows.forEach(row => {
+  for (const row of res.rows) {
     settings[row.key] = row.value;
-  });
+  }
 
   const pointsPer1000 =
     settings.points_per_1000 === undefined
