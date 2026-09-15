@@ -6318,26 +6318,22 @@ const quizStateResult =
             ELSE quiz_points.last_weekly_reset
           END
 
-      RETURNING
-        user_id,
-        points,
-        total_earned,
-        total_converted,
-        questions_today,
-        weekly_score
+RETURNING
+  points,
+  questions_today,
+  weekly_score
+
     )
 
-    SELECT
-      q.user_id,
-      q.points,
-      q.total_earned,
-      q.total_converted,
-      q.questions_today,
-      q.weekly_score,
+SELECT
+  q.points,
+  q.questions_today,
+  q.weekly_score,
 
-      s.points_per_1000,
-      s.min_conversion_points,
-      s.max_questions_per_day
+  s.points_per_1000,
+  s.min_conversion_points,
+  s.max_questions_per_day
+
 
     FROM upsert_quiz_points q
     CROSS JOIN settings s
