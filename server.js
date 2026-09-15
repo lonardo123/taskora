@@ -6743,15 +6743,46 @@ const question = {
       pointsEarned = 1;
 
     } else if (reward.action === 'retry') {
-      if (!question.answered || question.retry_used) {
-        await client.query('ROLLBACK');
-        return c.json({ success: false, message: question.answered ? 'RETRY_ALREADY_USED' : 'QUESTION_NOT_ANSWERED' }, question.retry_used ? 409 : 400);
-      }
+  if (!question.answered || question.retry_used) {
+    await client.query('ROLLBACK');
+    return c.json({
+      success: false,
+      message: question.answered ? 'RETRY_ALREADY_USED' : 'QUESTION_NOT_ANSWERED'
+    }, question.retry_used ? 409 : 400);
+  }
 
-      await client.query(`UPDATE quiz_question_sessions SET answered = false, is_correct = false, retry_used = true WHERE question_id = $1 AND user_id = $2`, [reward.question_id, userId]);
-      pointsEarned = 0;
+  const retryPointsResult = await client.query(
+    `WITH updated_question AS (
+       UPDATE quiz_question_sessions
+       SET answered = false,
+           is_correct = false,
+           retry_used = true
+       WHERE question_id = $1
+         AND user_id = $2
+       RETURNING question_id
+     )
+     SELECT
+       qp.points,
+       qp.total_earned,
+       qp.total_converted,
+       qp.questions_today,
+       qp.weekly_score
+     FROM quiz_points qp
+     WHERE qp.user_id = $2
+       AND EXISTS (
+         SELECT 1
+         FROM updated_question
+       )`,
+    [reward.question_id, userId]
+  );
 
-    } else if (reward.action === 'skip') {
+  if (retryPointsResult.rows.length === 0) {
+    throw new Error('QUIZ_POINTS_NOT_FOUND');
+  }
+
+  updatedPoints = retryPointsResult.rows[0];
+  pointsEarned = 0;
+} else if (reward.action === 'skip') {
       if (question.answered || question.skipped) {
         await client.query('ROLLBACK');
         return c.json({ success: false, message: 'QUESTION_ALREADY_PROCESSED' }, 409);
