@@ -6662,7 +6662,7 @@ app.post('/api/quiz/reward/complete', async (c) => {
      q.retry_used,
      q.double_used
    FROM quiz_reward_sessions r
-   LEFT JOIN quiz_question_sessions q
+   INNER JOIN quiz_question_sessions q
      ON q.question_id = r.question_id
     AND q.user_id = r.user_id
    WHERE r.reward_id = $1
@@ -6712,14 +6712,6 @@ if (new Date(reward.expires_at).getTime() <= Date.now()) {
     success: false,
     message: 'REWARD_EXPIRED'
   }, 400);
-}
-
-if (!row.q_question_id) {
-  await client.query('ROLLBACK');
-  return c.json({
-    success: false,
-    message: 'QUESTION_NOT_FOUND'
-  }, 404);
 }
 
 const question = {
