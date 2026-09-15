@@ -6646,43 +6646,91 @@ app.post('/api/quiz/reward/complete', async (c) => {
 
     await client.query('BEGIN');
 
-    const rewardRes = await client.query(
-      `SELECT reward_id, user_id, question_id, action, status, expires_at FROM quiz_reward_sessions WHERE reward_id = $1 AND user_id = $2 FOR UPDATE`,
-      [rewardId, userId]
-    );
+    const rewardQuestionRes = await client.query(
+  `SELECT
+     r.reward_id,
+     r.user_id AS reward_user_id,
+     r.question_id,
+     r.action,
+     r.status,
+     r.expires_at,
+     q.question_id AS q_question_id,
+     q.user_id AS q_user_id,
+     q.answered,
+     q.is_correct,
+     q.skipped,
+     q.retry_used,
+     q.double_used
+   FROM quiz_reward_sessions r
+   LEFT JOIN quiz_question_sessions q
+     ON q.question_id = r.question_id
+    AND q.user_id = r.user_id
+   WHERE r.reward_id = $1
+     AND r.user_id = $2
+   FOR UPDATE OF r, q`,
+  [rewardId, userId]
+);
 
-    if (rewardRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'REWARD_NOT_FOUND' }, 404);
-    }
+if (rewardQuestionRes.rows.length === 0) {
+  await client.query('ROLLBACK');
+  return c.json({ success: false, message: 'REWARD_NOT_FOUND' }, 404);
+}
 
-    const reward = rewardRes.rows[0];
+const row = rewardQuestionRes.rows[0];
 
-    if (reward.status === 'completed') {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'REWARD_ALREADY_COMPLETED' }, 409);
-    }
-    if (reward.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'INVALID_REWARD_STATUS' }, 400);
-    }
-    if (new Date(reward.expires_at).getTime() <= Date.now()) {
-      await client.query(`UPDATE quiz_reward_sessions SET status = 'expired' WHERE reward_id = $1`, [rewardId]);
-      await client.query('COMMIT');
-      return c.json({ success: false, message: 'REWARD_EXPIRED' }, 400);
-    }
+const reward = {
+  reward_id: row.reward_id,
+  user_id: row.reward_user_id,
+  question_id: row.question_id,
+  action: row.action,
+  status: row.status,
+  expires_at: row.expires_at
+};
 
-    const questionRes = await client.query(
-      `SELECT question_id, user_id, answered, is_correct, skipped, retry_used, double_used FROM quiz_question_sessions WHERE question_id = $1 AND user_id = $2 FOR UPDATE`,
-      [reward.question_id, userId]
-    );
+if (reward.status === 'completed') {
+  await client.query('ROLLBACK');
+  return c.json({ success: false, message: 'REWARD_ALREADY_COMPLETED' }, 409);
+}
 
-    if (questionRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'QUESTION_NOT_FOUND' }, 404);
-    }
+if (reward.status !== 'pending') {
+  await client.query('ROLLBACK');
+  return c.json({ success: false, message: 'INVALID_REWARD_STATUS' }, 400);
+}
 
-    const question = questionRes.rows[0];
+if (new Date(reward.expires_at).getTime() <= Date.now()) {
+  await client.query(
+    `UPDATE quiz_reward_sessions
+     SET status = 'expired'
+     WHERE reward_id = $1
+       AND user_id = $2`,
+    [rewardId, userId]
+  );
+
+  await client.query('COMMIT');
+
+  return c.json({
+    success: false,
+    message: 'REWARD_EXPIRED'
+  }, 400);
+}
+
+if (!row.q_question_id) {
+  await client.query('ROLLBACK');
+  return c.json({
+    success: false,
+    message: 'QUESTION_NOT_FOUND'
+  }, 404);
+}
+
+const question = {
+  question_id: row.q_question_id,
+  user_id: row.q_user_id,
+  answered: row.answered,
+  is_correct: row.is_correct,
+  skipped: row.skipped,
+  retry_used: row.retry_used,
+  double_used: row.double_used
+};
     let pointsEarned = 0;
     let updatedPoints = null;
 
