@@ -8533,21 +8533,17 @@ app.get('/api/quiz/points', async (c) => {
       u.username,
       qp.weekly_score
 
-    FROM (
-      SELECT
-        user_id,
-        weekly_score
-      FROM quiz_points
-      WHERE weekly_score > 0
-      ORDER BY weekly_score DESC
-      LIMIT 5
-    ) qp
+    FROM quiz_points qp
 
     JOIN users u
       ON qp.user_id = u.telegram_id
 
+    WHERE qp.weekly_score > 0
+
     ORDER BY
       qp.weekly_score DESC
+
+    LIMIT 5
     `
   );
     // ============================================================
