@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Taskora Admin - Manage Providers</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        body { background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
+        .header h1 { color: #38bdf8; font-size: 24px; }
+        button { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+        th, td { padding: 12px; text-align: right; border-bottom: 1px solid #1f2937; font-size: 13px; }
+        th { background: #1f2937; color: #94a3b8; font-weight: 600; }
+        tr:hover { background: #1e293b; }
+        .status-active { background: #22c55e20; color: #22c55e; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+        .status-inactive { background: #ef444420; color: #ef4444; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center; padding: 20px; }
+        .modal.active { display: flex; }
+        .modal-content { background: #111827; border-radius: 12px; padding: 25px; width: 100%; max-width: 700px; max-height: 90vh; overflow-y: auto; border: 1px solid #1f2937; }
+        .modal-content h2 { color: #38bdf8; margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 6px; color: #94a3b8; font-size: 13px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 10px; border: 1px solid #374151; border-radius: 6px;
+            background: #1f2937; color: white; font-size: 14px;
+        }
+        .form-group textarea { resize: vertical; min-height: 60px; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .toast { position: fixed; bottom: 20px; left: 20px; padding: 15px 25px; border-radius: 8px; color: white; font-weight: 600; display: none; z-index: 99999; }
+        .toast.success { background: #22c55e; }
+        .toast.error { background: #ef4444; }
+        .actions { display: flex; gap: 5px; flex-wrap: wrap; }
+        .admin-id-input { margin-bottom: 20px; padding: 15px; background: #1e293b; border-radius: 8px; border: 1px solid #374151; }
+        .info-box { background: #1e293b; border-right: 4px solid #38bdf8; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>🏪 إدارة المنصات التسويقية (Providers)</h1>
+        <button class="btn-primary" onclick="openAddModal()">➕ إضافة منصة جديدة</button>
+    </div>
+
+    <div class="admin-id-input">
+        <label>🔑 معرف الأدمن (Admin ID):</label>
+        <input type="text" id="adminIdInput" placeholder="مثال: 7171208519" style="width: 300px; padding: 8px; border: 1px solid #374151; border-radius: 6px; background: #1f2937; color: white;">
+        <button class="btn-sm btn-primary" onclick="saveAdminId()">حفظ</button>
+    </div>
+
+    <div class="info-box">
+        💡 <strong>نصيحة:</strong> للحصول على محددات CSS الصحيحة (Selectors)، افتح موقع المنصة في المتصفح، اضغط بزر الماوس الأيمن على عنصر (مثل اسم المنتج أو السعر)، واختر "Inspect". ثم انسخ اسم الـ Class (مثل <code>.product-title</code>).
+    </div>
+
+    <div class="card">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>اسم المنصة</th>
+                        <th>الدولة</th>
+                        <th>هامش الأدمن</th>
+                        <th>ربح المستخدم</th>
+                        <th>الشحن</th>
+                        <th>الطلبات</th>
+                        <th>إجمالي الربح</th>
+                        <th>الحالة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody id="providersTableBody">
+                    <tr><td colspan="10" style="text-align:center; padding: 40px; color: #94a3b8;">جاري التحميل...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: إضافة/تعديل منصة -->
+<div id="providerModal" class="modal">
+    <div class="modal-content">
+        <h2 id="modalTitle">➕ إضافة منصة جديدة</h2>
+        <form id="providerForm" onsubmit="saveProvider(event)">
+            <input type="hidden" id="providerId">
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label>اسم المنصة *</label>
+                    <input type="text" id="name" required placeholder="مثال: Vendo السعودية">
+                </div>
+                <div class="form-group">
+                    <label>رمز الدولة *</label>
+                    <input type="text" id="country_code" required maxlength="2" placeholder="SA, EG, AE..." style="text-transform: uppercase;">
+                </div>
+            </div>
+
+          <!-- ✅ إضافة اختيار الوضع (Mode) -->
+<div class="form-row">
+    <div class="form-group">
+        <label>وضع الجلب (Mode)</label>
+        <select id="mode" onchange="toggleApiFields()" style="width:100%; padding:10px; border:1px solid #374151; border-radius:6px; background:#1f2937; color:white;">
+            <option value="SCRAPING">🕷️ Scraping (جلب من HTML)</option>
+            <option value="API">🔌 API (عند توفر الـ API)</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>حالة المنصة</label>
+        <label style="display:flex; align-items:center; padding:10px;">
+            <input type="checkbox" id="is_active" checked style="margin-left:8px;">
+            نشطة (ظاهرة للمستخدمين)
+        </label>
+    </div>
+</div>
+
+<!-- ✅ حقول API (تظهر فقط عند اختيار API) -->
+<div id="apiFieldsGroup" style="display:none; background:#1e293b; padding:15px; border-radius:8px; margin-bottom:15px; border:1px solid #374151;">
+    <h3 style="color:#38bdf8; margin-bottom:10px; font-size:14px;">🔌 إعدادات API</h3>
+    
+    <div class="form-group">
+        <label>رابط الـ API الأساسي (API Endpoint)</label>
+        <input type="text" id="api_endpoint" placeholder="https://api.taager.com/v1">
+    </div>
+    
+    <div class="form-group">
+        <label>مفتاح الـ API (API Key)</label>
+        <input type="password" id="api_key" placeholder="sk_live_xxxxx">
+        <small style="color:#64748b;">سيتم تخزينه بشكل آمن</small>
+    </div>
+    
+    <div class="form-group">
+        <label>مسار البحث (Search Path)</label>
+        <input type="text" id="api_search_path" placeholder="/products/search?q={query}">
+    </div>
+    
+    <div class="form-group">
+        <label>مسار تفاصيل المنتج (Product Path)</label>
+        <input type="text" id="api_product_path" placeholder="/products/{id}">
+    </div>
+</div>
+          
+            <div class="form-group">
+                <label>رابط البحث (Search URL Pattern) *</label>
+                <input type="text" id="search_url_pattern" required placeholder="https://vendosaudi.dukan.shop/search?q={query}">
+                <small style="color: #64748b;">استخدم <code>{query}</code> مكان كلمة البحث</small>
+            </div>
+
+            <div class="form-group">
+                <label>رابط تفاصيل المنتج (Product URL Pattern)</label>
+                <input type="text" id="product_url_pattern" placeholder="https://vendosaudi.dukan.shop/product/{id}">
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>نسبة هامش الأدمن (%)</label>
+                    <input type="number" id="base_margin_percentage" value="20" min="0" max="100" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>نسبة ربح المستخدم من الهامش (%)</label>
+                    <input type="number" id="user_profit_percentage" value="40" min="0" max="100" step="0.1">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>تكلفة الشحن الثابتة ($)</label>
+                <input type="number" id="fixed_shipping_cost" value="0" min="0" step="0.01">
+            </div>
+
+            <h3 style="color: #38bdf8; margin: 20px 0 10px;">🎯 محددات CSS (Selectors) - اخترها من موقع المنصة</h3>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label>محدد اسم المنتج</label>
+                    <input type="text" id="selector_name" value=".product-title" placeholder=".product-title">
+                </div>
+                <div class="form-group">
+                    <label>محدد السعر</label>
+                    <input type="text" id="selector_price" value=".price" placeholder=".price">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>محدد الصورة</label>
+                <input type="text" id="selector_image" value=".product-image img" placeholder=".product-image img">
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="is_active" checked>
+                    المنصة نشطة (ظاهرة للمستخدمين)
+                </label>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button type="submit" class="btn-success" style="flex: 1;">💾 حفظ</button>
+                <button type="button" class="btn-danger" onclick="closeModal()" style="flex: 1;">❌ إلغاء</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+    const API_URL = "https://taskora.taskora.workers.dev"; // ⚠️ غيّر هذا إلى رابط الـ Worker الخاص بك
+    let currentAdminId = localStorage.getItem('taskora_admin_id') || '';
+
+    function saveAdminId() {
+        const input = document.getElementById('adminIdInput').value.trim();
+        if (input) {
+            currentAdminId = input;
+            localStorage.setItem('taskora_admin_id', currentAdminId);
+            showToast('✅ تم حفظ معرف الأدمن', 'success');
+            loadProviders();
+        }
+    }
+
+    window.onload = () => {
+        if (currentAdminId) {
+            document.getElementById('adminIdInput').value = currentAdminId;
+            loadProviders();
+        }
+    };
+
+    async function loadProviders() {
+        if (!currentAdminId) {
+            showToast('⚠️ يرجى إدخال معرف الأدمن أولاً', 'error');
+            return;
+        }
+
+        const tbody = document.getElementById('providersTableBody');
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 40px; color: #94a3b8;">جاري التحميل...</td></tr>';
+
+        try {
+            const res = await fetch(`${API_URL}/api/admin/marketing/providers?admin_id=${currentAdminId}`);
+            const data = await res.json();
+
+            if (!data.success) {
+                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 40px; color: #ef4444;">❌ ${data.message}</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = '';
+            if (data.data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 40px; color: #94a3b8;">لا توجد منصات. أضف منصة جديدة للبدء.</td></tr>';
+                return;
+            }
+
+            data.data.forEach(p => {
+                const statusBadge = p.is_active 
+                    ? '<span class="status-active">✅ نشطة</span>'
+                    : '<span class="status-inactive">⛔ معطلة</span>';
+
+                const row = `
+                    <tr>
+                        <td>#${p.id}</td>
+                        <td><strong style="color: #38bdf8;">${p.name}</strong></td>
+                        <td>${p.country_code}</td>
+                        <td>${parseFloat(p.base_margin_percentage).toFixed(1)}%</td>
+                        <td>${parseFloat(p.user_profit_percentage).toFixed(1)}%</td>
+                        <td>$${parseFloat(p.fixed_shipping_cost).toFixed(2)}</td>
+                        <td>${p.total_orders || 0}</td>
+                        <td style="color: #22c55e; font-weight: 600;">$${parseFloat(p.total_profit || 0).toFixed(2)}</td>
+                        <td>${statusBadge}</td>
+                        <td class="actions">
+                            <button class="btn-sm btn-primary" onclick="editProvider(${p.id})">✏️ تعديل</button>
+                            <button class="btn-sm btn-warning" onclick="testProvider(${p.id}, '${p.name.replace(/'/g, "\\'")}')">🧪 اختبار</button>
+                            <button class="btn-sm btn-danger" onclick="deleteProvider(${p.id}, '${p.name.replace(/'/g, "\\'")}')">🗑️ حذف</button>
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        } catch (err) {
+            console.error(err);
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 40px; color: #ef4444;">❌ خطأ في الاتصال</td></tr>';
+        }
+    }
+
+    function openAddModal() {
+        document.getElementById('modalTitle').textContent = '➕ إضافة منصة جديدة';
+        document.getElementById('providerForm').reset();
+        document.getElementById('providerId').value = '';
+        document.getElementById('is_active').checked = true;
+        document.getElementById('providerModal').classList.add('active');
+    }
+
+    async function editProvider(id) {
+    try {
+        const res = await fetch(`${API_URL}/api/admin/marketing/providers?admin_id=${currentAdminId}`);
+        const data = await res.json();
+        const provider = data.data.find(p => p.id === id);
+        if (!provider) return;
+
+        document.getElementById('modalTitle').textContent = '✏️ تعديل المنصة';
+        document.getElementById('providerId').value = provider.id;
+        document.getElementById('name').value = provider.name;
+        document.getElementById('country_code').value = provider.country_code;
+        document.getElementById('search_url_pattern').value = provider.search_url_pattern;
+        document.getElementById('product_url_pattern').value = provider.product_url_pattern || '';
+        document.getElementById('base_margin_percentage').value = provider.base_margin_percentage;
+        document.getElementById('user_profit_percentage').value = provider.user_profit_percentage;
+        document.getElementById('fixed_shipping_cost').value = provider.fixed_shipping_cost;
+        document.getElementById('selector_name').value = provider.selector_name;
+        document.getElementById('selector_price').value = provider.selector_price;
+        document.getElementById('selector_image').value = provider.selector_image;
+        document.getElementById('is_active').checked = provider.is_active;
+        
+        // ✅ تحميل بيانات الوضع والـ API
+        document.getElementById('mode').value = provider.mode || 'SCRAPING';
+        document.getElementById('api_endpoint').value = provider.api_endpoint || '';
+        document.getElementById('api_key').value = provider.api_key || '';
+        document.getElementById('api_search_path').value = provider.api_search_path || '';
+        document.getElementById('api_product_path').value = provider.api_product_path || '';
+        
+        // ✅ تحديث عرض الحقول حسب الوضع
+        toggleApiFields();
+
+        document.getElementById('providerModal').classList.add('active');
+    } catch (err) {
+        showToast('❌ فشل تحميل البيانات', 'error');
+    }
+}
+
+    function closeModal() {
+        document.getElementById('providerModal').classList.remove('active');
+    }
+
+    async function saveProvider(event) {
+    event.preventDefault();
+    
+    const id = document.getElementById('providerId').value;
+    const mode = document.getElementById('mode').value;
+    
+    const payload = {
+        name: document.getElementById('name').value,
+        country_code: document.getElementById('country_code').value,
+        search_url_pattern: document.getElementById('search_url_pattern').value,
+        product_url_pattern: document.getElementById('product_url_pattern').value,
+        base_margin_percentage: parseFloat(document.getElementById('base_margin_percentage').value),
+        user_profit_percentage: parseFloat(document.getElementById('user_profit_percentage').value),
+        fixed_shipping_cost: parseFloat(document.getElementById('fixed_shipping_cost').value),
+        selector_name: document.getElementById('selector_name').value,
+        selector_price: document.getElementById('selector_price').value,
+        selector_image: document.getElementById('selector_image').value,
+        is_active: document.getElementById('is_active').checked,
+        // ✅ الحقول الجديدة
+        mode: mode,
+        api_endpoint: mode === 'API' ? document.getElementById('api_endpoint').value : null,
+        api_key: mode === 'API' ? document.getElementById('api_key').value : null,
+        api_search_path: mode === 'API' ? document.getElementById('api_search_path').value : null,
+        api_product_path: mode === 'API' ? document.getElementById('api_product_path').value : null
+    };
+
+    try {
+        const url = id 
+            ? `${API_URL}/api/admin/marketing/providers/${id}?admin_id=${currentAdminId}`
+            : `${API_URL}/api/admin/marketing/providers?admin_id=${currentAdminId}`;
+        const method = id ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+            closeModal();
+            loadProviders();
+        } else {
+            showToast('❌ ' + data.message, 'error');
+        }
+    } catch (err) {
+        showToast('❌ خطأ في الاتصال', 'error');
+    }
+}
+    async function deleteProvider(id, name) {
+        if (!confirm(`⚠️ هل أنت متأكد من حذف المنصة "${name}"؟\n\nإذا كان لها طلبات سابقة، سيتم تعطيلها بدلاً من الحذف.`)) return;
+
+        try {
+            const res = await fetch(`${API_URL}/api/admin/marketing/providers/${id}?admin_id=${currentAdminId}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                showToast(data.message, 'success');
+                loadProviders();
+            } else {
+                showToast('❌ ' + data.message, 'error');
+            }
+        } catch (err) {
+            showToast('❌ خطأ في الاتصال', 'error');
+        }
+    }
+
+    async function testProvider(id, name) {
+        const query = prompt(`🧪 اختبار الاتصال بـ "${name}"\n\nأدخل كلمة بحث للتجربة:`, 'watch');
+        if (!query) return;
+
+        showToast('⏳ جاري الاختبار...', 'success');
+
+        try {
+            const res = await fetch(`${API_URL}/api/admin/marketing/providers/${id}/test?admin_id=${currentAdminId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ test_query: query })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                alert(`✅ نجح الاتصال!\n\n📊 التفاصيل:\n- حجم الصفحة: ${data.details.html_size} bytes\n- محدد الاسم: ${data.details.selectors_found.name ? '✅ موجود' : '❌ غير موجود'}\n- محدد السعر: ${data.details.selectors_found.price ? '✅ موجود' : '❌ غير موجود'}\n\n💡 ${data.details.recommendation}`);
+            } else {
+                showToast('❌ ' + data.message, 'error');
+            }
+        } catch (err) {
+            showToast('❌ خطأ في الاختبار', 'error');
+        }
+    }
+
+    function showToast(message, type) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = `toast ${type}`;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+    }
+
+
+// ✅ دالة لإظهار/إخفاء حقول API حسب الوضع المختار
+function toggleApiFields() {
+    const mode = document.getElementById('mode').value;
+    const apiFields = document.getElementById('apiFieldsGroup');
+    const scrapingFields = document.querySelectorAll('#selector_name, #selector_price, #selector_image');
+    
+    if (mode === 'API') {
+        apiFields.style.display = 'block';
+        scrapingFields.forEach(field => {
+            field.closest('.form-group').style.display = 'none';
+        });
+    } else {
+        apiFields.style.display = 'none';
+        scrapingFields.forEach(field => {
+            field.closest('.form-group').style.display = 'block';
+        });
+    }
+}
+  
+</script>
+
+</body>
+</html>
