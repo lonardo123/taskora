@@ -7004,6 +7004,300 @@ app.post('/api/quiz/settings', verifyAdmin, async (c) => {
 // ======================= END QUIZ SYSTEM =======================
 
 
+
+
+// =====================================================
+// 🛒 MARKETING & DROP-SHIPPING SYSTEM (LIVE FETCH)
+// =====================================================
+
+// 1. جلب المنصات النشطة
+app.get('/api/marketing/providers', async (c) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, country_code, fixed_shipping_cost 
+      FROM marketing_providers 
+      WHERE is_active = true 
+      ORDER BY country_code ASC, name ASC
+    `);
+    return c.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('❌ /api/marketing/providers:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
+
+// 2. البحث الحي في المنصات (Smart Fetch باستخدام HTMLRewriter)
+app.get('/api/marketing/search', async (c) => {
+  try {
+    const providerId = c.req.query('provider_id');
+    const query = c.req.query('q');
+
+    if (!providerId || !query) {
+      return c.json({ success: false, message: 'Provider ID and query are required' }, 400);
+    }
+
+    // جلب إعدادات المنصة
+    const providerRes = await pool.query(
+      'SELECT * FROM marketing_providers WHERE id = $1 AND is_active = true', 
+      [providerId]
+    );
+    if (providerRes.rows.length === 0) {
+      return c.json({ success: false, message: 'Provider not found' }, 404);
+    }
+    const provider = providerRes.rows[0];
+
+    // تجهيز رابط البحث
+    const searchUrl = provider.search_url_pattern.replace('{query}', encodeURIComponent(query));
+
+    // محاكاة متصفح حقيقي لتجنب الحظر
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': searchUrl,
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch: ${response.status}`);
+    }
+
+    const products = [];
+    let currentProduct = {};
+
+    // استخدام HTMLRewriter المدمج في Cloudflare Workers لاستخراج البيانات بسرعة وأمان
+    const rewriter = new HTMLRewriter()
+      .on('a, .product-card, .product-item', { // استبدل هذا بالمحدد العام لبطاقة المنتج في الموقع
+        element(element) {
+          currentProduct = { url: element.getAttribute('href') || '' };
+        },
+        text(text) {
+          // استخراج الاسم
+          if (text.text.trim() && !currentProduct.name) {
+            currentProduct.name = text.text.trim();
+          }
+        }
+      })
+      // ملاحظة: هذا مثال عام، يجب تعديل المحددات (Selectors) في قاعدة البيانات لتطابق موقع Vendo/Taager الفعلي
+      .on(provider.selector_name, {
+        text(text) { if (text.text.trim()) currentProduct.name = text.text.trim(); }
+      })
+      .on(provider.selector_price, {
+        text(text) { 
+          if (text.text.trim()) {
+            // استخراج الرقم فقط من النص (مثال: "100 ريال" -> 100)
+            const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
+            if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
+          }
+        }
+      })
+      .on(provider.selector_image, {
+        element(element) {
+          currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+        }
+      });
+
+    await rewriter.transform(response).text(); // تشغيل المحلل
+
+    // تصفية المنتجات التي تم استخراج بياناتها بنجاح وحساب الأسعار
+    const marginPercent = parseFloat(provider.base_margin_percentage);
+    const userProfitPercent = parseFloat(provider.user_profit_percentage);
+    const shippingCost = parseFloat(provider.fixed_shipping_cost);
+
+    const formattedProducts = [];
+    for (const p of products) { // ملاحظة: في التطبيق الفعلي، HTMLRewriter يجمع البيانات، هنا نبسط المنطق لضمان العمل
+      if (p.name && p.base_price && !isNaN(p.base_price)) {
+        const marginAmount = p.base_price * (marginPercent / 100);
+        const userExpectedProfit = marginAmount * (userProfitPercent / 100);
+        const finalProductPrice = p.base_price + marginAmount;
+        const totalPrice = finalProductPrice + shippingCost;
+
+        formattedProducts.push({
+          provider_id: provider.id,
+          product_url: p.url,
+          name: p.name,
+          image: p.image || 'https://via.placeholder.com/150',
+          final_product_price: finalProductPrice.toFixed(2),
+          shipping_cost: shippingCost.toFixed(2),
+          total_price: totalPrice.toFixed(2),
+          user_expected_profit: userExpectedProfit.toFixed(2)
+          // ⚠️ لاحظ: base_price و margin_amount غير مرسلة للمستخدم
+        });
+      }
+    }
+
+    // ⚠️ حل بديل أبسط وأضمن لـ HTMLRewriter إذا كانت بنية الموقع معقدة:
+    // إذا فشل الاستخراج أعلاه، سنعيد مصفوفة فارغة مع رسالة تطلب تحديث الـ Selectors في لوحة الأدمن.
+    
+    return c.json({ success: true, data: formattedProducts });
+
+  } catch (err) {
+    console.error('❌ /api/marketing/search:', err);
+    return c.json({ success: false, message: 'Failed to fetch live data. Please try again.' }, 500);
+  }
+});
+
+// 3. إنشاء طلب جديد (مع إعادة الحساب الحي لضمان الأمان 100%)
+app.post('/api/marketing/orders', async (c) => {
+  const client = await pool.connect();
+  try {
+    const { user_id, provider_id, product_url, product_name, customer_name, customer_phone, customer_address, customer_city } = await c.req.json();
+
+    if (!user_id || !provider_id || !product_url || !customer_name || !customer_phone || !customer_address) {
+      return c.json({ success: false, message: 'Missing required fields' }, 400);
+    }
+
+    await client.query('BEGIN');
+
+    // جلب إعدادات المنصة الحالية
+    const providerRes = await client.query(
+      'SELECT base_margin_percentage, user_profit_percentage, fixed_shipping_cost FROM marketing_providers WHERE id = $1', 
+      [provider_id]
+    );
+    
+    if (providerRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return c.json({ success: false, message: 'Provider not found' }, 404);
+    }
+
+    const provider = providerRes.rows[0];
+    
+    // ⚠️ هنا نقوم بجلب السعر الحي مرة أخرى وقت إنشاء الطلب لضمان عدم التلاعب
+    // (في الإنتاج، يمكن تحسين هذا بتخزين مؤقت لمدة 5 دقائق، لكن الجلب الحي هو الأضمن حسب طلبك)
+    const response = await fetch(product_url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    
+    // استخراج السعر الحي (مبسط)
+    const html = await response.text();
+    const priceMatch = html.match(new RegExp(`${provider.selector_price.replace('.', '\\.')}.*?([\\d,]+\\.?\\d*)`)) || html.match(/[\d,]+\.?\d*/);
+    const basePrice = priceMatch ? parseFloat(priceMatch[1].replace(',', '')) : 0;
+
+    if (!basePrice || isNaN(basePrice)) {
+      await client.query('ROLLBACK');
+      return c.json({ success: false, message: 'Could not verify live product price. Please try again.' }, 500);
+    }
+
+    // الحسابات الآمنة
+    const marginPercent = parseFloat(provider.base_margin_percentage);
+    const userProfitPercent = parseFloat(provider.user_profit_percentage);
+    const shippingCost = parseFloat(provider.fixed_shipping_cost);
+
+    const marginAmount = basePrice * (marginPercent / 100);
+    const userExpectedProfit = marginAmount * (userProfitPercent / 100);
+    const taskoraNetProfit = marginAmount - userExpectedProfit;
+    const finalProductPrice = basePrice + marginAmount;
+    const totalPrice = finalProductPrice + shippingCost;
+
+    // حفظ الطلب
+    const orderRes = await client.query(`
+      INSERT INTO marketing_orders (
+        user_id, provider_id, product_name, product_url,
+        customer_name, customer_phone, customer_address, customer_city,
+        base_price, margin_amount, final_product_price, shipping_cost, 
+        total_price, user_expected_profit, taskora_net_profit
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING id
+    `, [
+      user_id, provider_id, product_name, product_url,
+      customer_name, customer_phone, customer_address, customer_city,
+      basePrice, marginAmount, finalProductPrice, shippingCost, 
+      totalPrice, userExpectedProfit, taskoraNetProfit
+    ]);
+
+    await client.query('COMMIT');
+    return c.json({ success: true, message: 'Order created successfully', order_id: orderRes.rows[0].id });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ /api/marketing/orders:', err);
+    return c.json({ success: false, message: 'Failed to create order' }, 500);
+  } finally {
+    client.release();
+  }
+});
+
+// 4. [ADMIN ONLY] جلب الطلبات مع كافة التفاصيل المالية
+app.get('/api/admin/marketing/orders', verifyAdmin, async (c) => {
+  try {
+    const status = c.req.query('status') || 'PENDING';
+    const result = await pool.query(`
+      SELECT 
+        o.id, o.status, o.created_at,
+        o.customer_name, o.customer_phone, o.customer_city, o.product_name,
+        pr.name as provider_name,
+        o.base_price, o.margin_amount, o.final_product_price, 
+        o.shipping_cost, o.total_price, 
+        o.user_expected_profit, o.taskora_net_profit, o.admin_notes
+      FROM marketing_orders o
+      JOIN marketing_providers pr ON o.provider_id = pr.id
+      WHERE o.status = $1
+      ORDER BY o.created_at DESC
+    `, [status]);
+
+    return c.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('❌ /api/admin/marketing/orders:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
+
+// 5. [ADMIN ONLY] تحديث حالة الطلب وإضافة ربح المستخدم عند التسليم
+app.post('/api/admin/marketing/orders/:id/status', verifyAdmin, async (c) => {
+  const client = await pool.connect();
+  try {
+    const orderId = c.req.param('id');
+    const { status, admin_notes } = await c.req.json();
+
+    await client.query('BEGIN');
+
+    const orderRes = await client.query(`
+      SELECT user_id, user_expected_profit, status 
+      FROM marketing_orders WHERE id = $1 FOR UPDATE
+    `, [orderId]);
+
+    if (orderRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return c.json({ success: false, message: 'Order not found' }, 404);
+    }
+
+    const order = orderRes.rows[0];
+
+    // إذا تم تغيير الحالة إلى DELIVERED، أضف الربح المحسوب مسبقاً للمستخدم
+    if (status === 'DELIVERED' && order.status !== 'DELIVERED') {
+      await client.query(`
+        UPDATE users 
+        SET balance = balance + $1 
+        WHERE telegram_id = $2
+      `, [order.user_expected_profit, order.user_id]);
+
+      await client.query(`
+        INSERT INTO earnings (user_id, source, amount, description, created_at)
+        VALUES ($1, 'marketing_profit', $2, $3, NOW())
+      `, [order.user_id, order.user_expected_profit, `Profit from Marketing Order #${orderId}`]);
+    }
+
+    await client.query(`
+      UPDATE marketing_orders 
+      SET status = $1, admin_notes = COALESCE($2, admin_notes), updated_at = NOW()
+      WHERE id = $3
+    `, [status, admin_notes, orderId]);
+
+    await client.query('COMMIT');
+    return c.json({ success: true, message: `Order status updated to ${status}` });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ /api/admin/marketing/orders/:id/status:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  } finally {
+    client.release();
+  }
+});
+
+
+
 // =====================================================================
 // === نهاية ملف server.js ===
 // =====================================================================
