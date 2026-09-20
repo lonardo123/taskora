@@ -7026,7 +7026,7 @@ app.get('/api/marketing/providers', async (c) => {
   }
 });
 
-// 2. البحث الحي في المنصات (Smart Fetch باستخدام HTMLRewriter)
+// 2. البحث الحي في المنصات (يدعم SCRAPING و API تلقائياً)
 app.get('/api/marketing/search', async (c) => {
   try {
     const providerId = c.req.query('provider_id');
@@ -7046,74 +7046,124 @@ app.get('/api/marketing/search', async (c) => {
     }
     const provider = providerRes.rows[0];
 
-    // تجهيز رابط البحث
-    const searchUrl = provider.search_url_pattern.replace('{query}', encodeURIComponent(query));
+    let rawProducts = [];
 
-    // محاكاة متصفح حقيقي لتجنب الحظر
-    const response = await fetch(searchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': searchUrl,
+    // ✅ التحقق من الوضع والتبديل التلقائي
+    if (provider.mode === 'API' && provider.api_endpoint && provider.api_search_path) {
+      // ============================================
+      // 🟢 الوضع: API (مستقبلاً)
+      // ============================================
+      console.log(`🔌 Using API mode for provider: ${provider.name}`);
+      
+      const apiUrl = `${provider.api_endpoint}${provider.api_search_path.replace('{query}', encodeURIComponent(query))}`;
+      
+      const headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Taskora/1.0'
+      };
+      
+      // إضافة مفتاح API إذا كان موجوداً
+      if (provider.api_key) {
+        headers['Authorization'] = `Bearer ${provider.api_key}`;
+        headers['X-API-Key'] = provider.api_key; // دعم صيغ مختلفة
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch: ${response.status}`);
-    }
+      const apiResponse = await fetch(apiUrl, {
+        headers,
+        // timeout: 10000 // اختياري
+      });
 
-    const products = [];
-    let currentProduct = {};
+      if (!apiResponse.ok) {
+        throw new Error(`API request failed: ${apiResponse.status}`);
+      }
 
-    // استخدام HTMLRewriter المدمج في Cloudflare Workers لاستخراج البيانات بسرعة وأمان
-    const rewriter = new HTMLRewriter()
-      .on('a, .product-card, .product-item', { // استبدل هذا بالمحدد العام لبطاقة المنتج في الموقع
-        element(element) {
-          currentProduct = { url: element.getAttribute('href') || '' };
-        },
-        text(text) {
-          // استخراج الاسم
-          if (text.text.trim() && !currentProduct.name) {
-            currentProduct.name = text.text.trim();
-          }
-        }
-      })
-      // ملاحظة: هذا مثال عام، يجب تعديل المحددات (Selectors) في قاعدة البيانات لتطابق موقع Vendo/Taager الفعلي
-      .on(provider.selector_name, {
-        text(text) { if (text.text.trim()) currentProduct.name = text.text.trim(); }
-      })
-      .on(provider.selector_price, {
-        text(text) { 
-          if (text.text.trim()) {
-            // استخراج الرقم فقط من النص (مثال: "100 ريال" -> 100)
-            const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
-            if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
-          }
-        }
-      })
-      .on(provider.selector_image, {
-        element(element) {
-          currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+      const apiData = await apiResponse.json();
+      
+      // ⚠️ ملاحظة: بنية JSON تختلف من API لآخر
+      // يجب أن يكون apiData.items أو apiData.products أو apiData.data
+      const items = apiData.items || apiData.products || apiData.data || [];
+      
+      rawProducts = items.map(item => ({
+        name: item.name || item.title,
+        base_price: parseFloat(item.price || item.base_price || 0),
+        image: item.image || item.image_url || item.thumbnail,
+        url: item.url || item.product_url || `${provider.api_product_path?.replace('{id}', item.id) || ''}`
+      })).filter(p => p.name && p.base_price > 0);
+
+    } else {
+      // ============================================
+      // 🟡 الوضع: SCRAPING (الحالي)
+      // ============================================
+      console.log(`🕷️ Using Scraping mode for provider: ${provider.name}`);
+      
+      const searchUrl = provider.search_url_pattern.replace('{query}', encodeURIComponent(query));
+
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': searchUrl,
         }
       });
 
-    await rewriter.transform(response).text(); // تشغيل المحلل
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.status}`);
+      }
 
-    // تصفية المنتجات التي تم استخراج بياناتها بنجاح وحساب الأسعار
+      const products = [];
+      let currentProduct = {};
+
+      const rewriter = new HTMLRewriter()
+        .on('a, .product-card, .product-item', {
+          element(element) {
+            if (currentProduct.name) {
+              products.push({ ...currentProduct });
+            }
+            currentProduct = { url: element.getAttribute('href') || '' };
+          }
+        })
+        .on(provider.selector_name, {
+          text(text) { if (text.text.trim()) currentProduct.name = text.text.trim(); }
+        })
+        .on(provider.selector_price, {
+          text(text) { 
+            if (text.text.trim()) {
+              const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
+              if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
+            }
+          }
+        })
+        .on(provider.selector_image, {
+          element(element) {
+            currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+          }
+        });
+
+      await rewriter.transform(response).text();
+      
+      // إضافة آخر منتج
+      if (currentProduct.name) products.push(currentProduct);
+      
+      rawProducts = products;
+    }
+
+    // ============================================
+    // 💰 تطبيق معادلة الربح (مشتركة للوضعين)
+    // ============================================
     const marginPercent = parseFloat(provider.base_margin_percentage);
     const userProfitPercent = parseFloat(provider.user_profit_percentage);
     const shippingCost = parseFloat(provider.fixed_shipping_cost);
 
-    const formattedProducts = [];
-    for (const p of products) { // ملاحظة: في التطبيق الفعلي، HTMLRewriter يجمع البيانات، هنا نبسط المنطق لضمان العمل
-      if (p.name && p.base_price && !isNaN(p.base_price)) {
+    const formattedProducts = rawProducts
+      .filter(p => p.name && p.base_price && !isNaN(p.base_price))
+      .map(p => {
         const marginAmount = p.base_price * (marginPercent / 100);
         const userExpectedProfit = marginAmount * (userProfitPercent / 100);
         const finalProductPrice = p.base_price + marginAmount;
         const totalPrice = finalProductPrice + shippingCost;
 
-        formattedProducts.push({
+        return {
           provider_id: provider.id,
           product_url: p.url,
           name: p.name,
@@ -7122,19 +7172,19 @@ app.get('/api/marketing/search', async (c) => {
           shipping_cost: shippingCost.toFixed(2),
           total_price: totalPrice.toFixed(2),
           user_expected_profit: userExpectedProfit.toFixed(2)
-          // ⚠️ لاحظ: base_price و margin_amount غير مرسلة للمستخدم
-        });
-      }
-    }
+          // ⚠️ base_price و margin_amount غير مرسلة للمستخدم
+        };
+      });
 
-    // ⚠️ حل بديل أبسط وأضمن لـ HTMLRewriter إذا كانت بنية الموقع معقدة:
-    // إذا فشل الاستخراج أعلاه، سنعيد مصفوفة فارغة مع رسالة تطلب تحديث الـ Selectors في لوحة الأدمن.
-    
-    return c.json({ success: true, data: formattedProducts });
+    return c.json({ 
+      success: true, 
+      mode: provider.mode, // لإعلام الواجهة بالوضع المستخدم
+      data: formattedProducts 
+    });
 
   } catch (err) {
     console.error('❌ /api/marketing/search:', err);
-    return c.json({ success: false, message: 'Failed to fetch live data. Please try again.' }, 500);
+    return c.json({ success: false, message: 'Failed to fetch live data: ' + err.message }, 500);
   }
 });
 
@@ -7293,6 +7343,199 @@ app.post('/api/admin/marketing/orders/:id/status', verifyAdmin, async (c) => {
     return c.json({ success: false, message: 'Server error' }, 500);
   } finally {
     client.release();
+  }
+});
+
+// =====================================================
+// 🏪 ADMIN - MANAGE MARKETING PROVIDERS (CRUD)
+// =====================================================
+
+// 1. جلب كل المنصات (مع إحصائيات)
+app.get('/api/admin/marketing/providers', verifyAdmin, async (c) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        p.*,
+        COUNT(o.id) AS total_orders,
+        COALESCE(SUM(o.taskora_net_profit), 0) AS total_profit
+      FROM marketing_providers p
+      LEFT JOIN marketing_orders o ON o.provider_id = p.id
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+    `);
+    return c.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('❌ GET /api/admin/marketing/providers:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
+
+// 2. إضافة منصة جديدة
+app.post('/api/admin/marketing/providers', verifyAdmin, async (c) => {
+  try {
+    const {
+      name, country_code, search_url_pattern, product_url_pattern,
+      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
+      selector_name, selector_price, selector_image, is_active
+    } = await c.req.json();
+
+    if (!name || !country_code || !search_url_pattern) {
+      return c.json({ success: false, message: 'Name, country, and search URL are required' }, 400);
+    }
+
+    const result = await pool.query(`
+      INSERT INTO marketing_providers (
+        name, country_code, search_url_pattern, product_url_pattern,
+        base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
+        selector_name, selector_price, selector_image, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+    `, [
+      name, country_code.toUpperCase(), search_url_pattern, product_url_pattern || null,
+      base_margin_percentage || 20, user_profit_percentage || 40, fixed_shipping_cost || 0,
+      selector_name || '.product-title', selector_price || '.price',
+      selector_image || '.product-image img', is_active !== false
+    ]);
+
+    return c.json({ success: true, message: '✅ Provider added', data: result.rows[0] });
+  } catch (err) {
+    console.error('❌ POST /api/admin/marketing/providers:', err);
+    return c.json({ success: false, message: 'Failed to add provider' }, 500);
+  }
+});
+
+// 3. تعديل منصة موجودة
+app.put('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
+  try {
+    const providerId = c.req.param('id');
+    const {
+      name, country_code, search_url_pattern, product_url_pattern,
+      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
+      selector_name, selector_price, selector_image, is_active
+    } = await c.req.json();
+
+    const result = await pool.query(`
+      UPDATE marketing_providers SET
+        name = COALESCE($2, name),
+        country_code = COALESCE($3, country_code),
+        search_url_pattern = COALESCE($4, search_url_pattern),
+        product_url_pattern = COALESCE($5, product_url_pattern),
+        base_margin_percentage = COALESCE($6, base_margin_percentage),
+        user_profit_percentage = COALESCE($7, user_profit_percentage),
+        fixed_shipping_cost = COALESCE($8, fixed_shipping_cost),
+        selector_name = COALESCE($9, selector_name),
+        selector_price = COALESCE($10, selector_price),
+        selector_image = COALESCE($11, selector_image),
+        is_active = COALESCE($12, is_active)
+      WHERE id = $1
+      RETURNING *
+    `, [
+      providerId, name, country_code?.toUpperCase(), search_url_pattern, product_url_pattern,
+      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
+      selector_name, selector_price, selector_image, is_active
+    ]);
+
+    if (result.rows.length === 0) {
+      return c.json({ success: false, message: 'Provider not found' }, 404);
+    }
+
+    return c.json({ success: true, message: '✅ Provider updated', data: result.rows[0] });
+  } catch (err) {
+    console.error('❌ PUT /api/admin/marketing/providers/:id:', err);
+    return c.json({ success: false, message: 'Failed to update provider' }, 500);
+  }
+});
+
+// 4. حذف منصة (تفعيل/تعطيل فقط لحماية البيانات)
+app.delete('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
+  try {
+    const providerId = c.req.param('id');
+
+    // التحقق من وجود طلبات مرتبطة
+    const ordersCheck = await pool.query(
+      'SELECT COUNT(*) FROM marketing_orders WHERE provider_id = $1',
+      [providerId]
+    );
+    const ordersCount = parseInt(ordersCheck.rows[0].count);
+
+    if (ordersCount > 0) {
+      // إذا كان هناك طلبات، نقوم بالتعطيل فقط بدلاً من الحذف
+      await pool.query(
+        'UPDATE marketing_providers SET is_active = false WHERE id = $1',
+        [providerId]
+      );
+      return c.json({ 
+        success: true, 
+        message: `⚠️ Provider disabled (has ${ordersCount} orders). Use "Activate" to restore.` 
+      });
+    }
+
+    // حذف كامل إذا لم يكن هناك طلبات
+    await pool.query('DELETE FROM marketing_providers WHERE id = $1', [providerId]);
+    return c.json({ success: true, message: '✅ Provider deleted' });
+  } catch (err) {
+    console.error('❌ DELETE /api/admin/marketing/providers/:id:', err);
+    return c.json({ success: false, message: 'Failed to delete provider' }, 500);
+  }
+});
+
+// 5. اختبار الاتصال بالمنصة (اختياري - مفيد جداً)
+app.post('/api/admin/marketing/providers/:id/test', verifyAdmin, async (c) => {
+  try {
+    const providerId = c.req.param('id');
+    const { test_query = 'watch' } = await c.req.json();
+
+    const providerRes = await pool.query(
+      'SELECT * FROM marketing_providers WHERE id = $1',
+      [providerId]
+    );
+
+    if (providerRes.rows.length === 0) {
+      return c.json({ success: false, message: 'Provider not found' }, 404);
+    }
+
+    const provider = providerRes.rows[0];
+    const testUrl = provider.search_url_pattern.replace('{query}', encodeURIComponent(test_query));
+
+    const response = await fetch(testUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+        'Accept-Language': 'en-US,en;q=0.5'
+      }
+    });
+
+    if (!response.ok) {
+      return c.json({ 
+        success: false, 
+        message: `❌ Connection failed: HTTP ${response.status}` 
+      });
+    }
+
+    const html = await response.text();
+
+    // اختبار بسيط للـ Selectors
+    const hasName = html.includes(provider.selector_name.replace('.', ''));
+    const hasPrice = html.includes(provider.selector_price.replace('.', ''));
+
+    return c.json({
+      success: true,
+      message: '✅ Connection successful',
+      details: {
+        status: response.status,
+        html_size: html.length,
+        selectors_found: {
+          name: hasName,
+          price: hasPrice
+        },
+        recommendation: hasName && hasPrice 
+          ? '✅ Selectors look good' 
+          : '⚠️ Some selectors may not match. Use browser Inspect to verify.'
+      }
+    });
+  } catch (err) {
+    console.error('❌ Test provider error:', err);
+    return c.json({ success: false, message: 'Test failed: ' + err.message }, 500);
   }
 });
 
