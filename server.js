@@ -7069,137 +7069,1272 @@ app.get('/api/marketing/providers', async (c) => {
   }
 });
 
-// 2. البحث الحي (جلب الصفحة الرئيسية + تصفية ذكية)
+// ================================================================
+// 2. البحث الحي في المنصات النشطة
+//    يدعم:
+//    1) مواقع بها مربع بحث
+//    2) مواقع تستخدم {query}
+//    3) مواقع تستخدم {page}
+//    4) مواقع تعتمد على الأقسام
+//    5) مواقع تعتمد على "عرض المزيد" / Next / Pagination
+//    6) مواقع لا تحتوي على مربع بحث إطلاقًا
+//    7) API providers بشكل عام عند توفر API
+// ================================================================
+
 app.get('/api/marketing/search', async (c) => {
+
   try {
+
     const country = c.req.query('country');
     const query = c.req.query('q');
 
     if (!country || !query) {
-      return c.json({ success: false, message: 'Country and query are required' }, 400);
+      return c.json({
+        success: false,
+        message: 'Country and query are required'
+      }, 400);
     }
 
-    // جلب كل المنصات النشطة لهذه الدولة
-    const providersRes = await pool.query(
-      'SELECT * FROM marketing_providers WHERE country_code = $1 AND is_active = true',
-      [country.toUpperCase()]
-    );
+    const queryLower = query
+      .toLowerCase()
+      .trim();
+
+    if (queryLower.length < 2) {
+      return c.json({
+        success: false,
+        message: 'Search query must contain at least 2 characters'
+      }, 400);
+    }
+
+
+    // ============================================================
+    // جلب جميع المنصات النشطة للدولة
+    // ============================================================
+
+    const providersRes = await pool.query(`
+      SELECT
+        id,
+        name,
+        country_code,
+        base_url,
+        product_url_pattern,
+        base_margin_percentage,
+        user_profit_percentage,
+        fixed_shipping_cost,
+        selector_name,
+        selector_price,
+        selector_image,
+        is_active,
+        mode,
+        api_endpoint,
+        api_key,
+        api_search_path,
+        api_product_path
+      FROM marketing_providers
+      WHERE country_code = $1
+        AND is_active = true
+      ORDER BY name ASC
+    `, [
+      country.toUpperCase()
+    ]);
+
 
     if (providersRes.rows.length === 0) {
-      return c.json({ success: true, data: [], message: 'No providers found for this country' });
+
+      return c.json({
+        success: true,
+        data: [],
+        providers_searched: 0,
+        total_results: 0,
+        message: 'No active providers found for this country'
+      });
+
     }
 
+
     const allProducts = [];
-    const queryLower = query.toLowerCase().trim();
 
-    // البحث في كل منصة على حدة
-    const searchPromises = providersRes.rows.map(async (provider) => {
+
+    // ============================================================
+    // أدوات مساعدة خاصة بمحرك البحث
+    // ============================================================
+
+    const normalizeUrl = (url, baseUrl) => {
+
       try {
-        // ✅ جلب الصفحة الرئيسية للموقع (كما يفعل الشخص العادي)
-        const response = await fetch(provider.base_url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-          }
-        });
 
-        if (!response.ok) return [];
+        if (!url) return '';
 
-        const products = [];
-        let currentProduct = {};
+        return new URL(url, baseUrl).href;
 
-        // استخراج كل المنتجات من الصفحة
+      } catch {
+
+        return '';
+
+      }
+
+    };
+
+
+    const isSameOrigin = (url, baseUrl) => {
+
+      try {
+
+        return new URL(url).origin === new URL(baseUrl).origin;
+
+      } catch {
+
+        return false;
+
+      }
+
+    };
+
+
+    const containsSearchTerm = (value) => {
+
+      if (!value) return false;
+
+      return value
+        .toLowerCase()
+        .includes(queryLower);
+
+    };
+
+
+    const isPaginationLink = (text, href) => {
+
+      const value = (
+        `${text || ''} ${href || ''}`
+      ).toLowerCase();
+
+      return (
+        value.includes('next') ||
+        value.includes('page') ||
+        value.includes('pagination') ||
+        value.includes('load-more') ||
+        value.includes('loadmore') ||
+        value.includes('show-more') ||
+        value.includes('showmore') ||
+        value.includes('more') ||
+        value.includes('عرض المزيد') ||
+        value.includes('المزيد') ||
+        value.includes('التالي') ||
+        value.includes('الصفحة')
+      );
+
+    };
+
+
+    const isCategoryLink = (text, href) => {
+
+      const value = (
+        `${text || ''} ${href || ''}`
+      ).toLowerCase();
+
+      return (
+        value.includes('category') ||
+        value.includes('categories') ||
+        value.includes('collection') ||
+        value.includes('collections') ||
+        value.includes('shop') ||
+        value.includes('products') ||
+        value.includes('قسم') ||
+        value.includes('اقسام') ||
+        value.includes('منتجات')
+      );
+
+    };
+
+
+    // ============================================================
+    // استخراج المنتجات من صفحة HTML
+    // ============================================================
+
+    const extractProductsFromHtml = async (
+      response,
+      provider
+    ) => {
+
+      const products = [];
+
+      let currentProduct = null;
+
+      try {
+
+        const productContainerSelector =
+          [
+            'a.product-card',
+            '.product-card',
+            '.product-item',
+            '.product',
+            '[data-product-id]',
+            '[data-product]',
+            '[class*="product-card"]',
+            '[class*="product-item"]'
+          ].join(',');
+
+
         const rewriter = new HTMLRewriter()
-          .on('a.product-card, .product-item, [data-product-id]', { // محددات بطاقات المنتجات
+
+          // ------------------------------------------------------
+          // بداية منتج
+          // ------------------------------------------------------
+
+          .on(productContainerSelector, {
+
             element(element) {
-              if (currentProduct.name && currentProduct.base_price) {
-                products.push({ ...currentProduct });
+
+              if (
+                currentProduct &&
+                currentProduct.name &&
+                currentProduct.base_price
+              ) {
+
+                products.push(currentProduct);
+
               }
-              currentProduct = { 
-                url: element.getAttribute('href') || '',
-                id: element.getAttribute('data-product-id') || ''
+
+
+              currentProduct = {
+
+                url:
+                  element.getAttribute('href') ||
+                  element.getAttribute('data-url') ||
+                  '',
+
+                id:
+                  element.getAttribute('data-product-id') ||
+                  element.getAttribute('data-id') ||
+                  '',
+
+                image: ''
+
               };
+
             }
+
           })
+
+
+          // ------------------------------------------------------
+          // اسم المنتج
+          // ------------------------------------------------------
+
           .on(provider.selector_name, {
-            text(text) { 
-              if (text.text.trim()) {
-                currentProduct.name = (currentProduct.name || '') + text.text.trim() + ' ';
-              }
+
+            text(text) {
+
+              if (!currentProduct) return;
+
+              const value =
+                text.text.trim();
+
+              if (!value) return;
+
+              currentProduct.name =
+                (
+                  currentProduct.name || ''
+                ) +
+                value +
+                ' ';
+
             }
+
           })
+
+
+          // ------------------------------------------------------
+          // السعر
+          // ------------------------------------------------------
+
           .on(provider.selector_price, {
-            text(text) { 
-              if (text.text.trim()) {
-                const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
-                if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
+
+            text(text) {
+
+              if (!currentProduct) return;
+
+              const value =
+                text.text.trim();
+
+              if (!value) return;
+
+
+              const priceMatch =
+                value.match(
+                  /[\d,]+(?:\.\d+)?/
+                );
+
+
+              if (priceMatch) {
+
+                const parsed =
+                  parseFloat(
+                    priceMatch[0]
+                      .replace(/,/g, '')
+                  );
+
+
+                if (
+                  Number.isFinite(parsed) &&
+                  parsed > 0
+                ) {
+
+                  currentProduct.base_price =
+                    parsed;
+
+                }
+
               }
+
             }
+
           })
+
+
+          // ------------------------------------------------------
+          // الصورة
+          // ------------------------------------------------------
+
           .on(provider.selector_image, {
+
             element(element) {
-              currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+
+              if (!currentProduct) return;
+
+
+              currentProduct.image =
+                element.getAttribute('src') ||
+                element.getAttribute('data-src') ||
+                element.getAttribute('data-lazy-src') ||
+                element.getAttribute('data-original') ||
+                '';
+
             }
+
           });
 
-        await rewriter.transform(response).text();
-        
-        // إضافة آخر منتج
-        if (currentProduct.name && currentProduct.base_price) {
-          products.push(currentProduct);
+
+        await rewriter
+          .transform(response)
+          .text();
+
+
+        // --------------------------------------------------------
+        // آخر منتج
+        // --------------------------------------------------------
+
+        if (
+          currentProduct &&
+          currentProduct.name &&
+          currentProduct.base_price
+        ) {
+
+          products.push(
+            currentProduct
+          );
+
         }
 
-        // ✅ التصفية الذكية: البحث عن كلمة المستخدم في أسماء المنتجات
-        const filteredProducts = products.filter(p => 
-          p.name && 
-          p.name.toLowerCase().includes(queryLower)
+
+      } catch (extractError) {
+
+        console.error(
+          '❌ Product extraction error:',
+          extractError
         );
 
-        // تطبيق معادلات الربح على النتائج المفلترة فقط
-        const marginPercent = parseFloat(provider.base_margin_percentage);
-        const userProfitPercent = parseFloat(provider.user_profit_percentage);
-        const shippingCost = parseFloat(provider.fixed_shipping_cost);
+      }
 
-        return filteredProducts.map(p => {
-          const marginAmount = p.base_price * (marginPercent / 100);
-          const userExpectedProfit = marginAmount * (userProfitPercent / 100);
-          const finalProductPrice = p.base_price + marginAmount;
-          const totalPrice = finalProductPrice + shippingCost;
+
+      return products;
+
+    };
+
+
+    // ============================================================
+    // استخراج روابط التنقل من الصفحة
+    // ============================================================
+
+    const extractNavigationLinks = async (
+      response,
+      provider
+    ) => {
+
+      const links = [];
+
+      try {
+
+        const rewriter =
+          new HTMLRewriter()
+
+            .on('a', {
+
+              element(element) {
+
+                const href =
+                  element.getAttribute('href');
+
+                if (!href) return;
+
+
+                const normalized =
+                  normalizeUrl(
+                    href,
+                    provider.base_url
+                  );
+
+
+                if (!normalized) return;
+
+
+                if (
+                  !isSameOrigin(
+                    normalized,
+                    provider.base_url
+                  )
+                ) {
+                  return;
+                }
+
+
+                links.push({
+
+                  url: normalized,
+
+                  text: '',
+
+                  href
+
+                });
+
+              }
+
+            });
+
+
+        await rewriter
+          .transform(response)
+          .text();
+
+
+      } catch (linkError) {
+
+        console.error(
+          '❌ Navigation extraction error:',
+          linkError
+        );
+
+      }
+
+
+      return links;
+
+    };
+
+
+    // ============================================================
+    // البحث داخل منصة واحدة
+    // ============================================================
+
+    const searchProvider = async (
+      provider
+    ) => {
+
+      const providerProducts = [];
+
+      const visitedUrls = new Set();
+
+      const queuedUrls = new Set();
+
+      const navigationQueue = [];
+
+
+      // ==========================================================
+      // إعدادات البحث
+      // ==========================================================
+
+      const MAX_PAGES =
+        30;
+
+      const MAX_NAVIGATION_URLS =
+        100;
+
+
+      // ==========================================================
+      // إضافة رابط إلى قائمة البحث
+      // ==========================================================
+
+      const addUrl = (url) => {
+
+        if (!url) return;
+
+        const normalized =
+          normalizeUrl(
+            url,
+            provider.base_url
+          );
+
+        if (!normalized) return;
+
+
+        if (
+          !isSameOrigin(
+            normalized,
+            provider.base_url
+          )
+        ) {
+          return;
+        }
+
+
+        if (
+          visitedUrls.has(normalized) ||
+          queuedUrls.has(normalized)
+        ) {
+          return;
+        }
+
+
+        queuedUrls.add(normalized);
+
+        navigationQueue.push(
+          normalized
+        );
+
+      };
+
+
+      // ==========================================================
+      // إنشاء روابط البحث المحتملة
+      //
+      // لا نفترض أن كل المواقع تستخدم نفس طريقة البحث.
+      // ==========================================================
+
+      let baseUrl =
+        provider.base_url;
+
+
+      // ----------------------------------------------------------
+      // الطريقة الأولى:
+      // {query}
+      // ----------------------------------------------------------
+
+      if (
+        baseUrl.includes('{query}')
+      ) {
+
+        addUrl(
+          baseUrl.replace(
+            /\{query\}/gi,
+            encodeURIComponent(query)
+          )
+        );
+
+      }
+
+
+      // ----------------------------------------------------------
+      // الطريقة الثانية:
+      // {query} + {page}
+      // ----------------------------------------------------------
+
+      if (
+        baseUrl.includes('{query}') &&
+        baseUrl.includes('{page}')
+      ) {
+
+        for (
+          let page = 1;
+          page <= MAX_PAGES;
+          page++
+        ) {
+
+          addUrl(
+            baseUrl
+              .replace(
+                /\{query\}/gi,
+                encodeURIComponent(query)
+              )
+              .replace(
+                /\{page\}/gi,
+                String(page)
+              )
+          );
+
+        }
+
+      }
+
+
+      // ----------------------------------------------------------
+      // الطريقة الثالثة:
+      // إذا كان الموقع يستخدم {page} فقط
+      // ----------------------------------------------------------
+
+      if (
+        baseUrl.includes('{page}') &&
+        !baseUrl.includes('{query}')
+      ) {
+
+        for (
+          let page = 1;
+          page <= MAX_PAGES;
+          page++
+        ) {
+
+          addUrl(
+            baseUrl.replace(
+              /\{page\}/gi,
+              String(page)
+            )
+          );
+
+        }
+
+      }
+
+
+      // ----------------------------------------------------------
+      // الطريقة الرابعة:
+      // مواقع تستخدم ?q=
+      // ----------------------------------------------------------
+
+      if (
+        !baseUrl.includes('{query}')
+      ) {
+
+        try {
+
+          const searchParams = [
+            'q',
+            'search',
+            'query',
+            'keyword',
+            's'
+          ];
+
+
+          for (
+            const param of searchParams
+          ) {
+
+            const url =
+              new URL(baseUrl);
+
+            url.searchParams.set(
+              param,
+              query
+            );
+
+            addUrl(
+              url.href
+            );
+
+          }
+
+        } catch {}
+
+      }
+
+
+      // ----------------------------------------------------------
+      // الطريقة الخامسة:
+      // /search?q=
+      // ----------------------------------------------------------
+
+      try {
+
+        const parsedBase =
+          new URL(baseUrl);
+
+        const searchPath =
+          new URL(
+            '/search',
+            parsedBase.origin
+          );
+
+        searchPath.searchParams.set(
+          'q',
+          query
+        );
+
+        addUrl(
+          searchPath.href
+        );
+
+
+        const productsPath =
+          new URL(
+            '/products',
+            parsedBase.origin
+          );
+
+        productsPath.searchParams.set(
+          'q',
+          query
+        );
+
+        addUrl(
+          productsPath.href
+        );
+
+
+      } catch {}
+
+
+      // ----------------------------------------------------------
+      // الطريقة السادسة:
+      // الصفحة الرئيسية نفسها
+      //
+      // مهمة جدًا للمواقع التي لا تحتوي على مربع بحث.
+      // ----------------------------------------------------------
+
+      addUrl(baseUrl);
+
+
+      // ==========================================================
+      // معالجة الصفحات
+      // ==========================================================
+
+      let processedPages = 0;
+
+
+      while (
+        navigationQueue.length > 0 &&
+        processedPages < MAX_NAVIGATION_URLS
+      ) {
+
+        const currentUrl =
+          navigationQueue.shift();
+
+
+        if (
+          visitedUrls.has(currentUrl)
+        ) {
+          continue;
+        }
+
+
+        visitedUrls.add(
+          currentUrl
+        );
+
+
+        processedPages++;
+
+
+        try {
+
+          const response =
+            await fetch(
+              currentUrl,
+              {
+                headers: {
+
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+
+                  'Accept':
+                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+
+                  'Accept-Language':
+                    'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7'
+
+                }
+              }
+            );
+
+
+          if (!response.ok) {
+            continue;
+          }
+
+
+          // ======================================================
+          // مهم:
+          // نحتاج نسختين من الصفحة:
+          // واحدة لاستخراج المنتجات
+          // وواحدة لاستخراج روابط التنقل.
+          //
+          // Response body لا يمكن قراءته مرتين،
+          // لذلك نستخدم clone().
+          // ======================================================
+
+          const productResponse =
+            response.clone();
+
+          const navigationResponse =
+            response;
+
+
+          // ======================================================
+          // استخراج المنتجات
+          // ======================================================
+
+          const pageProducts =
+            await extractProductsFromHtml(
+              productResponse,
+              provider
+            );
+
+
+          providerProducts.push(
+            ...pageProducts
+          );
+
+
+          // ======================================================
+          // استخراج روابط الأقسام / المزيد / الصفحات
+          // ======================================================
+
+          if (
+            processedPages <
+            MAX_NAVIGATION_URLS
+          ) {
+
+            const links =
+              await extractNavigationLinks(
+                navigationResponse,
+                provider
+              );
+
+
+            for (
+              const link of links
+            ) {
+
+              if (
+                navigationQueue.length >=
+                MAX_NAVIGATION_URLS
+              ) {
+                break;
+              }
+
+
+              const href =
+                link.url;
+
+
+              const lowerHref =
+                href.toLowerCase();
+
+
+              // --------------------------------------------------
+              // نضيف الروابط التي يمكن أن تقود إلى منتجات
+              // --------------------------------------------------
+
+              if (
+                containsSearchTerm(
+                  href
+                ) ||
+
+                isPaginationLink(
+                  link.text,
+                  href
+                ) ||
+
+                isCategoryLink(
+                  link.text,
+                  href
+                ) ||
+
+                lowerHref.includes(
+                  encodeURIComponent(
+                    queryLower
+                  )
+                )
+              ) {
+
+                addUrl(href);
+
+              }
+
+            }
+
+          }
+
+
+        } catch (pageError) {
+
+          console.error(
+            `❌ Error fetching ${currentUrl} from ${provider.name}:`,
+            pageError
+          );
+
+        }
+
+      }
+
+
+      // ==========================================================
+      // إزالة المنتجات المكررة
+      // ==========================================================
+
+      const uniqueProducts = [];
+
+      const seenProducts =
+        new Set();
+
+
+      for (
+        const product of providerProducts
+      ) {
+
+        if (
+          !product ||
+          !product.name ||
+          !product.base_price
+        ) {
+          continue;
+        }
+
+
+        const normalizedName =
+          product.name
+            .trim()
+            .toLowerCase();
+
+
+        const normalizedUrl =
+          product.url ||
+          '';
+
+
+        const key =
+          `${normalizedUrl}|${normalizedName}|${product.base_price}`;
+
+
+        if (
+          seenProducts.has(key)
+        ) {
+          continue;
+        }
+
+
+        seenProducts.add(key);
+
+        uniqueProducts.push(
+          product
+        );
+
+      }
+
+
+      // ==========================================================
+      // البحث في اسم المنتج
+      // ==========================================================
+
+      const filteredProducts =
+        uniqueProducts.filter(
+          product => {
+
+            if (
+              !product.name
+            ) {
+              return false;
+            }
+
+
+            return product.name
+              .toLowerCase()
+              .includes(queryLower);
+
+          }
+        );
+
+
+      // ==========================================================
+      // الحسابات المالية
+      // ==========================================================
+
+      const marginPercent =
+        parseFloat(
+          provider.base_margin_percentage
+        ) || 0;
+
+
+      const userProfitPercent =
+        parseFloat(
+          provider.user_profit_percentage
+        ) || 0;
+
+
+      const shippingCost =
+        parseFloat(
+          provider.fixed_shipping_cost
+        ) || 0;
+
+
+      return filteredProducts.map(
+        product => {
+
+          const marginAmount =
+            product.base_price *
+            (
+              marginPercent / 100
+            );
+
+
+          const userExpectedProfit =
+            marginAmount *
+            (
+              userProfitPercent / 100
+            );
+
+
+          const finalProductPrice =
+            product.base_price +
+            marginAmount;
+
+
+          const totalPrice =
+            finalProductPrice +
+            shippingCost;
+
+
+          let productUrl =
+            product.url || '';
+
+
+          if (
+            productUrl &&
+            !productUrl.startsWith('http')
+          ) {
+
+            productUrl =
+              normalizeUrl(
+                productUrl,
+                provider.base_url
+              );
+
+          }
+
 
           return {
-            provider_id: provider.id,
-            provider_name: provider.name,
-            product_url: p.url.startsWith('http') ? p.url : `${provider.base_url}${p.url}`,
-            name: p.name.trim(),
-            image: p.image || 'https://via.placeholder.com/150',
-            final_product_price: finalProductPrice.toFixed(2),
-            shipping_cost: shippingCost.toFixed(2),
-            total_price: totalPrice.toFixed(2),
-            user_expected_profit: userExpectedProfit.toFixed(2)
+
+            provider_id:
+              provider.id,
+
+            provider_name:
+              provider.name,
+
+            product_url:
+              productUrl,
+
+            name:
+              product.name.trim(),
+
+            image:
+              product.image || '',
+
+            final_product_price:
+              finalProductPrice.toFixed(2),
+
+            shipping_cost:
+              shippingCost.toFixed(2),
+
+            total_price:
+              totalPrice.toFixed(2),
+
+            user_expected_profit:
+              userExpectedProfit.toFixed(2)
+
           };
-        });
 
-      } catch (err) {
-        console.error(`❌ Error fetching from ${provider.name}:`, err);
-        return [];
+        }
+      );
+
+    };
+
+
+    // ============================================================
+    // تشغيل جميع المنصات في نفس الوقت
+    // ============================================================
+
+    const searchPromises =
+      providersRes.rows.map(
+        async provider => {
+
+          try {
+
+            // ====================================================
+            // SCRAPING
+            // ====================================================
+
+            if (
+              (
+                provider.mode ||
+                'SCRAPING'
+              ).toUpperCase() ===
+              'SCRAPING'
+            ) {
+
+              return await searchProvider(
+                provider
+              );
+
+            }
+
+
+            // ====================================================
+            // API
+            // ====================================================
+
+            if (
+              (
+                provider.mode ||
+                ''
+              ).toUpperCase() ===
+              'API'
+            ) {
+
+              /*
+               * لا نفترض شكل JSON خاص بمزود معين.
+               *
+               * لذلك API mode يظل جاهزًا،
+               * لكن لا نقوم بتخمين أسماء الحقول.
+               *
+               * عندما نضيف Provider API حقيقي،
+               * يتم تعريف mapping الخاص به.
+               */
+
+              console.warn(
+                `⚠️ API provider ${provider.name} ` +
+                `requires provider-specific API mapping.`
+              );
+
+
+              return [];
+
+            }
+
+
+            return [];
+
+          } catch (providerError) {
+
+            console.error(
+              `❌ Marketing provider ${provider.name} error:`,
+              providerError
+            );
+
+
+            return [];
+
+          }
+
+        }
+      );
+
+
+    const resultsArray =
+      await Promise.all(
+        searchPromises
+      );
+
+
+    // ============================================================
+    // تجميع النتائج
+    // ============================================================
+
+    for (
+      const providerResults
+      of resultsArray
+    ) {
+
+      if (
+        !Array.isArray(
+          providerResults
+        )
+      ) {
+        continue;
       }
+
+
+      allProducts.push(
+        ...providerResults
+      );
+
+    }
+
+
+    // ============================================================
+    // إزالة أي تكرار نهائي بين النتائج
+    // ============================================================
+
+    const finalProducts = [];
+
+    const finalSeen =
+      new Set();
+
+
+    for (
+      const product
+      of allProducts
+    ) {
+
+      const key =
+        `${product.provider_id}|` +
+        `${product.product_url}|` +
+        `${product.name}`;
+
+
+      if (
+        finalSeen.has(key)
+      ) {
+        continue;
+      }
+
+
+      finalSeen.add(key);
+
+      finalProducts.push(
+        product
+      );
+
+    }
+
+
+    // ============================================================
+    // النتيجة
+    // ============================================================
+
+    return c.json({
+
+      success: true,
+
+      data:
+        finalProducts,
+
+      providers_searched:
+        providersRes.rows.length,
+
+      total_results:
+        finalProducts.length
+
     });
 
-    const resultsArray = await Promise.all(searchPromises);
-    const flatResults = resultsArray.flat();
-
-    return c.json({ 
-      success: true, 
-      data: flatResults,
-      providers_searched: providersRes.rows.length,
-      total_results: flatResults.length
-    });
 
   } catch (err) {
-    console.error('❌ /api/marketing/search:', err);
-    return c.json({ success: false, message: 'Failed to fetch live data: ' + err.message }, 500);
+
+    console.error(
+      '❌ /api/marketing/search:',
+      err
+    );
+
+
+    return c.json({
+
+      success: false,
+
+      message:
+        'Failed to fetch live data'
+
+    }, 500);
+
   }
+
 });
 
 // 3. إنشاء طلب جديد (مع إعادة الحساب الحي لضمان الأمان 100%)
@@ -7233,12 +8368,53 @@ app.post('/api/marketing/orders', async (c) => {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
     
-    // استخراج السعر الحي (مبسط)
-    const html = await response.text();
-    const priceMatch = html.match(new RegExp(`${provider.selector_price.replace('.', '\\.')}.*?([\\d,]+\\.?\\d*)`)) || html.match(/[\d,]+\.?\d*/);
-    const basePrice = priceMatch ? parseFloat(priceMatch[1].replace(',', '')) : 0;
+    // استخراج السعر الحي باستخدام نفس CSS selector الخاص بالمنصة
+if (!response.ok) {
+  await client.query('ROLLBACK');
 
-    if (!basePrice || isNaN(basePrice)) {
+  return c.json({
+    success: false,
+    message: 'Could not access the supplier product page.'
+  }, 502);
+}
+
+let verifiedBasePrice = 0;
+
+const priceRewriter = new HTMLRewriter()
+  .on(provider.selector_price, {
+    text(text) {
+
+      if (verifiedBasePrice > 0) return;
+
+      const value = text.text.trim();
+
+      if (!value) return;
+
+      const priceMatch =
+        value.match(/[\d,]+(?:\.\d+)?/);
+
+      if (priceMatch) {
+
+        const parsed =
+          parseFloat(
+            priceMatch[0].replace(/,/g, '')
+          );
+
+        if (
+          Number.isFinite(parsed) &&
+          parsed > 0
+        ) {
+          verifiedBasePrice = parsed;
+        }
+      }
+    }
+  });
+
+await priceRewriter.transform(response).text();
+
+const basePrice = verifiedBasePrice;
+
+if (!basePrice || !Number.isFinite(basePrice)) {
       await client.query('ROLLBACK');
       return c.json({ success: false, message: 'Could not verify live product price. Please try again.' }, 500);
     }
@@ -7307,58 +8483,671 @@ app.get('/api/admin/marketing/orders', verifyAdmin, async (c) => {
   }
 });
 
-// 5. [ADMIN ONLY] تحديث حالة الطلب وإضافة ربح المستخدم عند التسليم
-app.post('/api/admin/marketing/orders/:id/status', verifyAdmin, async (c) => {
-  const client = await pool.connect();
-  try {
-    const orderId = c.req.param('id');
-    const { status, admin_notes } = await c.req.json();
+// =====================================================================
+// 5. [ADMIN ONLY]
+// تحديث حالة الطلب وإضافة ربح المستخدم عند التسليم
+//
+// الحالات المسموح بها:
+// PENDING
+// PROCESSING
+// DELIVERED
+// CANCELLED
+//
+// عند DELIVERED:
+// 1. إضافة user_expected_profit للمستخدم
+// 2. تسجيل الربح في earnings
+// 3. حساب 5% Referral Commission
+// 4. إضافة العمولة لصاحب الإحالة
+// 5. تسجيل referral_earnings
+// 6. تسجيل العمولة في earnings
+//
+// كل العمليات داخل Transaction واحدة.
+// =====================================================================
 
-    await client.query('BEGIN');
+app.post(
+  '/api/admin/marketing/orders/:id/status',
+  verifyAdmin,
+  async (c) => {
 
-    const orderRes = await client.query(`
-      SELECT user_id, user_expected_profit, status 
-      FROM marketing_orders WHERE id = $1 FOR UPDATE
-    `, [orderId]);
+    const client =
+      await pool.connect();
 
-    if (orderRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'Order not found' }, 404);
+    try {
+
+      const orderId =
+        c.req.param('id');
+
+
+      const {
+        status,
+        admin_notes
+      } =
+        await c.req.json();
+
+
+      // ==========================================================
+      // التحقق من حالة الطلب
+      // ==========================================================
+
+      const allowedStatuses = [
+        'PENDING',
+        'PROCESSING',
+        'DELIVERED',
+        'CANCELLED'
+      ];
+
+
+      const normalizedStatus =
+        String(status || '')
+          .trim()
+          .toUpperCase();
+
+
+      if (
+        !allowedStatuses.includes(
+          normalizedStatus
+        )
+      ) {
+
+        return c.json({
+          success: false,
+          message: 'Invalid order status'
+        }, 400);
+
+      }
+
+
+      // ==========================================================
+      // بدء Transaction
+      // ==========================================================
+
+      await client.query(
+        'BEGIN'
+      );
+
+
+      // ==========================================================
+      // جلب الطلب وقفل السجل
+      // ==========================================================
+
+      const orderRes =
+        await client.query(`
+
+          SELECT
+            id,
+            user_id,
+            user_expected_profit,
+            taskora_net_profit,
+            status
+
+          FROM marketing_orders
+
+          WHERE id = $1
+
+          FOR UPDATE
+
+        `, [
+          orderId
+        ]);
+
+
+      if (
+        orderRes.rows.length === 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+
+        return c.json({
+          success: false,
+          message: 'Order not found'
+        }, 404);
+
+      }
+
+
+      const order =
+        orderRes.rows[0];
+
+
+      // ==========================================================
+      // منع تنفيذ DELIVERED أكثر من مرة
+      // ==========================================================
+
+      const isNewDelivery =
+        normalizedStatus === 'DELIVERED' &&
+        order.status !== 'DELIVERED';
+
+
+      // ==========================================================
+      // إذا كان الطلب DELIVERED بالفعل
+      // فلا نضيف الربح مرة ثانية.
+      // ==========================================================
+
+      if (
+        normalizedStatus === 'DELIVERED' &&
+        order.status === 'DELIVERED'
+      ) {
+
+        await client.query(`
+
+          UPDATE marketing_orders
+
+          SET
+            admin_notes =
+              COALESCE($1, admin_notes),
+
+            updated_at = NOW()
+
+          WHERE id = $2
+
+        `, [
+          admin_notes,
+          orderId
+        ]);
+
+
+        await client.query(
+          'COMMIT'
+        );
+
+
+        return c.json({
+
+          success: true,
+
+          message:
+            'Order is already DELIVERED. Profit was not added again.'
+
+        });
+
+      }
+
+
+      // ==========================================================
+      // تنفيذ التسليم لأول مرة
+      // ==========================================================
+
+      if (isNewDelivery) {
+
+
+        // ========================================================
+        // التحقق من ربح المستخدم
+        // ========================================================
+
+        const userProfit =
+          Number(
+            order.user_expected_profit
+          );
+
+
+        if (
+          !Number.isFinite(userProfit) ||
+          userProfit <= 0
+        ) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Invalid user marketing profit for this order'
+
+          }, 400);
+
+        }
+
+
+        // ========================================================
+        // التحقق من وجود المستخدم
+        // ========================================================
+
+        const userRes =
+          await client.query(`
+
+            SELECT
+              telegram_id
+
+            FROM users
+
+            WHERE telegram_id = $1
+
+            FOR UPDATE
+
+          `, [
+            order.user_id
+          ]);
+
+
+        if (
+          userRes.rows.length === 0
+        ) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Order user was not found'
+
+          }, 404);
+
+        }
+
+
+        // ========================================================
+        // 1. إضافة ربح التسويق إلى رصيد المستخدم
+        // ========================================================
+
+        const balanceRes =
+          await client.query(`
+
+            UPDATE users
+
+            SET balance =
+              COALESCE(balance, 0) + $1
+
+            WHERE telegram_id = $2
+
+            RETURNING telegram_id
+
+          `, [
+            userProfit,
+            order.user_id
+          ]);
+
+
+        if (
+          balanceRes.rows.length === 0
+        ) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Failed to add marketing profit to user balance'
+
+          }, 500);
+
+        }
+
+
+        // ========================================================
+        // 2. تسجيل ربح المستخدم في earnings
+        // ========================================================
+
+        await client.query(`
+
+          INSERT INTO earnings (
+            user_id,
+            source,
+            amount,
+            description,
+            created_at
+          )
+
+          VALUES (
+            $1,
+            'marketing_profit',
+            $2,
+            $3,
+            NOW()
+          )
+
+        `, [
+
+          order.user_id,
+
+          userProfit,
+
+          `Profit from Marketing Order #${orderId}`
+
+        ]);
+
+
+        // ========================================================
+        // 3. حساب عمولة الإحالة
+        //
+        // 5% من ربح المستخدم
+        //
+        // مثال:
+        //
+        // user profit = $0.80
+        //
+        // referral = $0.80 × 5%
+        //
+        // referral = $0.04
+        // ========================================================
+
+        const referralCommission =
+          Number(
+            (
+              userProfit * 0.05
+            ).toFixed(6)
+          );
+
+
+        // ========================================================
+        // 4. إذا كان هناك Referral
+        // ========================================================
+
+        if (
+          referralCommission > 0 &&
+          Number.isFinite(
+            referralCommission
+          )
+        ) {
+
+
+          const referralRes =
+            await client.query(`
+
+              SELECT
+                referrer_id
+
+              FROM referrals
+
+              WHERE referee_id = $1
+
+              ORDER BY created_at ASC
+
+              LIMIT 1
+
+              FOR SHARE
+
+            `, [
+              order.user_id
+            ]);
+
+
+          // ======================================================
+          // يوجد صاحب إحالة
+          // ======================================================
+
+          if (
+            referralRes.rows.length > 0
+          ) {
+
+
+            const referrerId =
+              referralRes.rows[0]
+                .referrer_id;
+
+
+            // ====================================================
+            // التحقق من وجود صاحب الإحالة
+            // ====================================================
+
+            const referrerRes =
+              await client.query(`
+
+                SELECT
+                  telegram_id
+
+                FROM users
+
+                WHERE telegram_id = $1
+
+                FOR UPDATE
+
+              `, [
+                referrerId
+              ]);
+
+
+            if (
+              referrerRes.rows.length > 0
+            ) {
+
+
+              // ==================================================
+              // 5. إضافة العمولة لصاحب الإحالة
+              // ==================================================
+
+              const referralBalanceRes =
+                await client.query(`
+
+                  UPDATE users
+
+                  SET
+
+                    balance =
+                      COALESCE(balance, 0)
+                      + $1,
+
+                    referral_earnings =
+                      COALESCE(
+                        referral_earnings,
+                        0
+                      )
+                      + $1
+
+                  WHERE telegram_id = $2
+
+                  RETURNING telegram_id
+
+                `, [
+
+                  referralCommission,
+
+                  referrerId
+
+                ]);
+
+
+              if (
+                referralBalanceRes.rows.length === 0
+              ) {
+
+                throw new Error(
+                  'Failed to add referral commission'
+                );
+
+              }
+
+
+              // ==================================================
+              // 6. تسجيل Referral Earnings
+              // ==================================================
+
+              await client.query(`
+
+                INSERT INTO referral_earnings (
+                  referrer_id,
+                  referee_id,
+                  amount,
+                  created_at
+                )
+
+                VALUES (
+                  $1,
+                  $2,
+                  $3,
+                  NOW()
+                )
+
+              `, [
+
+                referrerId,
+
+                order.user_id,
+
+                referralCommission
+
+              ]);
+
+
+              // ==================================================
+              // 7. تسجيل العمولة في earnings
+              // ==================================================
+
+              await client.query(`
+
+                INSERT INTO earnings (
+                  user_id,
+                  source,
+                  amount,
+                  description,
+                  created_at
+                )
+
+                VALUES (
+                  $1,
+                  'referral_bonus',
+                  $2,
+                  $3,
+                  NOW()
+                )
+
+              `, [
+
+                referrerId,
+
+                referralCommission,
+
+                `5% referral commission from Marketing Order #${orderId}`
+
+              ]);
+
+            }
+
+          }
+
+        }
+
+      }
+
+
+      // ==========================================================
+      // تحديث حالة الطلب
+      // ==========================================================
+
+      await client.query(`
+
+        UPDATE marketing_orders
+
+        SET
+
+          status = $1,
+
+          admin_notes =
+            COALESCE(
+              $2,
+              admin_notes
+            ),
+
+          updated_at = NOW()
+
+        WHERE id = $3
+
+      `, [
+
+        normalizedStatus,
+
+        admin_notes,
+
+        orderId
+
+      ]);
+
+
+      // ==========================================================
+      // إنهاء Transaction
+      // ==========================================================
+
+      await client.query(
+        'COMMIT'
+      );
+
+
+      // ==========================================================
+      // الرد
+      // ==========================================================
+
+      return c.json({
+
+        success: true,
+
+        message:
+          `Order status updated to ${normalizedStatus}`,
+
+        order_id:
+          orderId,
+
+        status:
+          normalizedStatus,
+
+        profit_added:
+          isNewDelivery
+
+      });
+
+
+    } catch (err) {
+
+
+      // ==========================================================
+      // إلغاء Transaction عند حدوث أي خطأ
+      // ==========================================================
+
+      try {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+      } catch (rollbackError) {
+
+        console.error(
+          '❌ Marketing order rollback error:',
+          rollbackError
+        );
+
+      }
+
+
+      console.error(
+        '❌ /api/admin/marketing/orders/:id/status:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Server error'
+
+      }, 500);
+
+
+    } finally {
+
+      client.release();
+
     }
 
-    const order = orderRes.rows[0];
-
-    // إذا تم تغيير الحالة إلى DELIVERED، أضف الربح المحسوب مسبقاً للمستخدم
-    if (status === 'DELIVERED' && order.status !== 'DELIVERED') {
-      await client.query(`
-        UPDATE users 
-        SET balance = balance + $1 
-        WHERE telegram_id = $2
-      `, [order.user_expected_profit, order.user_id]);
-
-      await client.query(`
-        INSERT INTO earnings (user_id, source, amount, description, created_at)
-        VALUES ($1, 'marketing_profit', $2, $3, NOW())
-      `, [order.user_id, order.user_expected_profit, `Profit from Marketing Order #${orderId}`]);
-    }
-
-    await client.query(`
-      UPDATE marketing_orders 
-      SET status = $1, admin_notes = COALESCE($2, admin_notes), updated_at = NOW()
-      WHERE id = $3
-    `, [status, admin_notes, orderId]);
-
-    await client.query('COMMIT');
-    return c.json({ success: true, message: `Order status updated to ${status}` });
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ /api/admin/marketing/orders/:id/status:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
-  } finally {
-    client.release();
   }
-});
+);
 
 // =====================================================
 // 🏪 ADMIN - MANAGE MARKETING PROVIDERS (CRUD)
