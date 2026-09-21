@@ -7388,28 +7388,73 @@ app.get('/api/admin/marketing/providers', verifyAdmin, async (c) => {
 app.post('/api/admin/marketing/providers', verifyAdmin, async (c) => {
   try {
     const {
-      name, country_code, search_url_pattern, product_url_pattern,
-      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
-      selector_name, selector_price, selector_image, is_active
-    } = await c.req.json();
+  name,
+  country_code,
+  base_url,
+  product_url_pattern,
+  mode,
+  api_endpoint,
+  api_key,
+  api_search_path,
+  api_product_path,
+  base_margin_percentage,
+  user_profit_percentage,
+  fixed_shipping_cost,
+  selector_name,
+  selector_price,
+  selector_image,
+  is_active
+} = await c.req.json();
 
-    if (!name || !country_code || !search_url_pattern) {
-      return c.json({ success: false, message: 'Name, country, and search URL are required' }, 400);
-    }
+if (!name || !country_code || !base_url) {
+  return c.json({
+    success: false,
+    message: 'Name, country, and base URL are required'
+  }, 400);
+}
 
     const result = await pool.query(`
       INSERT INTO marketing_providers (
-        name, country_code, search_url_pattern, product_url_pattern,
-        base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
-        selector_name, selector_price, selector_image, is_active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+  name,
+  country_code,
+  base_url,
+  product_url_pattern,
+  base_margin_percentage,
+  user_profit_percentage,
+  fixed_shipping_cost,
+  selector_name,
+  selector_price,
+  selector_image,
+  is_active,
+  mode,
+  api_endpoint,
+  api_key,
+  api_search_path,
+  api_product_path
+) VALUES (
+  $1, $2, $3, $4, $5,
+  $6, $7, $8, $9, $10,
+  $11, $12, $13, $14, $15, $16
+)
       RETURNING *
     `, [
-      name, country_code.toUpperCase(), search_url_pattern, product_url_pattern || null,
-      base_margin_percentage || 20, user_profit_percentage || 40, fixed_shipping_cost || 0,
-      selector_name || '.product-title', selector_price || '.price',
-      selector_image || '.product-image img', is_active !== false
-    ]);
+  name,
+  country_code.toUpperCase(),
+  base_url,
+  product_url_pattern || null,
+  base_margin_percentage ?? 20,
+  user_profit_percentage ?? 40,
+  fixed_shipping_cost ?? 0,
+  selector_name || '.product-title',
+  selector_price || '.price',
+  selector_image || '.product-image img',
+  is_active !== false,
+  mode || 'SCRAPING',
+  api_endpoint || null,
+  api_key || null,
+  api_search_path || null,
+  api_product_path || null
+]);
 
     return c.json({ success: true, message: '✅ Provider added', data: result.rows[0] });
   } catch (err) {
@@ -7423,16 +7468,28 @@ app.put('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
   try {
     const providerId = c.req.param('id');
     const {
-      name, country_code, search_url_pattern, product_url_pattern,
-      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
-      selector_name, selector_price, selector_image, is_active
-    } = await c.req.json();
-
+  name,
+  country_code,
+  base_url,
+  product_url_pattern,
+  mode,
+  api_endpoint,
+  api_key,
+  api_search_path,
+  api_product_path,
+  base_margin_percentage,
+  user_profit_percentage,
+  fixed_shipping_cost,
+  selector_name,
+  selector_price,
+  selector_image,
+  is_active
+} = await c.req.json();
     const result = await pool.query(`
       UPDATE marketing_providers SET
         name = COALESCE($2, name),
         country_code = COALESCE($3, country_code),
-        search_url_pattern = COALESCE($4, search_url_pattern),
+        base_url = COALESCE($4, base_url),
         product_url_pattern = COALESCE($5, product_url_pattern),
         base_margin_percentage = COALESCE($6, base_margin_percentage),
         user_profit_percentage = COALESCE($7, user_profit_percentage),
@@ -7441,13 +7498,32 @@ app.put('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
         selector_price = COALESCE($10, selector_price),
         selector_image = COALESCE($11, selector_image),
         is_active = COALESCE($12, is_active)
+        mode = COALESCE($13, mode),
+api_endpoint = COALESCE($14, api_endpoint),
+api_key = COALESCE($15, api_key),
+api_search_path = COALESCE($16, api_search_path),
+api_product_path = COALESCE($17, api_product_path)
       WHERE id = $1
       RETURNING *
     `, [
-      providerId, name, country_code?.toUpperCase(), search_url_pattern, product_url_pattern,
-      base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
-      selector_name, selector_price, selector_image, is_active
-    ]);
+  providerId,
+  name,
+  country_code?.toUpperCase(),
+  base_url,
+  product_url_pattern,
+  base_margin_percentage,
+  user_profit_percentage,
+  fixed_shipping_cost,
+  selector_name,
+  selector_price,
+  selector_image,
+  is_active,
+  mode,
+  api_endpoint,
+  api_key,
+  api_search_path,
+  api_product_path
+]);
 
     if (result.rows.length === 0) {
       return c.json({ success: false, message: 'Provider not found' }, 404);
