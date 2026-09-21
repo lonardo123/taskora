@@ -108,10 +108,12 @@
         </div>
 
         <div class="field">
-          <label>رابط البحث (Search URL) *</label>
-          <input type="text" id="search_url_pattern" required placeholder="https://example.com/search?q={query}">
-          <small style="color: #64748b; font-size: 12px;">استخدم <code>{query}</code> مكان كلمة البحث</small>
-        </div>
+    <label>الرابط الأساسي للموقع (Base URL) *</label>
+    <input type="text" id="base_url" required placeholder="https://vendosaudi.dukan.shop/">
+    <small style="color: #64748b; font-size: 12px;">
+        ⚠️ ضع الرابط الرئيسي للموقع (الصفحة التي تعرض المنتجات). النظام سيجلب كل المنتجات منها ويبحث فيها.
+    </small>
+</div>
 
         <div class="form-row">
           <div class="field">
@@ -290,7 +292,7 @@
         document.getElementById('providerId').value = p.id;
         document.getElementById('name').value = p.name;
         document.getElementById('country_code').value = p.country_code;
-        document.getElementById('search_url_pattern').value = p.search_url_pattern;
+        document.getElementById('base_url').value = p.base_url;
         document.getElementById('mode').value = p.mode || 'SCRAPING';
         document.getElementById('is_active').value = p.is_active.toString();
         document.getElementById('selector_name').value = p.selector_name || '.product-title';
@@ -324,7 +326,7 @@
       const payload = {
         name: document.getElementById('name').value,
         country_code: document.getElementById('country_code').value.toUpperCase(),
-        search_url_pattern: document.getElementById('search_url_pattern').value,
+        base_url: document.getElementById('base_url').value,
         mode: mode,
         is_active: document.getElementById('is_active').value === 'true',
         selector_name: document.getElementById('selector_name').value,
