@@ -81,30 +81,24 @@ app.get('/quiz-settings', async (c) => {
 app.get('/admin-providers', async (c) => {
   try {
     const url = new URL(c.req.url);
-    // توجيه الطلب لملف HTML الفعلي
+
     url.pathname = '/admin-providers.html';
-    
+
     return c.env.ASSETS.fetch(
       new Request(url.toString(), c.req.raw)
     );
+
   } catch (err) {
     console.error('❌ /admin-providers:', err);
-    return c.text('Admin Providers page failed to load.', 500);
+
+    return c.text(
+      'Quiz Settings page failed to load.',
+      500
+    );
   }
 });
 
-// مسار احتياطي في حال طلب المستخدم الرابط بامتداد .html مباشرة
-app.get('/admin-providers.html', async (c) => {
-  try {
-    const url = new URL(c.req.url);
-    return c.env.ASSETS.fetch(
-      new Request(url.toString(), c.req.raw)
-    );
-  } catch (err) {
-    console.error('❌ /admin-providers.html:', err);
-    return c.text('Admin Providers page failed to load.', 500);
-  }
-});
+
 // ==========================================
 // Worker Start
 // Cloudflare Workers لا يستخدم express.static()
