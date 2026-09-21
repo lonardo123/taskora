@@ -74,6 +74,16 @@ app.get('/quiz-settings', async (c) => {
   }
 });
 
+   app.get('/admin-marketing', async (c) => {
+     try {
+       const url = new URL(c.req.url);
+       url.pathname = '/admin-marketing.html';
+       return c.env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+     } catch (err) {
+       return c.text('Admin Marketing page failed to load.', 500);
+     }
+   });
+
 // ==========================================
 // ⚙️ Admin Providers Page
 // فتح صفحة إدارة المنصات من public/admin-providers.html
