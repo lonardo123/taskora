@@ -230,6 +230,28 @@ tr:hover{background:#1e293b/50}
 #pendingWithdrawalsCount {
   transition: all 0.3s ease;
 }  
+
+    /* زر طلبات التسويق: تدرج بنفسجي مميز */
+    .quick-btn.marketing-orders {
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: #ffffff;
+      border: 1px solid #8b5cf6;
+    }
+    .quick-btn.marketing-orders:hover {
+      background: linear-gradient(135deg, #6d28d9, #5b21b6);
+      transform: translateY(-2px);
+    }
+
+    /* زر إدارة المنصات: تدرج تركواز/أخضر مزرق مميز */
+    .quick-btn.manage-providers {
+      background: linear-gradient(135deg, #0d9488, #0f766e);
+      color: #ffffff;
+      border: 1px solid #14b8a6;
+    }
+    .quick-btn.manage-providers:hover {
+      background: linear-gradient(135deg, #0f766e, #115e59);
+      transform: translateY(-2px);
+    }  
 </style>
 </head>
 <body>
@@ -292,6 +314,15 @@ tr:hover{background:#1e293b/50}
   <span class="icon">🧠</span>
   <span class="label">Quiz Settings</span>
 </button>
+
+         <button class="quick-btn marketing-orders" onclick="openMarketingOrders()">
+        <span class="icon">🛒</span>
+        <span class="label">Marketing Orders</span>
+      </button>
+      <button class="quick-btn manage-providers" onclick="openManageProviders()">
+        <span class="icon">🏪</span>
+        <span class="label">Manage Providers</span>
+      </button>   
     </div>
 
     <!-- Stats Dashboard -->
@@ -3693,6 +3724,22 @@ function openQuizSettings() {
   window.location.href =
     `/quiz-settings?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`;
 }
+
+ // ==========================================
+// 🛒 فتح إدارة طلبات التسويق
+// ==========================================
+function openMarketingOrders() {
+  window.location.href =
+    `/admin-marketing?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`;
+}
+
+// ==========================================
+// 🏪 فتح إدارة المنصات
+// ==========================================
+function openManageProviders() {
+  window.location.href =
+    `/admin-providers?admin_id=${encodeURIComponent(REQUIRED_ADMIN_ID)}`;
+} 
   
 // ================= REFRESH ALL =================
 async function refreshAll() {
