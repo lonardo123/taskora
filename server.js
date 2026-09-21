@@ -7069,160 +7069,131 @@ app.get('/api/marketing/providers', async (c) => {
   }
 });
 
-// 2. البحث الحي في المنصات (يدعم SCRAPING و API تلقائياً)
+// 2. البحث الحي (جلب الصفحة الرئيسية + تصفية ذكية)
 app.get('/api/marketing/search', async (c) => {
   try {
-    const providerId = c.req.query('provider_id');
+    const country = c.req.query('country');
     const query = c.req.query('q');
 
-    if (!providerId || !query) {
-      return c.json({ success: false, message: 'Provider ID and query are required' }, 400);
+    if (!country || !query) {
+      return c.json({ success: false, message: 'Country and query are required' }, 400);
     }
 
-    // جلب إعدادات المنصة
-    const providerRes = await pool.query(
-      'SELECT * FROM marketing_providers WHERE id = $1 AND is_active = true', 
-      [providerId]
+    // جلب كل المنصات النشطة لهذه الدولة
+    const providersRes = await pool.query(
+      'SELECT * FROM marketing_providers WHERE country_code = $1 AND is_active = true',
+      [country.toUpperCase()]
     );
-    if (providerRes.rows.length === 0) {
-      return c.json({ success: false, message: 'Provider not found' }, 404);
+
+    if (providersRes.rows.length === 0) {
+      return c.json({ success: true, data: [], message: 'No providers found for this country' });
     }
-    const provider = providerRes.rows[0];
 
-    let rawProducts = [];
+    const allProducts = [];
+    const queryLower = query.toLowerCase().trim();
 
-    // ✅ التحقق من الوضع والتبديل التلقائي
-    if (provider.mode === 'API' && provider.api_endpoint && provider.api_search_path) {
-      // ============================================
-      // 🟢 الوضع: API (مستقبلاً)
-      // ============================================
-      console.log(`🔌 Using API mode for provider: ${provider.name}`);
-      
-      const apiUrl = `${provider.api_endpoint}${provider.api_search_path.replace('{query}', encodeURIComponent(query))}`;
-      
-      const headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'Taskora/1.0'
-      };
-      
-      // إضافة مفتاح API إذا كان موجوداً
-      if (provider.api_key) {
-        headers['Authorization'] = `Bearer ${provider.api_key}`;
-        headers['X-API-Key'] = provider.api_key; // دعم صيغ مختلفة
-      }
-
-      const apiResponse = await fetch(apiUrl, {
-        headers,
-        // timeout: 10000 // اختياري
-      });
-
-      if (!apiResponse.ok) {
-        throw new Error(`API request failed: ${apiResponse.status}`);
-      }
-
-      const apiData = await apiResponse.json();
-      
-      // ⚠️ ملاحظة: بنية JSON تختلف من API لآخر
-      // يجب أن يكون apiData.items أو apiData.products أو apiData.data
-      const items = apiData.items || apiData.products || apiData.data || [];
-      
-      rawProducts = items.map(item => ({
-        name: item.name || item.title,
-        base_price: parseFloat(item.price || item.base_price || 0),
-        image: item.image || item.image_url || item.thumbnail,
-        url: item.url || item.product_url || `${provider.api_product_path?.replace('{id}', item.id) || ''}`
-      })).filter(p => p.name && p.base_price > 0);
-
-    } else {
-      // ============================================
-      // 🟡 الوضع: SCRAPING (الحالي)
-      // ============================================
-      console.log(`🕷️ Using Scraping mode for provider: ${provider.name}`);
-      
-      const searchUrl = provider.search_url_pattern.replace('{query}', encodeURIComponent(query));
-
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': searchUrl,
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.status}`);
-      }
-
-      const products = [];
-      let currentProduct = {};
-
-      const rewriter = new HTMLRewriter()
-        .on('a, .product-card, .product-item', {
-          element(element) {
-            if (currentProduct.name) {
-              products.push({ ...currentProduct });
-            }
-            currentProduct = { url: element.getAttribute('href') || '' };
-          }
-        })
-        .on(provider.selector_name, {
-          text(text) { if (text.text.trim()) currentProduct.name = text.text.trim(); }
-        })
-        .on(provider.selector_price, {
-          text(text) { 
-            if (text.text.trim()) {
-              const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
-              if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
-            }
-          }
-        })
-        .on(provider.selector_image, {
-          element(element) {
-            currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+    // البحث في كل منصة على حدة
+    const searchPromises = providersRes.rows.map(async (provider) => {
+      try {
+        // ✅ جلب الصفحة الرئيسية للموقع (كما يفعل الشخص العادي)
+        const response = await fetch(provider.base_url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
           }
         });
 
-      await rewriter.transform(response).text();
-      
-      // إضافة آخر منتج
-      if (currentProduct.name) products.push(currentProduct);
-      
-      rawProducts = products;
-    }
+        if (!response.ok) return [];
 
-    // ============================================
-    // 💰 تطبيق معادلة الربح (مشتركة للوضعين)
-    // ============================================
-    const marginPercent = parseFloat(provider.base_margin_percentage);
-    const userProfitPercent = parseFloat(provider.user_profit_percentage);
-    const shippingCost = parseFloat(provider.fixed_shipping_cost);
+        const products = [];
+        let currentProduct = {};
 
-    const formattedProducts = rawProducts
-      .filter(p => p.name && p.base_price && !isNaN(p.base_price))
-      .map(p => {
-        const marginAmount = p.base_price * (marginPercent / 100);
-        const userExpectedProfit = marginAmount * (userProfitPercent / 100);
-        const finalProductPrice = p.base_price + marginAmount;
-        const totalPrice = finalProductPrice + shippingCost;
+        // استخراج كل المنتجات من الصفحة
+        const rewriter = new HTMLRewriter()
+          .on('a.product-card, .product-item, [data-product-id]', { // محددات بطاقات المنتجات
+            element(element) {
+              if (currentProduct.name && currentProduct.base_price) {
+                products.push({ ...currentProduct });
+              }
+              currentProduct = { 
+                url: element.getAttribute('href') || '',
+                id: element.getAttribute('data-product-id') || ''
+              };
+            }
+          })
+          .on(provider.selector_name, {
+            text(text) { 
+              if (text.text.trim()) {
+                currentProduct.name = (currentProduct.name || '') + text.text.trim() + ' ';
+              }
+            }
+          })
+          .on(provider.selector_price, {
+            text(text) { 
+              if (text.text.trim()) {
+                const priceMatch = text.text.trim().match(/[\d,]+\.?\d*/);
+                if (priceMatch) currentProduct.base_price = parseFloat(priceMatch[0].replace(',', ''));
+              }
+            }
+          })
+          .on(provider.selector_image, {
+            element(element) {
+              currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src');
+            }
+          });
 
-        return {
-          provider_id: provider.id,
-          product_url: p.url,
-          name: p.name,
-          image: p.image || 'https://via.placeholder.com/150',
-          final_product_price: finalProductPrice.toFixed(2),
-          shipping_cost: shippingCost.toFixed(2),
-          total_price: totalPrice.toFixed(2),
-          user_expected_profit: userExpectedProfit.toFixed(2)
-          // ⚠️ base_price و margin_amount غير مرسلة للمستخدم
-        };
-      });
+        await rewriter.transform(response).text();
+        
+        // إضافة آخر منتج
+        if (currentProduct.name && currentProduct.base_price) {
+          products.push(currentProduct);
+        }
+
+        // ✅ التصفية الذكية: البحث عن كلمة المستخدم في أسماء المنتجات
+        const filteredProducts = products.filter(p => 
+          p.name && 
+          p.name.toLowerCase().includes(queryLower)
+        );
+
+        // تطبيق معادلات الربح على النتائج المفلترة فقط
+        const marginPercent = parseFloat(provider.base_margin_percentage);
+        const userProfitPercent = parseFloat(provider.user_profit_percentage);
+        const shippingCost = parseFloat(provider.fixed_shipping_cost);
+
+        return filteredProducts.map(p => {
+          const marginAmount = p.base_price * (marginPercent / 100);
+          const userExpectedProfit = marginAmount * (userProfitPercent / 100);
+          const finalProductPrice = p.base_price + marginAmount;
+          const totalPrice = finalProductPrice + shippingCost;
+
+          return {
+            provider_id: provider.id,
+            provider_name: provider.name,
+            product_url: p.url.startsWith('http') ? p.url : `${provider.base_url}${p.url}`,
+            name: p.name.trim(),
+            image: p.image || 'https://via.placeholder.com/150',
+            final_product_price: finalProductPrice.toFixed(2),
+            shipping_cost: shippingCost.toFixed(2),
+            total_price: totalPrice.toFixed(2),
+            user_expected_profit: userExpectedProfit.toFixed(2)
+          };
+        });
+
+      } catch (err) {
+        console.error(`❌ Error fetching from ${provider.name}:`, err);
+        return [];
+      }
+    });
+
+    const resultsArray = await Promise.all(searchPromises);
+    const flatResults = resultsArray.flat();
 
     return c.json({ 
       success: true, 
-      mode: provider.mode, // لإعلام الواجهة بالوضع المستخدم
-      data: formattedProducts 
+      data: flatResults,
+      providers_searched: providersRes.rows.length,
+      total_results: flatResults.length
     });
 
   } catch (err) {
