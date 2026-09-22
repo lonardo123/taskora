@@ -111,7 +111,7 @@
     <label>الرابط الأساسي للموقع (Base URL) *</label>
     <input type="text" id="base_url" required placeholder="https://vendosaudi.dukan.shop/">
     <small style="color: #64748b; font-size: 12px;">
-        ⚠️ ضع الرابط الرئيسي للموقع (الصفحة التي تعرض المنتجات). النظام سيجلب كل المنتجات منها ويبحث فيها.
+        ⚠️ ضع الرابط الأساسي للموقع أو الصفحة الرئيسية للمنتجات. يستخدمه النظام كنقطة بداية للبحث حسب طريقة الجلب المتاحة.
     </small>
 </div>
 
@@ -157,9 +157,13 @@
             <input type="text" id="api_endpoint" placeholder="https://api.example.com/v1">
           </div>
           <div class="field">
-            <label>مفتاح الـ API (API Key)</label>
-            <input type="password" id="api_key" placeholder="sk_live_xxxxx">
-          </div>
+  <label>مفتاح الـ API (API Key)</label>
+  <input
+    type="password"
+    id="api_key"
+    placeholder="اتركه فارغاً للإبقاء على المفتاح الحالي"
+  >
+</div>
           <div class="form-row">
             <div class="field">
               <label>مسار البحث (Search Path)</label>
@@ -299,7 +303,7 @@
         document.getElementById('selector_price').value = p.selector_price || '.price';
         document.getElementById('selector_image').value = p.selector_image || '.product-image img';
         document.getElementById('api_endpoint').value = p.api_endpoint || '';
-        document.getElementById('api_key').value = p.api_key || '';
+        document.getElementById('api_key').value = '';
         document.getElementById('api_search_path').value = p.api_search_path || '';
         document.getElementById('api_product_path').value = p.api_product_path || '';
         document.getElementById('base_margin_percentage').value = p.base_margin_percentage;
@@ -333,7 +337,9 @@
         selector_price: document.getElementById('selector_price').value,
         selector_image: document.getElementById('selector_image').value,
         api_endpoint: mode === 'API' ? document.getElementById('api_endpoint').value : null,
-        api_key: mode === 'API' ? document.getElementById('api_key').value : null,
+        api_key: mode === 'API'
+  ? (document.getElementById('api_key').value.trim() || null)
+  : null,
         api_search_path: mode === 'API' ? document.getElementById('api_search_path').value : null,
         api_product_path: mode === 'API' ? document.getElementById('api_product_path').value : null,
         base_margin_percentage: parseFloat(document.getElementById('base_margin_percentage').value),
