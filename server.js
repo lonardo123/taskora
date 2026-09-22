@@ -7082,9 +7082,7 @@ app.get('/api/marketing/providers', async (c) => {
 // ================================================================
 
 app.get('/api/marketing/search', async (c) => {
-
   try {
-
     const country = c.req.query('country');
     const query = c.req.query('q');
 
@@ -7095,9 +7093,7 @@ app.get('/api/marketing/search', async (c) => {
       }, 400);
     }
 
-    const queryLower = query
-      .toLowerCase()
-      .trim();
+    const queryLower = query.toLowerCase().trim();
 
     if (queryLower.length < 2) {
       return c.json({
@@ -7106,41 +7102,21 @@ app.get('/api/marketing/search', async (c) => {
       }, 400);
     }
 
-
     // ============================================================
     // جلب جميع المنصات النشطة للدولة
     // ============================================================
-
     const providersRes = await pool.query(`
       SELECT
-        id,
-        name,
-        country_code,
-        base_url,
-        product_url_pattern,
-        base_margin_percentage,
-        user_profit_percentage,
-        fixed_shipping_cost,
-        selector_name,
-        selector_price,
-        selector_image,
-        is_active,
-        mode,
-        api_endpoint,
-        api_key,
-        api_search_path,
-        api_product_path
+        id, name, country_code, base_url, product_url_pattern,
+        base_margin_percentage, user_profit_percentage, fixed_shipping_cost,
+        selector_name, selector_price, selector_image, is_active, mode,
+        api_endpoint, api_key, api_search_path, api_product_path
       FROM marketing_providers
-      WHERE country_code = $1
-        AND is_active = true
+      WHERE country_code = $1 AND is_active = true
       ORDER BY name ASC
-    `, [
-      country.toUpperCase()
-    ]);
-
+    `, [country.toUpperCase()]);
 
     if (providersRes.rows.length === 0) {
-
       return c.json({
         success: true,
         data: [],
@@ -7148,1193 +7124,655 @@ app.get('/api/marketing/search', async (c) => {
         total_results: 0,
         message: 'No active providers found for this country'
       });
-
     }
 
-
     const allProducts = [];
-
 
     // ============================================================
     // أدوات مساعدة خاصة بمحرك البحث
     // ============================================================
-
     const normalizeUrl = (url, baseUrl) => {
-
       try {
-
         if (!url) return '';
-
         return new URL(url, baseUrl).href;
-
       } catch {
-
         return '';
-
       }
-
     };
-
 
     const isSameOrigin = (url, baseUrl) => {
-
       try {
-
         return new URL(url).origin === new URL(baseUrl).origin;
-
       } catch {
-
         return false;
-
       }
-
     };
 
+    // ============================================================
+    // تطبيع النص للبحث
+    // ============================================================
+    const normalizeSearchText = (value) => {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .normalize('NFKC')
+        .replace(/[\u064B-\u065F\u0670]/g, '') // إزالة التشكيل
+        .replace(/ـ/g, '') // إزالة التطويل
+        .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي') // توحيد الحروف
+        .replace(/[-_/\\.]+/g, ' ') // توحيد الفواصل
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ') // إزالة الرموز الزائدة
+        .toLowerCase()
+        .replace(/\s+/g, ' ').trim(); // إزالة المسافات الزائدة
+    };
+
+    // ============================================================
+    // الكلمات المنفصلة للبحث
+    // ============================================================
+    const getSearchTokens = (value) => {
+      const normalized = normalizeSearchText(value);
+      if (!normalized) return [];
+      return [...new Set(normalized.split(' ').map(t => t.trim()).filter(t => t.length >= 2))];
+    };
+
+    const normalizedQuery = normalizeSearchText(query);
+    const queryTokens = getSearchTokens(query);
 
     const containsSearchTerm = (value) => {
-
       if (!value) return false;
-
-      return value
-        .toLowerCase()
-        .includes(queryLower);
-
+      return normalizeSearchText(value).includes(normalizedQuery);
     };
 
+    // ============================================================
+    // حساب تشابه بسيط للكلمات (Levenshtein)
+    // ============================================================
+    const levenshteinDistance = (a, b) => {
+      const first = String(a || '');
+      const second = String(b || '');
+      if (first === second) return 0;
+      if (!first.length) return second.length;
+      if (!second.length) return first.length;
+
+      let previousRow = Array.from({ length: second.length + 1 }, (_, index) => index);
+      for (let i = 0; i < first.length; i++) {
+        const currentRow = [i + 1];
+        for (let j = 0; j < second.length; j++) {
+          const insertCost = currentRow[j] + 1;
+          const deleteCost = previousRow[j + 1] + 1;
+          const replaceCost = previousRow[j] + (first[i] === second[j] ? 0 : 1);
+          currentRow.push(Math.min(insertCost, deleteCost, replaceCost));
+        }
+        previousRow = currentRow;
+      }
+      return previousRow[previousRow.length - 1];
+    };
+
+    const isFuzzyTokenMatch = (searchToken, productToken) => {
+      if (!searchToken || !productToken) return false;
+      if (searchToken === productToken) return true;
+      if (searchToken.length >= 4 && productToken.includes(searchToken)) return true;
+      if (productToken.length >= 4 && searchToken.includes(productToken)) return true;
+      if (searchToken.length < 4 || productToken.length < 4) return false;
+
+      const distance = levenshteinDistance(searchToken, productToken);
+      const maxLength = Math.max(searchToken.length, productToken.length);
+      const allowedDistance = maxLength >= 8 ? 2 : 1;
+      return distance <= allowedDistance;
+    };
+
+    // ============================================================
+    // حساب درجة مطابقة المنتج (محسّن لدمج Exact و Fuzzy معاً)
+    // ============================================================
+    const calculateProductRelevance = (product) => {
+      const name = normalizeSearchText(product.name);
+      const sku = normalizeSearchText(product.sku);
+      const barcode = normalizeSearchText(product.barcode);
+      const ean = normalizeSearchText(product.ean);
+      const upc = normalizeSearchText(product.upc);
+      const productCode = normalizeSearchText(product.product_code);
+      const title = normalizeSearchText(product.title);
+
+      const searchableFields = [name, title, sku, barcode, ean, upc, productCode].filter(Boolean);
+      if (!searchableFields.length) return { score: 0, strong: false, related: false };
+
+      // 1. تطابق كامل مع اسم المنتج
+      if (name && name === normalizedQuery) return { score: 100, strong: true, related: false };
+
+      // 2. تطابق كامل مع الأكواد
+      const exactCodeMatch = [sku, barcode, ean, upc, productCode].some(field => field && field === normalizedQuery);
+      if (exactCodeMatch) return { score: 98, strong: true, related: false };
+
+      // 3. الاسم يحتوي على البحث كاملًا
+      if (name && name.includes(normalizedQuery)) return { score: 92, strong: true, related: false };
+
+      // 4. أحد الحقول الأخرى يحتوي على البحث كاملًا
+      if (searchableFields.some(field => field.includes(normalizedQuery))) return { score: 88, strong: true, related: false };
+
+      // 5. البحث بالكلمات المنفصلة + Fuzzy Match معاً (يمنع العودة المبكرة الخاطئة)
+      if (queryTokens.length > 0) {
+        let matchedTokens = 0;
+        let fuzzyMatchedTokens = 0;
+        const nameTokens = getSearchTokens(name);
+
+        for (const searchToken of queryTokens) {
+          const exactMatch = searchableFields.some(field => field.includes(searchToken));
+          if (exactMatch) {
+            matchedTokens++;
+          } else {
+            const fuzzyMatch = nameTokens.some(productToken => isFuzzyTokenMatch(searchToken, productToken));
+            if (fuzzyMatch) fuzzyMatchedTokens++;
+          }
+        }
+
+        const totalMatched = matchedTokens + fuzzyMatchedTokens;
+        if (totalMatched === queryTokens.length) {
+          return { score: matchedTokens === queryTokens.length ? 84 : 75, strong: true, related: false };
+        }
+        if (totalMatched > 0) {
+          const tokenRatio = totalMatched / queryTokens.length;
+          const score = Math.round(55 + (tokenRatio * 25));
+          return { score, strong: score >= 70, related: score < 70 };
+        }
+      }
+
+      // 6. نتيجة قريبة جداً لكنها ليست تطابقاً قوياً
+      const firstQueryToken = queryTokens[0] || normalizedQuery;
+      if (firstQueryToken && searchableFields.some(field => field.includes(firstQueryToken))) {
+        return { score: 40, strong: false, related: true };
+      }
+
+      return { score: 0, strong: false, related: false };
+    };
 
     const isPaginationLink = (text, href) => {
+      const value = (`${text || ''} ${href || ''}`).toLowerCase().trim();
+      if (!value) return false;
 
-      const value = (
-        `${text || ''} ${href || ''}`
-      ).toLowerCase();
+      const paginationKeywords = [
+        'next', 'previous', 'prev', 'page', 'pagination',
+        'load-more', 'loadmore', 'load more',
+        'show-more', 'showmore', 'show more',
+        'عرض المزيد', 'عرض مزيد', 'المزيد',
+        'التالي', 'الصفحة التالية', 'السابق', 'الصفحة السابقة'
+      ];
 
-      return (
-        value.includes('next') ||
-        value.includes('page') ||
-        value.includes('pagination') ||
-        value.includes('load-more') ||
-        value.includes('loadmore') ||
-        value.includes('show-more') ||
-        value.includes('showmore') ||
-        value.includes('more') ||
-        value.includes('عرض المزيد') ||
-        value.includes('المزيد') ||
-        value.includes('التالي') ||
-        value.includes('الصفحة')
-      );
+      if (paginationKeywords.some(keyword => value.includes(keyword))) return true;
+      if (/[?&](page|p|pg)=\d+/i.test(value)) return true;
+      if (/\/page\/\d+(?:\/|$|\?)/i.test(value)) return true;
+      if (/^\d{1,4}$/.test(String(text || '').trim())) return true;
 
+      return false;
     };
-
 
     const isCategoryLink = (text, href) => {
-
-      const value = (
-        `${text || ''} ${href || ''}`
-      ).toLowerCase();
-
+      const value = (`${text || ''} ${href || ''}`).toLowerCase();
       return (
-        value.includes('category') ||
-        value.includes('categories') ||
-        value.includes('collection') ||
-        value.includes('collections') ||
-        value.includes('shop') ||
-        value.includes('products') ||
-        value.includes('قسم') ||
-        value.includes('اقسام') ||
-        value.includes('منتجات')
+        value.includes('/category') || value.includes('/categories') ||
+        value.includes('/collection') || value.includes('/collections') ||
+        value.includes('/shop') || value.includes('/products') ||
+        value.includes('قسم') || value.includes('اقسام') || value.includes('منتجات')
       );
-
     };
-
 
     // ============================================================
     // استخراج المنتجات من صفحة HTML
     // ============================================================
-
-    const extractProductsFromHtml = async (
-      response,
-      provider
-    ) => {
-
+    const extractProductsFromHtml = async (response, provider) => {
       const products = [];
-
       let currentProduct = null;
 
       try {
-
-        const productContainerSelector =
-          [
-            'a.product-card',
-            '.product-card',
-            '.product-item',
-            '.product',
-            '[data-product-id]',
-            '[data-product]',
-            '[class*="product-card"]',
-            '[class*="product-item"]'
-          ].join(',');
-
+        const productContainerSelector = [
+          'a.product-card', '.product-card', '.product-item', '.product',
+          '[data-product-id]', '[data-product]', '[class*="product-card"]', '[class*="product-item"]'
+        ].join(',');
 
         const rewriter = new HTMLRewriter()
-
-          // ------------------------------------------------------
-          // بداية منتج
-          // ------------------------------------------------------
-
           .on(productContainerSelector, {
-
             element(element) {
-
-              if (
-                currentProduct &&
-                currentProduct.name &&
-                currentProduct.base_price
-              ) {
-
+              if (currentProduct && currentProduct.name && currentProduct.base_price) {
                 products.push(currentProduct);
-
               }
-
-
               currentProduct = {
-
-                url:
-                  element.getAttribute('href') ||
-                  element.getAttribute('data-url') ||
-                  '',
-
-                id:
-                  element.getAttribute('data-product-id') ||
-                  element.getAttribute('data-id') ||
-                  '',
-
-                image: ''
-
+                url: element.getAttribute('href') || element.getAttribute('data-url') || '',
+                id: element.getAttribute('data-product-id') || element.getAttribute('data-id') || '',
+                sku: '', barcode: '', ean: '', upc: '', product_code: '',
+                title: element.getAttribute('title') || '',
+                name: '', image: '', base_price: null
               };
-
             }
-
           })
-
-
-          // ------------------------------------------------------
-          // اسم المنتج
-          // ------------------------------------------------------
-
+          // Fallback: إذا كان الرابط داخل وسم <a> داخل الحاوية
+          .on('a', {
+            element(element) {
+              if (currentProduct && !currentProduct.url) {
+                const aHref = element.getAttribute('href') || element.getAttribute('data-url');
+                if (aHref) currentProduct.url = aHref;
+              }
+            }
+          })
           .on(provider.selector_name, {
-
             text(text) {
-
               if (!currentProduct) return;
-
-              const value =
-                text.text.trim();
-
-              if (!value) return;
-
-              currentProduct.name =
-                (
-                  currentProduct.name || ''
-                ) +
-                value +
-                ' ';
-
+              const value = text.text.trim();
+              if (value) currentProduct.name = (currentProduct.name || '') + value + ' ';
             }
-
           })
-
-
-          // ------------------------------------------------------
-          // السعر
-          // ------------------------------------------------------
-
           .on(provider.selector_price, {
-
             text(text) {
-
               if (!currentProduct) return;
-
-              const value =
-                text.text.trim();
-
+              const value = text.text.trim();
               if (!value) return;
-
-
-              const priceMatch =
-                value.match(
-                  /[\d,]+(?:\.\d+)?/
-                );
-
-
+              
+              // دعم الأرقام العربية والفواصل العشرية (نقطة أو فاصلة)
+              const priceMatch = value.match(/[\d\u0660-\u0669]+(?:[.,\u066B\u066C]\d{1,3})?/g);
               if (priceMatch) {
-
-                const parsed =
-                  parseFloat(
-                    priceMatch[0]
-                      .replace(/,/g, '')
-                  );
-
-
-                if (
-                  Number.isFinite(parsed) &&
-                  parsed > 0
-                ) {
-
-                  currentProduct.base_price =
-                    parsed;
-
+                const rawPrice = priceMatch[priceMatch.length - 1];
+                let cleanPrice = rawPrice.replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 0x0030));
+                
+                // توحيد الفواصل العشرية العربية إلى نقطة
+                cleanPrice = cleanPrice.replace(/[\u066B\u066C]/g, '.');
+                
+                // إذا كانت هناك فاصلة عادية وليست هناك نقطة، نعتبرها فاصلة عشرية
+                if (cleanPrice.includes(',') && !cleanPrice.includes('.')) {
+                  cleanPrice = cleanPrice.replace(',', '.');
+                } else {
+                  // وإلا نزيل جميع الفواصل العادية (آلاف)
+                  cleanPrice = cleanPrice.replace(/,/g, '');
                 }
 
+                const parsed = parseFloat(cleanPrice);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                  currentProduct.base_price = parsed;
+                }
               }
-
             }
-
           })
-
-
-          // ------------------------------------------------------
-          // الصورة
-          // ------------------------------------------------------
-
           .on(provider.selector_image, {
-
             element(element) {
-
               if (!currentProduct) return;
-
-
-              currentProduct.image =
-                element.getAttribute('src') ||
-                element.getAttribute('data-src') ||
-                element.getAttribute('data-lazy-src') ||
-                element.getAttribute('data-original') ||
-                '';
-
+              currentProduct.image = element.getAttribute('src') || element.getAttribute('data-src') || element.getAttribute('data-lazy-src') || element.getAttribute('data-original') || '';
             }
-
+          })
+          .on(['.sku', '[class*="sku"]', '[id*="sku"]', '[data-sku]', '[itemprop="sku"]'].join(','), {
+            text(text) {
+              if (!currentProduct) return;
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              const cleanValue = value.replace(/^(sku|كود|رمز|المعرف):\s*/i, '').trim();
+              if (cleanValue) currentProduct.sku = `${currentProduct.sku || ''} ${cleanValue}`.trim();
+            }
+          })
+          .on(['.barcode', '[class*="barcode"]', '[id*="barcode"]', '[data-barcode]', '[itemprop="gtin"]'].join(','), {
+            text(text) {
+              if (!currentProduct) return;
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              const cleanValue = value.replace(/^(barcode|باركود):\s*/i, '').trim();
+              if (cleanValue) currentProduct.barcode = `${currentProduct.barcode || ''} ${cleanValue}`.trim();
+            }
+          })
+          .on(['.ean', '[class*="ean"]', '[id*="ean"]', '[data-ean]', '[itemprop="gtin13"]'].join(','), {
+            text(text) {
+              if (!currentProduct) return;
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              const cleanValue = value.replace(/^(ean):\s*/i, '').trim();
+              if (cleanValue) currentProduct.ean = `${currentProduct.ean || ''} ${cleanValue}`.trim();
+            }
+          })
+          .on(['.upc', '[class*="upc"]', '[id*="upc"]', '[data-upc]', '[itemprop="gtin12"]'].join(','), {
+            text(text) {
+              if (!currentProduct) return;
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              const cleanValue = value.replace(/^(upc):\s*/i, '').trim();
+              if (cleanValue) currentProduct.upc = `${currentProduct.upc || ''} ${cleanValue}`.trim();
+            }
+          })
+          .on(['.product-code', '.product_code', '[class*="product-code"]', '[class*="product_code"]', '[id*="product-code"]', '[data-product-code]'].join(','), {
+            text(text) {
+              if (!currentProduct) return;
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              const cleanValue = value.replace(/^(code|كود|رمز):\s*/i, '').trim();
+              if (cleanValue) currentProduct.product_code = `${currentProduct.product_code || ''} ${cleanValue}`.trim();
+            }
           });
 
+        await rewriter.transform(response).text();
 
-        await rewriter
-          .transform(response)
-          .text();
-
-
-        // --------------------------------------------------------
-        // آخر منتج
-        // --------------------------------------------------------
-
-        if (
-          currentProduct &&
-          currentProduct.name &&
-          currentProduct.base_price
-        ) {
-
-          products.push(
-            currentProduct
-          );
-
+        if (currentProduct && currentProduct.name && currentProduct.base_price) {
+          products.push(currentProduct);
         }
-
-
       } catch (extractError) {
-
-        console.error(
-          '❌ Product extraction error:',
-          extractError
-        );
-
+        console.error('❌ Product extraction error:', extractError);
       }
 
-
       return products;
-
     };
 
-
     // ============================================================
-    // استخراج روابط التنقل من الصفحة
+    // استخراج روابط التنقل و Endpoints من الصفحة (بما في ذلك JavaScript)
     // ============================================================
-
-    const extractNavigationLinks = async (
-      response,
-      provider
-    ) => {
-
+    const extractNavigationLinks = async (response, provider) => {
       const links = [];
 
       try {
+        const rewriter = new HTMLRewriter()
+          .on('a', {
+            element(element) {
+              const href = element.getAttribute('href') || element.getAttribute('data-url') || element.getAttribute('data-href') || element.getAttribute('data-next') || element.getAttribute('data-next-url') || element.getAttribute('data-load-more-url') || element.getAttribute('data-loadmore-url') || element.getAttribute('data-page-url') || element.getAttribute('data-fetch-url') || element.getAttribute('data-endpoint') || element.getAttribute('data-api-url') || '';
+              
+              if (!href) return; // تم الإصلاح: كان resolvedHref غير معرف
 
-        const rewriter =
-          new HTMLRewriter()
+              const rel = (element.getAttribute('rel') || '').toLowerCase();
+              const normalized = normalizeUrl(href, provider.base_url);
+              if (!normalized || !isSameOrigin(normalized, provider.base_url)) return;
 
-            .on('a', {
-
-  element(element) {
-
-    const href =
-      element.getAttribute('href');
-
-    if (!href) return;
-
-
-                const normalized =
-                  normalizeUrl(
-                    href,
-                    provider.base_url
-                  );
-
-
-                if (!normalized) return;
-
-
-                if (
-                  !isSameOrigin(
-                    normalized,
-                    provider.base_url
-                  )
-                ) {
-                  return;
+              const linkData = { url: normalized, href, text: '', rel, type: 'link', closed: false };
+              links.push(linkData);
+              element.onEndTag(() => { linkData.closed = true; });
+            },
+            text(text) {
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              for (let index = links.length - 1; index >= 0; index--) {
+                const current = links[index];
+                if (current && !current.closed) {
+                  current.text += (current.text ? ' ' : '') + value;
+                  break;
                 }
-
-
-                links.push({
-
-                  url: normalized,
-
-                  text: '',
-
-                  href
-
-                });
-
               }
+            }
+          })
+          .on('button', {
+            element(element) {
+              const href = element.getAttribute('data-url') || element.getAttribute('data-href') || element.getAttribute('data-next') || element.getAttribute('data-next-url') || element.getAttribute('data-load-more-url') || element.getAttribute('data-loadmore-url') || element.getAttribute('data-page-url') || element.getAttribute('data-fetch-url') || element.getAttribute('data-endpoint') || element.getAttribute('data-api-url') || '';
+              
+              if (!href) return;
 
-            });
+              const normalized = normalizeUrl(href, provider.base_url);
+              if (!normalized || !isSameOrigin(normalized, provider.base_url)) return;
 
+              const buttonData = { url: normalized, href: href, text: '', rel: '', type: 'button', closed: false }; // تم الإصلاح: كان resolvedHref غير معرف
+              links.push(buttonData);
+              element.onEndTag(() => { buttonData.closed = true; });
+            },
+            text(text) {
+              const value = String(text.text || '').trim();
+              if (!value) return;
+              for (let index = links.length - 1; index >= 0; index--) {
+                const current = links[index];
+                if (current && current.type === 'button' && !current.closed) {
+                  current.text += (current.text ? ' ' : '') + value;
+                  break;
+                }
+              }
+            }
+          })
+          // إضافة جديدة: استخراج Endpoints من JavaScript لدعم مواقع AJAX / Load More
+          .on('script', {
+            text(text) {
+              const scriptContent = text.text;
+              
+              // البحث عن استدعاءات fetch أو axios أو xhr
+              const fetchMatches = scriptContent.match(/(?:fetch|axios\.(?:get|post)|xhr\.open)\s*\(\s*['"`]([^'"`]+)['"`]/gi) || [];
+              for (const match of fetchMatches) {
+                const urlMatch = match.match(/['"`]([^'"`]+)['"`]/);
+                if (urlMatch) {
+                  const cleanUrl = urlMatch[1];
+                  if (cleanUrl && (cleanUrl.includes('search') || cleanUrl.includes('product') || cleanUrl.includes('api') || cleanUrl.includes('ajax') || cleanUrl.includes('query') || cleanUrl.includes('q='))) {
+                    const normalized = normalizeUrl(cleanUrl, provider.base_url);
+                    if (normalized && isSameOrigin(normalized, provider.base_url)) {
+                      links.push({ url: normalized, href: cleanUrl, text: 'script-endpoint', rel: '', type: 'script', closed: true });
+                    }
+                  }
+                }
+              }
+              
+              // البحث عن أي مسار نسبي يحتوي على كلمات مفتاحية بحثية
+              const genericUrls = scriptContent.match(/['"`](\/[^'"`]*?(?:search|product|api|ajax|query|catalog)[^'"`]*?)['"`]/gi) || [];
+              for (const match of genericUrls) {
+                const cleanUrl = match.replace(/^['"`]|['"`]$/g, '');
+                if (cleanUrl && !cleanUrl.includes('://')) {
+                  const normalized = normalizeUrl(cleanUrl, provider.base_url);
+                  if (normalized && isSameOrigin(normalized, provider.base_url)) {
+                    if (!links.some(l => l.url === normalized)) {
+                      links.push({ url: normalized, href: cleanUrl, text: 'script-endpoint', rel: '', type: 'script', closed: true });
+                    }
+                  }
+                }
+              }
+            }
+          });
 
-        await rewriter
-          .transform(response)
-          .text();
-
-
+        await rewriter.transform(response).text();
       } catch (linkError) {
-
-        console.error(
-          '❌ Navigation extraction error:',
-          linkError
-        );
-
+        console.error('❌ Navigation extraction error:', linkError);
       }
 
-
-      return links;
-
+      const uniqueLinks = [];
+      const seen = new Set();
+      for (const link of links) {
+        if (!link || !link.url) continue;
+        const key = `${link.type || 'link'}|${link.url}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueLinks.push({ url: link.url, href: link.href, text: link.text.trim(), rel: link.rel || '', type: link.type || 'link' });
+      }
+      return uniqueLinks;
     };
-
 
     // ============================================================
     // البحث داخل منصة واحدة
     // ============================================================
-
-    const searchProvider = async (
-      provider
-    ) => {
-
+    const searchProvider = async (provider) => {
       const providerProducts = [];
-
       const visitedUrls = new Set();
-
       const queuedUrls = new Set();
-
       const navigationQueue = [];
 
-
-      // ==========================================================
-      // إعدادات البحث
-      // ==========================================================
-
-      const MAX_PAGES =
-        30;
-
-      const MAX_NAVIGATION_URLS =
-        100;
-
-
-      // ==========================================================
-      // إضافة رابط إلى قائمة البحث
-      // ==========================================================
+      const MAX_PAGES = 30;
+      const MAX_NAVIGATION_URLS = 100;
 
       const addUrl = (url) => {
-
         if (!url) return;
-
-        const normalized =
-          normalizeUrl(
-            url,
-            provider.base_url
-          );
-
-        if (!normalized) return;
-
-
-        if (
-          !isSameOrigin(
-            normalized,
-            provider.base_url
-          )
-        ) {
-          return;
-        }
-
-
-        if (
-          visitedUrls.has(normalized) ||
-          queuedUrls.has(normalized)
-        ) {
-          return;
-        }
-
-
+        const normalized = normalizeUrl(url, provider.base_url);
+        if (!normalized || !isSameOrigin(normalized, provider.base_url)) return;
+        if (visitedUrls.has(normalized) || queuedUrls.has(normalized)) return;
         queuedUrls.add(normalized);
-
-        navigationQueue.push(
-          normalized
-        );
-
+        navigationQueue.push(normalized);
       };
 
+      let baseUrl = provider.base_url;
 
-      // ==========================================================
-      // إنشاء روابط البحث المحتملة
-      //
-      // لا نفترض أن كل المواقع تستخدم نفس طريقة البحث.
-      // ==========================================================
-
-      let baseUrl =
-        provider.base_url;
-
-
-      // ----------------------------------------------------------
-      // الطريقة الأولى:
-      // {query}
-      // ----------------------------------------------------------
-
-      if (
-        baseUrl.includes('{query}')
-      ) {
-
-        addUrl(
-          baseUrl.replace(
-            /\{query\}/gi,
-            encodeURIComponent(query)
-          )
-        );
-
+      if (baseUrl.includes('{query}')) {
+        addUrl(baseUrl.replace(/\{query\}/gi, encodeURIComponent(query)));
       }
-
-
-      // ----------------------------------------------------------
-      // الطريقة الثانية:
-      // {query} + {page}
-      // ----------------------------------------------------------
-
-      if (
-        baseUrl.includes('{query}') &&
-        baseUrl.includes('{page}')
-      ) {
-
-        for (
-          let page = 1;
-          page <= MAX_PAGES;
-          page++
-        ) {
-
-          addUrl(
-            baseUrl
-              .replace(
-                /\{query\}/gi,
-                encodeURIComponent(query)
-              )
-              .replace(
-                /\{page\}/gi,
-                String(page)
-              )
-          );
-
+      if (baseUrl.includes('{query}') && baseUrl.includes('{page}')) {
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          addUrl(baseUrl.replace(/\{query\}/gi, encodeURIComponent(query)).replace(/\{page\}/gi, String(page)));
         }
-
       }
-
-
-      // ----------------------------------------------------------
-      // الطريقة الثالثة:
-      // إذا كان الموقع يستخدم {page} فقط
-      // ----------------------------------------------------------
-
-      if (
-        baseUrl.includes('{page}') &&
-        !baseUrl.includes('{query}')
-      ) {
-
-        for (
-          let page = 1;
-          page <= MAX_PAGES;
-          page++
-        ) {
-
-          addUrl(
-            baseUrl.replace(
-              /\{page\}/gi,
-              String(page)
-            )
-          );
-
+      if (baseUrl.includes('{page}') && !baseUrl.includes('{query}')) {
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          addUrl(baseUrl.replace(/\{page\}/gi, String(page)));
         }
-
       }
-
-
-      // ----------------------------------------------------------
-      // الطريقة الرابعة:
-      // مواقع تستخدم ?q=
-      // ----------------------------------------------------------
-
-      if (
-        !baseUrl.includes('{query}')
-      ) {
-
+      if (!baseUrl.includes('{query}')) {
         try {
-
-          const searchParams = [
-            'q',
-            'search',
-            'query',
-            'keyword',
-            's'
-          ];
-
-
-          for (
-            const param of searchParams
-          ) {
-
-            const url =
-              new URL(baseUrl);
-
-            url.searchParams.set(
-              param,
-              query
-            );
-
-            addUrl(
-              url.href
-            );
-
+          for (const param of ['q', 'search', 'query', 'keyword', 's']) {
+            const url = new URL(baseUrl);
+            url.searchParams.set(param, query);
+            addUrl(url.href);
           }
-
         } catch {}
-
       }
-
-
-      // ----------------------------------------------------------
-      // الطريقة الخامسة:
-      // /search?q=
-      // ----------------------------------------------------------
 
       try {
+        // تم الإصلاح: استخدام baseUrl كـ base لحل المسارات النسبية بشكل صحيح والحفاظ على مسار الدومين الأصلي
+        const searchPath = new URL('search', baseUrl);
+        searchPath.searchParams.set('q', query);
+        addUrl(searchPath.href);
 
-        const parsedBase =
-          new URL(baseUrl);
-
-        const searchPath =
-          new URL(
-            '/search',
-            parsedBase.origin
-          );
-
-        searchPath.searchParams.set(
-          'q',
-          query
-        );
-
-        addUrl(
-          searchPath.href
-        );
-
-
-        const productsPath =
-          new URL(
-            '/products',
-            parsedBase.origin
-          );
-
-        productsPath.searchParams.set(
-          'q',
-          query
-        );
-
-        addUrl(
-          productsPath.href
-        );
-
-
+        const productsPath = new URL('products', baseUrl);
+        productsPath.searchParams.set('q', query);
+        addUrl(productsPath.href);
       } catch {}
-
-
-      // ----------------------------------------------------------
-      // الطريقة السادسة:
-      // الصفحة الرئيسية نفسها
-      //
-      // مهمة جدًا للمواقع التي لا تحتوي على مربع بحث.
-      // ----------------------------------------------------------
 
       addUrl(baseUrl);
 
-
-      // ==========================================================
-      // معالجة الصفحات
-      // ==========================================================
-
       let processedPages = 0;
 
-
-      while (
-        navigationQueue.length > 0 &&
-        processedPages < MAX_NAVIGATION_URLS
-      ) {
-
-        const currentUrl =
-          navigationQueue.shift();
-
-
-        if (
-          visitedUrls.has(currentUrl)
-        ) {
-          continue;
-        }
-
-
-        visitedUrls.add(
-          currentUrl
-        );
-
-
+      while (navigationQueue.length > 0 && processedPages < MAX_NAVIGATION_URLS) {
+        const currentUrl = navigationQueue.shift();
+        if (visitedUrls.has(currentUrl)) continue;
+        visitedUrls.add(currentUrl);
         processedPages++;
 
-
         try {
-
-          const response =
-            await fetch(
-              currentUrl,
-              {
-                headers: {
-
-                  'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-
-                  'Accept':
-                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-
-                  'Accept-Language':
-                    'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7'
-
-                }
-              }
-            );
-
-
-          if (!response.ok) {
-            continue;
-          }
-
-
-          // ======================================================
-          // مهم:
-          // نحتاج نسختين من الصفحة:
-          // واحدة لاستخراج المنتجات
-          // وواحدة لاستخراج روابط التنقل.
-          //
-          // Response body لا يمكن قراءته مرتين،
-          // لذلك نستخدم clone().
-          // ======================================================
-
-          const productResponse =
-            response.clone();
-
-          const navigationResponse =
-            response;
-
-
-          // ======================================================
-          // استخراج المنتجات
-          // ======================================================
-
-          const pageProducts =
-            await extractProductsFromHtml(
-              productResponse,
-              provider
-            );
-
-
-          providerProducts.push(
-            ...pageProducts
-          );
-
-
-          // ======================================================
-          // استخراج روابط الأقسام / المزيد / الصفحات
-          // ======================================================
-
-          if (
-            processedPages <
-            MAX_NAVIGATION_URLS
-          ) {
-
-            const links =
-              await extractNavigationLinks(
-                navigationResponse,
-                provider
-              );
-
-
-            for (
-              const link of links
-            ) {
-
-              if (
-                navigationQueue.length >=
-                MAX_NAVIGATION_URLS
-              ) {
-                break;
-              }
-
-
-              const href =
-                link.url;
-
-
-              const lowerHref =
-                href.toLowerCase();
-
-
-              // --------------------------------------------------
-              // نضيف الروابط التي يمكن أن تقود إلى منتجات
-              // --------------------------------------------------
-
-              if (
-                containsSearchTerm(
-                  href
-                ) ||
-
-                isPaginationLink(
-                  link.text,
-                  href
-                ) ||
-
-                isCategoryLink(
-                  link.text,
-                  href
-                ) ||
-
-                lowerHref.includes(
-                  encodeURIComponent(
-                    queryLower
-                  )
-                )
-              ) {
-
-                addUrl(href);
-
-              }
-
+          const response = await fetch(currentUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+              'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7'
             }
+          });
 
+          if (!response.ok) continue;
+
+          // تم الإصلاح: استنساخ الاستجابة بشكل صحيح للقراءة المتعددة المتوازية
+          const productResponse = response.clone();
+          const navigationResponse = response.clone();
+
+          const [pageProducts, links] = await Promise.all([
+            extractProductsFromHtml(productResponse, provider),
+            extractNavigationLinks(navigationResponse, provider)
+          ]);
+
+          providerProducts.push(...pageProducts);
+
+          if (processedPages < MAX_NAVIGATION_URLS) {
+            for (const link of links) {
+              if (navigationQueue.length >= MAX_NAVIGATION_URLS) break;
+              const href = link.url;
+              const lowerHref = href.toLowerCase();
+
+              if (
+                containsSearchTerm(href) ||
+                containsSearchTerm(link.text) ||
+                isPaginationLink(link.text, href) ||
+                isCategoryLink(link.text, href) ||
+                link.rel === 'next' || link.rel === 'next-page' || link.rel === 'prev' || link.rel === 'previous' ||
+                lowerHref.includes(encodeURIComponent(queryLower))
+              ) {
+                addUrl(href);
+              }
+            }
           }
-
-
         } catch (pageError) {
-
-          console.error(
-            `❌ Error fetching ${currentUrl} from ${provider.name}:`,
-            pageError
-          );
-
+          console.error(`❌ Error fetching ${currentUrl} from ${provider.name}:`, pageError);
         }
-
       }
-
-
-      // ==========================================================
-      // إزالة المنتجات المكررة
-      // ==========================================================
 
       const uniqueProducts = [];
-
-      const seenProducts =
-        new Set();
-
-
-      for (
-        const product of providerProducts
-      ) {
-
-        if (
-          !product ||
-          !product.name ||
-          !product.base_price
-        ) {
-          continue;
-        }
-
-
-        const normalizedName =
-          product.name
-            .trim()
-            .toLowerCase();
-
-
-        const normalizedUrl =
-          product.url ||
-          '';
-
-
-        const key =
-          `${normalizedUrl}|${normalizedName}|${product.base_price}`;
-
-
-        if (
-          seenProducts.has(key)
-        ) {
-          continue;
-        }
-
-
+      const seenProducts = new Set();
+      for (const product of providerProducts) {
+        if (!product || !product.name || !product.base_price) continue;
+        const key = `${(product.url || '').toLowerCase()}|${product.name.trim().toLowerCase()}|${product.base_price}`;
+        if (seenProducts.has(key)) continue;
         seenProducts.add(key);
-
-        uniqueProducts.push(
-          product
-        );
-
+        uniqueProducts.push(product);
       }
 
+      const scoredProducts = uniqueProducts
+        .map(product => {
+          const relevance = calculateProductRelevance(product);
+          return { ...product, search_score: relevance.score, search_strong: relevance.strong, search_related: relevance.related };
+        })
+        .filter(product => product.search_score > 0)
+        .sort((a, b) => b.search_score - a.search_score);
 
-      // ==========================================================
-      // البحث في اسم المنتج
-      // ==========================================================
+      const strongProducts = scoredProducts.filter(p => p.search_strong);
+      const relatedProducts = scoredProducts.filter(p => !p.search_strong && p.search_related);
+      const filteredProducts = strongProducts.length > 0 ? [...strongProducts, ...relatedProducts] : relatedProducts;
 
-      const filteredProducts =
-        uniqueProducts.filter(
-          product => {
+      const marginPercent = parseFloat(provider.base_margin_percentage) || 0;
+      const userProfitPercent = parseFloat(provider.user_profit_percentage) || 0;
+      const shippingCost = parseFloat(provider.fixed_shipping_cost) || 0;
 
-            if (
-              !product.name
-            ) {
-              return false;
-            }
+      return filteredProducts.map(product => {
+        const marginAmount = product.base_price * (marginPercent / 100);
+        const userExpectedProfit = marginAmount * (userProfitPercent / 100);
+        const finalProductPrice = product.base_price + marginAmount;
+        const totalPrice = finalProductPrice + shippingCost;
 
-
-            return product.name
-              .toLowerCase()
-              .includes(queryLower);
-
-          }
-        );
-
-
-      // ==========================================================
-      // الحسابات المالية
-      // ==========================================================
-
-      const marginPercent =
-        parseFloat(
-          provider.base_margin_percentage
-        ) || 0;
-
-
-      const userProfitPercent =
-        parseFloat(
-          provider.user_profit_percentage
-        ) || 0;
-
-
-      const shippingCost =
-        parseFloat(
-          provider.fixed_shipping_cost
-        ) || 0;
-
-
-      return filteredProducts.map(
-        product => {
-
-          const marginAmount =
-            product.base_price *
-            (
-              marginPercent / 100
-            );
-
-
-          const userExpectedProfit =
-            marginAmount *
-            (
-              userProfitPercent / 100
-            );
-
-
-          const finalProductPrice =
-            product.base_price +
-            marginAmount;
-
-
-          const totalPrice =
-            finalProductPrice +
-            shippingCost;
-
-
-          let productUrl =
-            product.url || '';
-
-
-          if (
-            productUrl &&
-            !productUrl.startsWith('http')
-          ) {
-
-            productUrl =
-              normalizeUrl(
-                productUrl,
-                provider.base_url
-              );
-
-          }
-
-
-          return {
-
-            provider_id:
-              provider.id,
-
-            provider_name:
-              provider.name,
-
-            product_url:
-              productUrl,
-
-            name:
-              product.name.trim(),
-
-            image:
-              product.image || '',
-
-            final_product_price:
-              finalProductPrice.toFixed(2),
-
-            shipping_cost:
-              shippingCost.toFixed(2),
-
-            total_price:
-              totalPrice.toFixed(2),
-
-            user_expected_profit:
-              userExpectedProfit.toFixed(2)
-
-          };
-
+        let productUrl = product.url || '';
+        if (productUrl && !productUrl.startsWith('http')) {
+          productUrl = normalizeUrl(productUrl, provider.base_url);
         }
-      );
 
+        return {
+          provider_id: provider.id,
+          provider_name: provider.name,
+          match_type: product.search_strong ? 'strong' : 'related',
+          product_url: productUrl,
+          name: product.name.trim(),
+          image: product.image || '',
+          final_product_price: finalProductPrice.toFixed(2),
+          shipping_cost: shippingCost.toFixed(2),
+          total_price: totalPrice.toFixed(2),
+          user_expected_profit: userExpectedProfit.toFixed(2)
+        };
+      });
     };
-
 
     // ============================================================
     // تشغيل جميع المنصات في نفس الوقت
     // ============================================================
-
-    const searchPromises =
-      providersRes.rows.map(
-        async provider => {
-
-          try {
-
-            // ====================================================
-            // SCRAPING
-            // ====================================================
-
-            if (
-              (
-                provider.mode ||
-                'SCRAPING'
-              ).toUpperCase() ===
-              'SCRAPING'
-            ) {
-
-              return await searchProvider(
-                provider
-              );
-
-            }
-
-
-            // ====================================================
-            // API
-            // ====================================================
-
-            if (
-              (
-                provider.mode ||
-                ''
-              ).toUpperCase() ===
-              'API'
-            ) {
-
-              /*
-               * لا نفترض شكل JSON خاص بمزود معين.
-               *
-               * لذلك API mode يظل جاهزًا،
-               * لكن لا نقوم بتخمين أسماء الحقول.
-               *
-               * عندما نضيف Provider API حقيقي،
-               * يتم تعريف mapping الخاص به.
-               */
-
-              console.warn(
-                `⚠️ API provider ${provider.name} ` +
-                `requires provider-specific API mapping.`
-              );
-
-
-              return [];
-
-            }
-
-
-            return [];
-
-          } catch (providerError) {
-
-            console.error(
-              `❌ Marketing provider ${provider.name} error:`,
-              providerError
-            );
-
-
-            return [];
-
-          }
-
+    const searchPromises = providersRes.rows.map(async provider => {
+      try {
+        if ((provider.mode || 'SCRAPING').toUpperCase() === 'SCRAPING') {
+          return await searchProvider(provider);
         }
-      );
-
-
-    const resultsArray =
-      await Promise.all(
-        searchPromises
-      );
-
-
-    // ============================================================
-    // تجميع النتائج
-    // ============================================================
-
-    for (
-      const providerResults
-      of resultsArray
-    ) {
-
-      if (
-        !Array.isArray(
-          providerResults
-        )
-      ) {
-        continue;
+        if ((provider.mode || '').toUpperCase() === 'API') {
+          console.warn(`⚠️ API provider ${provider.name} requires provider-specific API mapping.`);
+          return [];
+        }
+        return [];
+      } catch (providerError) {
+        console.error(`❌ Marketing provider ${provider.name} error:`, providerError);
+        return [];
       }
-
-
-      allProducts.push(
-        ...providerResults
-      );
-
-    }
-
-
-    // ============================================================
-    // إزالة أي تكرار نهائي بين النتائج
-    // ============================================================
-
-    const finalProducts = [];
-
-    const finalSeen =
-      new Set();
-
-
-    for (
-      const product
-      of allProducts
-    ) {
-
-      const key =
-        `${product.provider_id}|` +
-        `${product.product_url}|` +
-        `${product.name}`;
-
-
-      if (
-        finalSeen.has(key)
-      ) {
-        continue;
-      }
-
-
-      finalSeen.add(key);
-
-      finalProducts.push(
-        product
-      );
-
-    }
-
-
-    // ============================================================
-    // النتيجة
-    // ============================================================
-
-    return c.json({
-
-      success: true,
-
-      data:
-        finalProducts,
-
-      providers_searched:
-        providersRes.rows.length,
-
-      total_results:
-        finalProducts.length
-
     });
 
+    const resultsArray = await Promise.all(searchPromises);
 
-  } catch (err) {
+    for (const providerResults of resultsArray) {
+      if (Array.isArray(providerResults)) {
+        allProducts.push(...providerResults);
+      }
+    }
 
-    console.error(
-      '❌ /api/marketing/search:',
-      err
-    );
-
+    const finalProducts = [];
+    const finalSeen = new Set();
+    for (const product of allProducts) {
+      const key = `${product.provider_id}|${product.product_url}|${product.name}`;
+      if (finalSeen.has(key)) continue;
+      finalSeen.add(key);
+      finalProducts.push(product);
+    }
 
     return c.json({
+      success: true,
+      data: finalProducts,
+      providers_searched: providersRes.rows.length,
+      total_results: finalProducts.length
+    });
 
-      success: false,
-
-      message:
-        'Failed to fetch live data'
-
-    }, 500);
-
+  } catch (err) {
+    console.error('❌ /api/marketing/search:', err);
+    return c.json({ success: false, message: 'Failed to fetch live data' }, 500);
   }
-
 });
 
 // 3. إنشاء طلب جديد (مع إعادة الحساب الحي لضمان الأمان 100%)
