@@ -9268,171 +9268,445 @@ if (!validTransition) {
 app.get('/api/admin/marketing/providers', verifyAdmin, async (c) => {
   try {
     const result = await pool.query(`
-      SELECT 
-        p.*,
+      SELECT
+        p.id,
+        p.name,
+        p.country_code,
+        p.base_url,
+        p.product_url_pattern,
+        p.base_margin_percentage,
+        p.user_profit_percentage,
+        p.fixed_shipping_cost,
+        p.selector_name,
+        p.selector_price,
+        p.selector_image,
+        p.is_active,
+        p.created_at,
+        p.mode,
+        p.api_endpoint,
+        p.api_search_path,
+        p.api_product_path,
         COUNT(o.id) AS total_orders,
         COALESCE(SUM(o.taskora_net_profit), 0) AS total_profit
       FROM marketing_providers p
-      LEFT JOIN marketing_orders o ON o.provider_id = p.id
+      LEFT JOIN marketing_orders o
+        ON o.provider_id = p.id
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `);
-    return c.json({ success: true, data: result.rows });
+
+    return c.json({
+      success: true,
+      data: result.rows
+    });
+
   } catch (err) {
     console.error('❌ GET /api/admin/marketing/providers:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Server error'
+    }, 500);
   }
 });
-
 // 2. إضافة منصة جديدة
 app.post('/api/admin/marketing/providers', verifyAdmin, async (c) => {
   try {
     const {
-  name,
-  country_code,
-  base_url,
-  product_url_pattern,
-  mode,
-  api_endpoint,
-  api_key,
-  api_search_path,
-  api_product_path,
-  base_margin_percentage,
-  user_profit_percentage,
-  fixed_shipping_cost,
-  selector_name,
-  selector_price,
-  selector_image,
-  is_active
-} = await c.req.json();
+      name,
+      country_code,
+      base_url,
+      product_url_pattern,
+      mode,
+      api_endpoint,
+      api_key,
+      api_search_path,
+      api_product_path,
+      base_margin_percentage,
+      user_profit_percentage,
+      fixed_shipping_cost,
+      selector_name,
+      selector_price,
+      selector_image,
+      is_active
+    } = await c.req.json();
 
-if (!name || !country_code || !base_url) {
-  return c.json({
-    success: false,
-    message: 'Name, country, and base URL are required'
-  }, 400);
-}
+    if (!name || !country_code || !base_url) {
+      return c.json({
+        success: false,
+        message: 'Name, country, and Base URL are required'
+      }, 400);
+    }
+
+    const normalizedCountry = String(country_code).trim().toUpperCase();
+
+    if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
+      return c.json({
+        success: false,
+        message: 'Country code must be exactly 2 letters'
+      }, 400);
+    }
+
+    let parsedBaseUrl;
+
+    try {
+      parsedBaseUrl = new URL(String(base_url).trim());
+
+      if (!['http:', 'https:'].includes(parsedBaseUrl.protocol)) {
+        throw new Error('Invalid protocol');
+      }
+    } catch {
+      return c.json({
+        success: false,
+        message: 'Invalid Base URL'
+      }, 400);
+    }
+
+    const normalizedMode =
+      String(mode || 'SCRAPING').trim().toUpperCase();
+
+    if (!['SCRAPING', 'API'].includes(normalizedMode)) {
+      return c.json({
+        success: false,
+        message: 'Mode must be SCRAPING or API'
+      }, 400);
+    }
+
+    const margin = Number(base_margin_percentage ?? 20);
+    const userProfit = Number(user_profit_percentage ?? 40);
+    const shipping = Number(fixed_shipping_cost ?? 0);
+
+    if (
+      !Number.isFinite(margin) ||
+      margin < 0 ||
+      margin > 100
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid base margin percentage'
+      }, 400);
+    }
+
+    if (
+      !Number.isFinite(userProfit) ||
+      userProfit < 0 ||
+      userProfit > 100
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid user profit percentage'
+      }, 400);
+    }
+
+    if (
+      !Number.isFinite(shipping) ||
+      shipping < 0
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid shipping cost'
+      }, 400);
+    }
+
+    if (normalizedMode === 'API' && !api_endpoint) {
+      return c.json({
+        success: false,
+        message: 'API Endpoint is required when mode is API'
+      }, 400);
+    }
 
     const result = await pool.query(`
       INSERT INTO marketing_providers (
-  name,
-  country_code,
-  base_url,
-  product_url_pattern,
-  base_margin_percentage,
-  user_profit_percentage,
-  fixed_shipping_cost,
-  selector_name,
-  selector_price,
-  selector_image,
-  is_active,
-  mode,
-  api_endpoint,
-  api_key,
-  api_search_path,
-  api_product_path
-) VALUES (
-  $1, $2, $3, $4, $5,
-  $6, $7, $8, $9, $10,
-  $11, $12, $13, $14, $15, $16
-)
-      RETURNING *
+        name,
+        country_code,
+        base_url,
+        product_url_pattern,
+        base_margin_percentage,
+        user_profit_percentage,
+        fixed_shipping_cost,
+        selector_name,
+        selector_price,
+        selector_image,
+        is_active,
+        mode,
+        api_endpoint,
+        api_key,
+        api_search_path,
+        api_product_path
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14, $15, $16
+      )
+      RETURNING
+        id,
+        name,
+        country_code,
+        base_url,
+        product_url_pattern,
+        base_margin_percentage,
+        user_profit_percentage,
+        fixed_shipping_cost,
+        selector_name,
+        selector_price,
+        selector_image,
+        is_active,
+        mode,
+        api_endpoint,
+        api_search_path,
+        api_product_path,
+        created_at
     `, [
-  name,
-  country_code.toUpperCase(),
-  base_url,
-  product_url_pattern || null,
-  base_margin_percentage ?? 20,
-  user_profit_percentage ?? 40,
-  fixed_shipping_cost ?? 0,
-  selector_name || '.product-title',
-  selector_price || '.price',
-  selector_image || '.product-image img',
-  is_active !== false,
-  mode || 'SCRAPING',
-  api_endpoint || null,
-  api_key || null,
-  api_search_path || null,
-  api_product_path || null
-]);
+      String(name).trim(),
+      normalizedCountry,
+      parsedBaseUrl.href,
+      product_url_pattern ? String(product_url_pattern).trim() : null,
+      margin,
+      userProfit,
+      shipping,
+      selector_name ? String(selector_name).trim() : '.product-title',
+      selector_price ? String(selector_price).trim() : '.price',
+      selector_image ? String(selector_image).trim() : '.product-image img',
+      is_active !== false,
+      normalizedMode,
+      api_endpoint ? String(api_endpoint).trim() : null,
+      api_key ? String(api_key).trim() : null,
+      api_search_path ? String(api_search_path).trim() : null,
+      api_product_path ? String(api_product_path).trim() : null
+    ]);
 
-    return c.json({ success: true, message: '✅ Provider added', data: result.rows[0] });
+    return c.json({
+      success: true,
+      message: '✅ Provider added',
+      data: result.rows[0]
+    });
+
   } catch (err) {
     console.error('❌ POST /api/admin/marketing/providers:', err);
-    return c.json({ success: false, message: 'Failed to add provider' }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Failed to add provider'
+    }, 500);
   }
 });
-
 // 3. تعديل منصة موجودة
 app.put('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
   try {
     const providerId = c.req.param('id');
-    const {
-  name,
-  country_code,
-  base_url,
-  product_url_pattern,
-  mode,
-  api_endpoint,
-  api_key,
-  api_search_path,
-  api_product_path,
-  base_margin_percentage,
-  user_profit_percentage,
-  fixed_shipping_cost,
-  selector_name,
-  selector_price,
-  selector_image,
-  is_active
-} = await c.req.json();
-    const result = await pool.query(`
-      UPDATE marketing_providers SET
-  name = COALESCE($2, name),
-  country_code = COALESCE($3, country_code),
-  base_url = COALESCE($4, base_url),
-  product_url_pattern = COALESCE($5, product_url_pattern),
-  base_margin_percentage = COALESCE($6, base_margin_percentage),
-  user_profit_percentage = COALESCE($7, user_profit_percentage),
-  fixed_shipping_cost = COALESCE($8, fixed_shipping_cost),
-  selector_name = COALESCE($9, selector_name),
-  selector_price = COALESCE($10, selector_price),
-  selector_image = COALESCE($11, selector_image),
-  is_active = COALESCE($12, is_active),
-  mode = COALESCE($13, mode),
-  api_endpoint = COALESCE($14, api_endpoint),
-  api_key = COALESCE($15, api_key),
-  api_search_path = COALESCE($16, api_search_path),
-  api_product_path = COALESCE($17, api_product_path)
-WHERE id = $1
-RETURNING *
-    `, [
-  providerId,
-  name,
-  country_code?.toUpperCase(),
-  base_url,
-  product_url_pattern,
-  base_margin_percentage,
-  user_profit_percentage,
-  fixed_shipping_cost,
-  selector_name,
-  selector_price,
-  selector_image,
-  is_active,
-  mode,
-  api_endpoint,
-  api_key,
-  api_search_path,
-  api_product_path
-]);
 
-    if (result.rows.length === 0) {
-      return c.json({ success: false, message: 'Provider not found' }, 404);
+    const {
+      name,
+      country_code,
+      base_url,
+      product_url_pattern,
+      base_margin_percentage,
+      user_profit_percentage,
+      fixed_shipping_cost,
+      selector_name,
+      selector_price,
+      selector_image,
+      is_active,
+      mode,
+      api_endpoint,
+      api_key,
+      api_search_path,
+      api_product_path
+    } = await c.req.json();
+
+    if (!providerId || !/^\d+$/.test(String(providerId))) {
+      return c.json({
+        success: false,
+        message: 'Invalid provider ID'
+      }, 400);
     }
 
-    return c.json({ success: true, message: '✅ Provider updated', data: result.rows[0] });
+    let normalizedCountry = null;
+
+    if (country_code !== undefined && country_code !== null) {
+      normalizedCountry = String(country_code).trim().toUpperCase();
+
+      if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
+        return c.json({
+          success: false,
+          message: 'Country code must be exactly 2 letters'
+        }, 400);
+      }
+    }
+
+    let normalizedBaseUrl = null;
+
+    if (base_url !== undefined && base_url !== null) {
+      try {
+        const parsedBaseUrl = new URL(String(base_url).trim());
+
+        if (!['http:', 'https:'].includes(parsedBaseUrl.protocol)) {
+          throw new Error('Invalid protocol');
+        }
+
+        normalizedBaseUrl = parsedBaseUrl.href;
+      } catch {
+        return c.json({
+          success: false,
+          message: 'Invalid Base URL'
+        }, 400);
+      }
+    }
+
+    let normalizedMode = null;
+
+    if (mode !== undefined && mode !== null) {
+      normalizedMode = String(mode).trim().toUpperCase();
+
+      if (!['SCRAPING', 'API'].includes(normalizedMode)) {
+        return c.json({
+          success: false,
+          message: 'Mode must be SCRAPING or API'
+        }, 400);
+      }
+    }
+
+    const margin =
+      base_margin_percentage !== undefined &&
+      base_margin_percentage !== null
+        ? Number(base_margin_percentage)
+        : null;
+
+    const userProfit =
+      user_profit_percentage !== undefined &&
+      user_profit_percentage !== null
+        ? Number(user_profit_percentage)
+        : null;
+
+    const shipping =
+      fixed_shipping_cost !== undefined &&
+      fixed_shipping_cost !== null
+        ? Number(fixed_shipping_cost)
+        : null;
+
+    if (
+      margin !== null &&
+      (!Number.isFinite(margin) || margin < 0 || margin > 100)
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid base margin percentage'
+      }, 400);
+    }
+
+    if (
+      userProfit !== null &&
+      (!Number.isFinite(userProfit) || userProfit < 0 || userProfit > 100)
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid user profit percentage'
+      }, 400);
+    }
+
+    if (
+      shipping !== null &&
+      (!Number.isFinite(shipping) || shipping < 0)
+    ) {
+      return c.json({
+        success: false,
+        message: 'Invalid shipping cost'
+      }, 400);
+    }
+
+    const result = await pool.query(`
+      UPDATE marketing_providers SET
+        name = COALESCE($2, name),
+        country_code = COALESCE($3, country_code),
+        base_url = COALESCE($4, base_url),
+        product_url_pattern = COALESCE($5, product_url_pattern),
+        base_margin_percentage = COALESCE($6, base_margin_percentage),
+        user_profit_percentage = COALESCE($7, user_profit_percentage),
+        fixed_shipping_cost = COALESCE($8, fixed_shipping_cost),
+        selector_name = COALESCE($9, selector_name),
+        selector_price = COALESCE($10, selector_price),
+        selector_image = COALESCE($11, selector_image),
+        is_active = COALESCE($12, is_active),
+        mode = COALESCE($13, mode),
+        api_endpoint = COALESCE($14, api_endpoint),
+        api_key = COALESCE($15, api_key),
+        api_search_path = COALESCE($16, api_search_path),
+        api_product_path = COALESCE($17, api_product_path)
+      WHERE id = $1
+      RETURNING
+        id,
+        name,
+        country_code,
+        base_url,
+        product_url_pattern,
+        base_margin_percentage,
+        user_profit_percentage,
+        fixed_shipping_cost,
+        selector_name,
+        selector_price,
+        selector_image,
+        is_active,
+        mode,
+        api_endpoint,
+        api_search_path,
+        api_product_path,
+        created_at
+    `, [
+      providerId,
+      name !== undefined ? String(name).trim() : null,
+      normalizedCountry,
+      normalizedBaseUrl,
+      product_url_pattern !== undefined
+        ? (product_url_pattern ? String(product_url_pattern).trim() : null)
+        : null,
+      margin,
+      userProfit,
+      shipping,
+      selector_name !== undefined
+        ? (selector_name ? String(selector_name).trim() : null)
+        : null,
+      selector_price !== undefined
+        ? (selector_price ? String(selector_price).trim() : null)
+        : null,
+      selector_image !== undefined
+        ? (selector_image ? String(selector_image).trim() : null)
+        : null,
+      is_active !== undefined ? Boolean(is_active) : null,
+      normalizedMode,
+      api_endpoint !== undefined
+        ? (api_endpoint ? String(api_endpoint).trim() : null)
+        : null,
+      api_key !== undefined
+        ? (api_key ? String(api_key).trim() : null)
+        : null,
+      api_search_path !== undefined
+        ? (api_search_path ? String(api_search_path).trim() : null)
+        : null,
+      api_product_path !== undefined
+        ? (api_product_path ? String(api_product_path).trim() : null)
+        : null
+    ]);
+
+    if (result.rows.length === 0) {
+      return c.json({
+        success: false,
+        message: 'Provider not found'
+      }, 404);
+    }
+
+    return c.json({
+      success: true,
+      message: '✅ Provider updated',
+      data: result.rows[0]
+    });
+
   } catch (err) {
     console.error('❌ PUT /api/admin/marketing/providers/:id:', err);
-    return c.json({ success: false, message: 'Failed to update provider' }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Failed to update provider'
+    }, 500);
   }
 });
 
@@ -9469,90 +9743,184 @@ app.delete('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
   }
 });
 
-// 5. اختبار الاتصال بالمنصة (اختياري - مفيد جداً)
+// 5. اختبار الاتصال بالمنصة
 app.post('/api/admin/marketing/providers/:id/test', verifyAdmin, async (c) => {
   try {
     const providerId = c.req.param('id');
-    const { test_query = 'watch' } = await c.req.json();
 
-    const providerRes = await pool.query(
-      'SELECT * FROM marketing_providers WHERE id = $1',
-      [providerId]
-    );
+    const body = await c.req.json().catch(() => ({}));
+
+    const testQuery =
+      String(body.test_query || 'watch').trim();
+
+    const providerRes = await pool.query(`
+      SELECT
+        id,
+        name,
+        base_url,
+        mode,
+        selector_name,
+        selector_price,
+        selector_image,
+        api_endpoint,
+        api_search_path
+      FROM marketing_providers
+      WHERE id = $1
+    `, [providerId]);
 
     if (providerRes.rows.length === 0) {
-      return c.json({ success: false, message: 'Provider not found' }, 404);
+      return c.json({
+        success: false,
+        message: 'Provider not found'
+      }, 404);
     }
 
     const provider = providerRes.rows[0];
-    let testUrl = provider.base_url;
 
-if (testUrl.includes('{query}')) {
-  testUrl = testUrl.replace(
-    /\{query\}/gi,
-    encodeURIComponent(test_query)
-  );
-} else {
-  try {
-    const parsedUrl = new URL(testUrl);
+    /*
+     * حالياً اختبار المنصة يختبر Scraping فقط.
+     * API mode سيتم ربطه لاحقاً بطريقة API محددة،
+     * لأن كل API له طريقة استجابة مختلفة.
+     */
+    if (String(provider.mode).toUpperCase() === 'API') {
+      if (!provider.api_endpoint) {
+        return c.json({
+          success: false,
+          message: 'API Endpoint is not configured'
+        }, 400);
+      }
 
-    parsedUrl.searchParams.set(
-      'q',
-      test_query
-    );
+      let apiUrl;
 
-    testUrl = parsedUrl.href;
+      try {
+        apiUrl = new URL(provider.api_endpoint);
 
-  } catch {
-    return c.json({
-      success: false,
-      message: 'Invalid provider Base URL'
-    }, 400);
-  }
-}
+        if (!['http:', 'https:'].includes(apiUrl.protocol)) {
+          throw new Error('Invalid protocol');
+        }
+      } catch {
+        return c.json({
+          success: false,
+          message: 'Invalid API Endpoint'
+        }, 400);
+      }
+
+      const response = await fetch(apiUrl.href, {
+        headers: {
+          'User-Agent': 'Taskora-Provider-Test/1.0',
+          'Accept': 'application/json,text/plain,*/*'
+        }
+      });
+
+      return c.json({
+        success: response.ok,
+        message: response.ok
+          ? '✅ API Endpoint is reachable'
+          : `❌ API connection failed: HTTP ${response.status}`,
+        details: {
+          mode: 'API',
+          status: response.status,
+          endpoint: apiUrl.href
+        }
+      });
+    }
+
+    let testUrl;
+
+    try {
+      const baseUrl = new URL(provider.base_url);
+
+      /*
+       * إذا كان Base URL يحتوي على {query}
+       * نستبدله مباشرة.
+       */
+      if (provider.base_url.includes('{query}')) {
+        testUrl = provider.base_url.replace(
+          /\{query\}/gi,
+          encodeURIComponent(testQuery)
+        );
+      } else {
+        /*
+         * لا نفترض مسار بحث خاص بالمنصة.
+         * نستخدم Base URL كما هو لاختبار الوصول.
+         */
+        testUrl = baseUrl.href;
+      }
+    } catch {
+      return c.json({
+        success: false,
+        message: 'Invalid provider Base URL'
+      }, 400);
+    }
 
     const response = await fetch(testUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
-        'Accept-Language': 'en-US,en;q=0.5'
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language':
+          'en-US,en;q=0.8'
       }
     });
 
     if (!response.ok) {
-      return c.json({ 
-        success: false, 
-        message: `❌ Connection failed: HTTP ${response.status}` 
+      return c.json({
+        success: false,
+        message: `❌ Connection failed: HTTP ${response.status}`
       });
     }
 
     const html = await response.text();
 
-    // اختبار بسيط للـ Selectors
-    const hasName = html.includes(provider.selector_name.replace('.', ''));
-    const hasPrice = html.includes(provider.selector_price.replace('.', ''));
+    const selectorName =
+      String(provider.selector_name || '').trim();
+
+    const selectorPrice =
+      String(provider.selector_price || '').trim();
+
+    const selectorImage =
+      String(provider.selector_image || '').trim();
+
+    /*
+     * هذا اختبار اتصال + وجود نصوص الـ selectors داخل HTML.
+     * لا نعتبره إثباتاً أن استخراج المنتجات صحيح 100%.
+     */
+    const selectorsFound = {
+      name:
+        selectorName.length > 0 &&
+        html.includes(selectorName),
+
+      price:
+        selectorPrice.length > 0 &&
+        html.includes(selectorPrice),
+
+      image:
+        selectorImage.length > 0 &&
+        html.includes(selectorImage)
+    };
 
     return c.json({
       success: true,
       message: '✅ Connection successful',
       details: {
+        mode: 'SCRAPING',
         status: response.status,
         html_size: html.length,
-        selectors_found: {
-          name: hasName,
-          price: hasPrice
-        },
-        recommendation: hasName && hasPrice 
-          ? '✅ Selectors look good' 
-          : '⚠️ Some selectors may not match. Use browser Inspect to verify.'
+        test_url: testUrl,
+        selectors_found: selectorsFound
       }
     });
+
   } catch (err) {
     console.error('❌ Test provider error:', err);
-    return c.json({ success: false, message: 'Test failed: ' + err.message }, 500);
+
+    return c.json({
+      success: false,
+      message: 'Test failed: ' + err.message
+    }, 500);
   }
 });
-
 
 
 // =====================================================================
