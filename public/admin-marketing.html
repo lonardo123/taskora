@@ -92,7 +92,7 @@
             <thead>
               <tr>
                 <th>#ID</th>
-                <th>المنتج / المنصة</th>
+                <th>المنتج / المنصة / الرابط</th>
                 <th>بيانات العميل</th>
                 <th>التفاصيل المالية</th>
                 <th>الحالة</th>
@@ -108,9 +108,20 @@
   </div>
 
   <script>
-    const API = 'https://taskora.taskora.workers.dev'; // ⚠️ تأكد من تغيير هذا الرابط إذا لزم الأمر
-    const urlParams = new URLSearchParams(window.location.search);
-    let adminId = urlParams.get('admin_id') || localStorage.getItem('taskora_admin_id') || '';
+    const API = 'https://taskora.taskora.workers.dev';
+
+const urlParams = new URLSearchParams(window.location.search);
+
+let adminId =
+  urlParams.get('admin_id') ||
+  localStorage.getItem('taskora_admin_id') ||
+  '';
+
+/*
+ * تخزين الطلبات الحالية حسب ID
+ * حتى لا نضع بيانات العميل والرابط مباشرة داخل onclick.
+ */
+let marketingOrders = {};
 
     if (adminId) {
       document.getElementById('adminIdInput').value = adminId;
@@ -141,6 +152,14 @@
       setTimeout(() => { statusBox.className = 'status'; }, 4000);
     }
 
+    function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
     async function loadOrders() {
       if (!adminId) {
         showStatus('⚠️ يرجى إدخال معرف الأدمن أولاً', 'error');
@@ -165,55 +184,250 @@
         }
 
         if (data.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 40px; color: #666;">لا توجد طلبات في هذه الحالة</td></tr>';
-        } else {
-          data.data.forEach(order => {
-            const customerInfo = `👤 ${order.customer_name}\n📱 ${order.customer_phone}\n📍 ${order.customer_city || '-'}\n🏠 ${order.customer_address}`;
-            
-            const financials = `
-              <div class="financials">
-                سعر المورد: <span class="cost">$${parseFloat(order.base_price).toFixed(2)}</span><br>
-                هامش Taskora: <span class="profit">+$${parseFloat(order.margin_amount).toFixed(2)}</span><br>
-                ربح المستخدم: <span class="cost">-$${parseFloat(order.user_expected_profit).toFixed(2)}</span><br>
-                <hr style="border-color: #e5e7eb; margin: 6px 0;">
-                صافي ربحك: <span class="net">$${parseFloat(order.taskora_net_profit).toFixed(2)}</span>
-              </div>
-            `;
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="7" style="text-align:center; padding:40px; color:#666;">
+        لا توجد طلبات في هذه الحالة
+      </td>
+    </tr>
+  `;
+} else {
 
-            const date = new Date(order.created_at).toLocaleString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  marketingOrders = {};
 
-            let actionButtons = '';
-            if (order.status === 'PENDING' || order.status === 'PROCESSING') {
-              actionButtons = `
-                <button class="btn btn-sm btn-primary" onclick="copyCustomerInfo('${order.customer_name.replace(/'/g, "\\'")}', '${order.customer_phone}', '${(order.customer_city || '').replace(/'/g, "\\'")}', '${order.customer_address.replace(/'/g, "\\'")}')">📋 نسخ البيانات</button>
-                <select onchange="updateStatus(${order.id}, this.value)">
-                  <option value="">تغيير الحالة...</option>
-                  <option value="PROCESSING">قيد المعالجة</option>
-                  <option value="DELIVERED" style="color: green; font-weight: bold;">✅ تم التسليم (إضافة الربح)</option>
-                  <option value="CANCELLED" style="color: red;">❌ إلغاء</option>
-                </select>
-              `;
-            } else {
-              actionButtons = `<span style="color: #64748b; font-size: 12px;">مكتمل / مغلق</span>`;
-            }
+  data.data.forEach(order => {
 
-            const row = `
-              <tr>
-                <td><strong>#${order.id}</strong></td>
-                <td>
-                  <div style="font-weight: bold; color: #2563eb;">${order.product_name}</div>
-                  <div style="font-size: 11px; color: #64748b; margin-top: 4px;">${order.provider_name}</div>
-                </td>
-                <td style="white-space: pre-line; color: #334155;">${customerInfo}</td>
-                <td>${financials}</td>
-                <td><span class="status-badge status-${order.status}">${order.status}</span></td>
-                <td style="font-size: 12px; color: #64748b; white-space: nowrap;">${date}</td>
-                <td class="actions">${actionButtons}</td>
-              </tr>
-            `;
-            tbody.innerHTML += row;
-          });
-        }
+    // حفظ الطلب لاستخدامه من أزرار النسخ وفتح الرابط
+    marketingOrders[order.id] = order;
+
+    const customerInfo = `
+      👤 ${escapeHtml(order.customer_name)}
+      \n📱 ${escapeHtml(order.customer_phone)}
+      \n📍 ${escapeHtml(order.customer_city || '-')}
+      \n🏠 ${escapeHtml(order.customer_address)}
+    `;
+
+    const financials = `
+      <div class="financials">
+        سعر المورد:
+        <span class="cost">
+          $${parseFloat(order.base_price || 0).toFixed(2)}
+        </span><br>
+
+        هامش Taskora:
+        <span class="profit">
+          +$${parseFloat(order.margin_amount || 0).toFixed(2)}
+        </span><br>
+
+        ربح المستخدم:
+        <span class="cost">
+          -$${parseFloat(order.user_expected_profit || 0).toFixed(2)}
+        </span><br>
+
+        <hr style="border-color:#e5e7eb;margin:6px 0;">
+
+        صافي ربحك:
+        <span class="net">
+          $${parseFloat(order.taskora_net_profit || 0).toFixed(2)}
+        </span>
+      </div>
+    `;
+
+    const date = new Date(order.created_at).toLocaleString(
+      'ar-EG',
+      {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }
+    );
+
+    /*
+     * رابط المنتج الأصلي عند المورد.
+     * هذا الرابط لا يعرض سعر المورد أو هامش Taskora.
+     */
+    const productLink = order.product_url
+      ? `
+        <a
+          href="${escapeHtml(order.product_url)}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            display:inline-block;
+            margin-top:6px;
+            color:#2563eb;
+            font-size:12px;
+            text-decoration:none;
+          "
+        >
+          🔗 فتح رابط المنتج
+        </a>
+      `
+      : `
+        <div style="margin-top:6px;color:#94a3b8;font-size:12px;">
+          ⚠️ رابط المنتج غير متوفر
+        </div>
+      `;
+
+    let actionButtons = '';
+
+    if (order.status === 'PENDING') {
+
+      /*
+       * PENDING:
+       * مسموح فقط:
+       * PENDING → PROCESSING
+       * PENDING → CANCELLED
+       */
+      actionButtons = `
+        <button
+          class="btn btn-sm btn-primary"
+          onclick="copyCustomerInfo(${order.id})"
+        >
+          📋 نسخ بيانات العميل
+        </button>
+
+        <button
+          class="btn btn-sm"
+          style="background:#0f766e;color:white;"
+          onclick="copyOrderInfo(${order.id})"
+        >
+          📦 نسخ بيانات الطلب
+        </button>
+
+        <select onchange="updateStatus(${order.id}, this.value)">
+          <option value="">تغيير الحالة...</option>
+
+          <option value="PROCESSING">
+            🔄 بدء المعالجة
+          </option>
+
+          <option value="CANCELLED" style="color:red;">
+            ❌ إلغاء
+          </option>
+        </select>
+      `;
+
+    } else if (order.status === 'PROCESSING') {
+
+      /*
+       * PROCESSING:
+       * مسموح فقط:
+       * PROCESSING → DELIVERED
+       * PROCESSING → CANCELLED
+       */
+      actionButtons = `
+        <button
+          class="btn btn-sm btn-primary"
+          onclick="copyCustomerInfo(${order.id})"
+        >
+          📋 نسخ بيانات العميل
+        </button>
+
+        <button
+          class="btn btn-sm"
+          style="background:#0f766e;color:white;"
+          onclick="copyOrderInfo(${order.id})"
+        >
+          📦 نسخ بيانات الطلب
+        </button>
+
+        <select onchange="updateStatus(${order.id}, this.value)">
+          <option value="">تغيير الحالة...</option>
+
+          <option
+            value="DELIVERED"
+            style="color:green;font-weight:bold;"
+          >
+            ✅ تم التسليم (إضافة الربح)
+          </option>
+
+          <option
+            value="CANCELLED"
+            style="color:red;"
+          >
+            ❌ إلغاء
+          </option>
+        </select>
+      `;
+
+    } else {
+
+      actionButtons = `
+        <span style="color:#64748b;font-size:12px;">
+          مكتمل / مغلق
+        </span>
+      `;
+    }
+
+    const row = `
+      <tr>
+
+        <td>
+          <strong>#${order.id}</strong>
+        </td>
+
+        <td>
+
+          <div style="font-weight:bold;color:#2563eb;">
+            ${escapeHtml(order.product_name)}
+          </div>
+
+          <div
+            style="
+              font-size:11px;
+              color:#64748b;
+              margin-top:4px;
+            "
+          >
+            ${escapeHtml(order.provider_name)}
+          </div>
+
+          ${productLink}
+
+        </td>
+
+        <td
+          style="
+            white-space:pre-line;
+            color:#334155;
+          "
+        >
+          ${customerInfo}
+        </td>
+
+        <td>
+          ${financials}
+        </td>
+
+        <td>
+          <span class="status-badge status-${escapeHtml(order.status)}">
+            ${escapeHtml(order.status)}
+          </span>
+        </td>
+
+        <td
+          style="
+            font-size:12px;
+            color:#64748b;
+            white-space:nowrap;
+          "
+        >
+          ${date}
+        </td>
+
+        <td class="actions">
+          ${actionButtons}
+        </td>
+
+      </tr>
+    `;
+
+    tbody.innerHTML += row;
+  });
+}
 
         loading.style.display = 'none';
         tableContainer.style.display = 'block';
@@ -225,15 +439,75 @@
       }
     }
 
-    function copyCustomerInfo(name, phone, city, address) {
-      const text = `اسم العميل: ${name}\nرقم الهاتف: ${phone}\nالمدينة: ${city}\nالعنوان: ${address}`;
-      navigator.clipboard.writeText(text).then(() => {
-        showStatus('✅ تم نسخ بيانات العميل للحافظة بنجاح', 'success');
-      }).catch(() => {
-        showStatus('❌ فشل النسخ. يرجى النسخ يدوياً', 'error');
-      });
-    }
+    function copyCustomerInfo(orderId) {
 
+  const order = marketingOrders[orderId];
+
+  if (!order) {
+    showStatus('❌ لم يتم العثور على بيانات الطلب', 'error');
+    return;
+  }
+
+  const text =
+`اسم العميل: ${order.customer_name || ''}
+رقم الهاتف: ${order.customer_phone || ''}
+المدينة: ${order.customer_city || '-'}
+العنوان: ${order.customer_address || ''}`;
+
+  navigator.clipboard.writeText(text)
+    .then(() => {
+      showStatus(
+        '✅ تم نسخ بيانات العميل للحافظة بنجاح',
+        'success'
+      );
+    })
+    .catch(() => {
+      showStatus(
+        '❌ فشل النسخ. يرجى النسخ يدوياً',
+        'error'
+      );
+    });
+}
+    
+function copyOrderInfo(orderId) {
+
+  const order = marketingOrders[orderId];
+
+  if (!order) {
+    showStatus('❌ لم يتم العثور على بيانات الطلب', 'error');
+    return;
+  }
+
+  const text =
+`رقم الطلب: #${order.id}
+المنتج: ${order.product_name || ''}
+المنصة: ${order.provider_name || ''}
+رابط المنتج: ${order.product_url || ''}
+
+اسم العميل: ${order.customer_name || ''}
+رقم الهاتف: ${order.customer_phone || ''}
+المدينة: ${order.customer_city || '-'}
+العنوان: ${order.customer_address || ''}
+
+سعر البيع للعميل: $${parseFloat(order.final_product_price || 0).toFixed(2)}
+الشحن: $${parseFloat(order.shipping_cost || 0).toFixed(2)}
+إجمالي COD: $${parseFloat(order.total_price || 0).toFixed(2)}`;
+
+  navigator.clipboard.writeText(text)
+    .then(() => {
+      showStatus(
+        '✅ تم نسخ بيانات الطلب ورابط المنتج بنجاح',
+        'success'
+      );
+    })
+    .catch(() => {
+      showStatus(
+        '❌ فشل النسخ. يرجى النسخ يدوياً',
+        'error'
+      );
+    });
+}
+    
     async function updateStatus(orderId, newStatus) {
       if (!newStatus) return;
       
