@@ -7690,10 +7690,12 @@ app.post(
   '/api/marketing/manual-order',
   async (c) => {
 
-    const client =
-      await pool.connect();
+    let client = null;
 
     try {
+
+      client =
+        await pool.connect();
 
       const {
         user_id,
@@ -8032,18 +8034,22 @@ app.post(
 
     } catch (err) {
 
-      try {
+      if (client) {
 
-        await client.query(
-          'ROLLBACK'
-        );
+        try {
 
-      } catch (rollbackError) {
+          await client.query(
+            'ROLLBACK'
+          );
 
-        console.error(
-          '❌ Marketing manual order rollback error:',
-          rollbackError
-        );
+        } catch (rollbackError) {
+
+          console.error(
+            '❌ Marketing manual order rollback error:',
+            rollbackError
+          );
+
+        }
 
       }
 
@@ -8066,13 +8072,16 @@ app.post(
 
     } finally {
 
-      client.release();
+      if (client) {
+
+        client.release();
+
+      }
 
     }
 
   }
 );
-
 
 
 // =====================================================
