@@ -7056,12 +7056,16 @@ app.post('/api/quiz/settings', verifyAdmin, async (c) => {
 // 1. جلب المنصات النشطة
 app.get('/api/marketing/providers', async (c) => {
   try {
+    const country = c.req.query('country');
+    if (!country) return c.json({ success: false, message: 'Country is required' }, 400);
+
     const result = await pool.query(`
-      SELECT id, name, country_code, fixed_shipping_cost 
+      SELECT id, name, country_code, base_url, mode, fixed_shipping_cost 
       FROM marketing_providers 
-      WHERE is_active = true 
-      ORDER BY country_code ASC, name ASC
-    `);
+      WHERE country_code = $1 AND is_active = true 
+      ORDER BY name ASC
+    `, [country.toUpperCase()]);
+    
     return c.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('❌ /api/marketing/providers:', err);
@@ -7069,51 +7073,7 @@ app.get('/api/marketing/providers', async (c) => {
   }
 });
 
-// ================================================================
-// 2. البحث الحي في المنصات النشطة
-//    يدعم:
-//    1) مواقع بها مربع بحث
-//    2) مواقع تستخدم {query}
-//    3) مواقع تستخدم {page}
-//    4) مواقع تعتمد على الأقسام
-//    5) مواقع تعتمد على "عرض المزيد" / Next / Pagination
-//    6) مواقع لا تحتوي على مربع بحث إطلاقًا
-//    7) API providers بشكل عام عند توفر API
-// ================================================================
 
-app.get('/api/marketing/search', async (c) => {
-
-try {
-
-const country = c.req.query('country');
-const query = c.req.query('q');
-
-if (!country || !query) {
-  return c.json({
-    success: false,
-    message: 'Country and query are required'
-  }, 400);
-}
-
-const queryLower = query
-  .toLowerCase()
-  .trim();
-
-if (queryLower.length < 2) {
-  return c.json({
-    success: false,
-    message: 'Search query must contain at least 2 characters'
-  }, 400);
-}
-
-
-// ============================================================
-// جلب جميع المنصات النشطة للدولة
-// ============================================================
-
-const providersRes = await pool.query(`
-  SELECT
-    id,
 
 // 3. إنشاء طلب جديد (مع إعادة الحساب الحي لضمان الأمان 100%)
 app.post('/api/marketing/orders', async (c) => {
@@ -7292,6 +7252,76 @@ if (!basePrice || !Number.isFinite(basePrice)) {
   }
 });
 
+
+// =====================================================
+// 🛒 MARKETING: MANUAL BROWSE & REPORT SYSTEM
+// =====================================================
+app.post('/api/marketing/manual-order', async (c) => {
+  const client = await pool.connect();
+  try {
+    const { user_id, provider_id, product_name, declared_price, image_url, customer_name, customer_phone, customer_address, customer_city } = await c.req.json();
+
+    if (!user_id || !provider_id || !product_name || !declared_price || !customer_name || !customer_phone || !customer_address) {
+      return c.json({ success: false, message: 'Missing required fields' }, 400);
+    }
+
+    await client.query('BEGIN');
+
+    const providerRes = await client.query(
+      'SELECT base_margin_percentage, user_profit_percentage, fixed_shipping_cost FROM marketing_providers WHERE id = $1 AND is_active = true', 
+      [provider_id]
+    );
+    
+    if (providerRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return c.json({ success: false, message: 'Provider not found or inactive' }, 404);
+    }
+
+    const provider = providerRes.rows[0];
+    const dPrice = parseFloat(declared_price);
+    
+    if (isNaN(dPrice) || dPrice <= 0) {
+      await client.query('ROLLBACK');
+      return c.json({ success: false, message: 'Invalid declared price' }, 400);
+    }
+
+    const marginPercent = parseFloat(provider.base_margin_percentage);
+    const userProfitPercent = parseFloat(provider.user_profit_percentage);
+    const shippingCost = parseFloat(provider.fixed_shipping_cost);
+
+    const marginAmount = dPrice * (marginPercent / 100);
+    const userExpectedProfit = marginAmount * (userProfitPercent / 100);
+    const taskoraNetProfit = marginAmount - userExpectedProfit;
+    const finalProductPrice = dPrice + marginAmount;
+    const totalPrice = finalProductPrice + shippingCost;
+
+    const orderRes = await client.query(`
+      INSERT INTO marketing_orders (
+        user_id, provider_id, product_name, product_url,
+        customer_name, customer_phone, customer_address, customer_city,
+        base_price, margin_amount, final_product_price, shipping_cost, 
+        total_price, user_expected_profit, taskora_net_profit, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PENDING_VERIFICATION')
+      RETURNING id
+    `, [
+      user_id, provider_id, product_name, image_url || null,
+      customer_name, customer_phone, customer_address, customer_city,
+      dPrice, marginAmount, finalProductPrice, shippingCost, 
+      totalPrice, userExpectedProfit, taskoraNetProfit
+    ]);
+
+    await client.query('COMMIT');
+    return c.json({ success: true, message: 'Order submitted for admin verification', order_id: orderRes.rows[0].id });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ /api/marketing/manual-order:', err);
+    return c.json({ success: false, message: 'Failed to create order' }, 500);
+  } finally {
+    client.release();
+  }
+});
+
 // 4. [ADMIN ONLY] جلب الطلبات مع كافة التفاصيل المالية
 app.get('/api/admin/marketing/orders', verifyAdmin, async (c) => {
   try {
@@ -7377,32 +7407,21 @@ app.post(
       // التحقق من حالة الطلب
       // ==========================================================
 
-      const allowedStatuses = [
-        'PENDING',
-        'PROCESSING',
-        'DELIVERED',
-        'CANCELLED'
-      ];
+      const allowedStatuses = ['PENDING_VERIFICATION', 'PENDING', 'PROCESSING', 'DELIVERED', 'CANCELLED'];
 
+// ... (بعد جلب الطلب)
+const currentStatus = String(order.status || '').trim().toUpperCase();
 
-      const normalizedStatus =
-        String(status || '')
-          .trim()
-          .toUpperCase();
+const validTransition =
+  (currentStatus === 'PENDING_VERIFICATION' && (normalizedStatus === 'PROCESSING' || normalizedStatus === 'CANCELLED')) ||
+  (currentStatus === 'PENDING' && (normalizedStatus === 'PROCESSING' || normalizedStatus === 'CANCELLED')) ||
+  (currentStatus === 'PROCESSING' && (normalizedStatus === 'DELIVERED' || normalizedStatus === 'CANCELLED')) ||
+  (currentStatus === normalizedStatus && (normalizedStatus === 'DELIVERED' || normalizedStatus === 'CANCELLED'));
 
-
-      if (
-        !allowedStatuses.includes(
-          normalizedStatus
-        )
-      ) {
-
-        return c.json({
-          success: false,
-          message: 'Invalid order status'
-        }, 400);
-
-      }
+if (!validTransition) {
+  await client.query('ROLLBACK');
+  return c.json({ success: false, message: `Invalid status transition: ${currentStatus} → ${normalizedStatus}` }, 400);
+}
 
 
       // ==========================================================
