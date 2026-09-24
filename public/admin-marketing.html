@@ -4,544 +4,1567 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>إدارة طلبات التسويق</title>
+
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f8; color: #222; }
-    .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 20px; }
-    
-    .header { background: #ffffff; border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
-    .header h1 { margin: 0; font-size: 22px; color: #2563eb; }
-    
-    .controls { display: flex; gap: 10px; align-items: center; }
-    select { padding: 10px; border: 1px solid #d5d9de; border-radius: 8px; font-size: 14px; outline: none; background: white; }
-    
-    .btn { border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    * {
+      box-sizing: border-box;
+    }
 
-    .card { background: #ffffff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
-    .table-container { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 900px; }
-    th, td { padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; }
-    th { background: #f8fafc; color: #64748b; font-weight: 600; white-space: nowrap; }
-    tr:hover { background: #f8fafc; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f4f6f8;
+      color: #222;
+    }
 
-    .status-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; display: inline-block; }
-    .status-PENDING { background: #fef3c7; color: #92400e; }
-    .status-PROCESSING { background: #dbeafe; color: #1e40af; }
-    .status-DELIVERED { background: #dcfce7; color: #166534; }
-    .status-CANCELLED { background: #fee2e2; color: #991b1b; }
+    .container {
+      width: 100%;
+      max-width: 1250px;
+      margin: 0 auto;
+      padding: 20px;
+    }
 
-    .financials { font-family: monospace; font-size: 12px; line-height: 1.6; background: #f8fafc; padding: 8px; border-radius: 6px; }
-    .financials .profit { color: #16a34a; font-weight: bold; }
-    .financials .cost { color: #dc2626; }
-    .financials .net { color: #2563eb; font-weight: bold; font-size: 13px; }
+    .header {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
 
-    .actions { display: flex; flex-direction: column; gap: 6px; min-width: 140px; }
-    .actions select { width: 100%; padding: 6px; font-size: 12px; border: 1px solid #d5d9de; border-radius: 6px; }
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
 
-    .status { margin-top: 15px; padding: 12px; border-radius: 8px; display: none; font-size: 14px; text-align: center; }
-    .status.success { display: block; background: #dcfce7; color: #166534; }
-    .status.error { display: block; background: #fee2e2; color: #991b1b; }
-    .loading { text-align: center; padding: 40px; color: #666; }
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+      color: #2563eb;
+    }
 
-    .admin-id-input { margin-bottom: 20px; padding: 15px; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .admin-id-input label { font-weight: bold; font-size: 14px; color: #334155; }
-    .admin-id-input input { padding: 8px; border: 1px solid #d5d9de; border-radius: 6px; font-size: 14px; width: 250px; }
+    .header p {
+      margin: 5px 0 0;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    select {
+      padding: 10px;
+      border: 1px solid #d5d9de;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      background: white;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-success {
+      background: #16a34a;
+      color: white;
+    }
+
+    .btn-warning {
+      background: #d97706;
+      color: white;
+    }
+
+    .btn-danger {
+      background: #dc2626;
+      color: white;
+    }
+
+    .btn-info {
+      background: #0f766e;
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+
+    .table-container {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1050px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      text-align: right;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 13px;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #64748b;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tr:hover {
+      background: #f8fafc;
+    }
+
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: bold;
+      display: inline-block;
+      white-space: nowrap;
+    }
+
+    .status-PENDING,
+    .status-PENDING_VERIFICATION {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .status-PROCESSING {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .status-DELIVERED {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status-CANCELLED {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .financials {
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      background: #f8fafc;
+      padding: 8px;
+      border-radius: 6px;
+      min-width: 190px;
+    }
+
+    .financials .price {
+      color: #334155;
+      font-weight: bold;
+    }
+
+    .financials .profit {
+      color: #16a34a;
+      font-weight: bold;
+    }
+
+    .financials .referral {
+      color: #7c3aed;
+      font-weight: bold;
+    }
+
+    .financials .net {
+      color: #2563eb;
+      font-weight: bold;
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 160px;
+    }
+
+    .actions select {
+      width: 100%;
+      padding: 6px;
+      font-size: 12px;
+      border: 1px solid #d5d9de;
+      border-radius: 6px;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 8px;
+      display: none;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .status.success {
+      display: block;
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status.error {
+      display: block;
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .admin-id-input {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .admin-id-input label {
+      font-weight: bold;
+      font-size: 14px;
+      color: #334155;
+    }
+
+    .admin-id-input input {
+      padding: 8px;
+      border: 1px solid #d5d9de;
+      border-radius: 6px;
+      font-size: 14px;
+      width: 250px;
+    }
+
+    .info-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e40af;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 15px;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .customer-info {
+      white-space: pre-line;
+      color: #334155;
+      line-height: 1.7;
+    }
+
+    .product-name {
+      font-weight: bold;
+      color: #2563eb;
+      margin-bottom: 4px;
+    }
+
+    .provider-name {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .product-link {
+      display: inline-block;
+      margin-top: 6px;
+      color: #2563eb;
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .product-link:hover {
+      text-decoration: underline;
+    }
+
+    .price-note {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.5;
+    }
 
     @media (max-width: 600px) {
-      .header { flex-direction: column; text-align: center; }
-      .admin-id-input { flex-direction: column; align-items: stretch; }
-      .admin-id-input input { width: 100%; }
+
+      .header {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .controls {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .admin-id-input {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .admin-id-input input {
+        width: 100%;
+      }
     }
   </style>
 </head>
+
 <body>
 
-  <div class="container">
-    <div class="header">
-      <div>
-        <h1>🛒 إدارة طلبات التسويق (Marketing Orders)</h1>
-        <p style="margin: 5px 0 0; color: #666; font-size: 14px;">مراجعة الطلبات، نسخ بيانات العملاء، وتأكيد التسليم</p>
-      </div>
-      <div class="controls">
-        <select id="statusFilter" onchange="loadOrders()">
-          <option value="PENDING">قيد الانتظار (PENDING)</option>
-          <option value="PROCESSING">قيد المعالجة (PROCESSING)</option>
-          <option value="DELIVERED">تم التسليم (DELIVERED)</option>
-          <option value="CANCELLED">ملغي (CANCELLED)</option>
-        </select>
-        <button class="btn btn-primary" onclick="loadOrders()">🔄 تحديث</button>
-      </div>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+
+    <div>
+      <h1>🛒 إدارة طلبات التسويق</h1>
+
+      <p>
+        مراجعة الطلبات، بيانات العملاء، متابعة التنفيذ وتأكيد التسليم
+      </p>
     </div>
 
-    <div class="admin-id-input">
-      <label>🔑 معرف الأدمن (Admin ID):</label>
-      <input type="text" id="adminIdInput" placeholder="مثال: 7171208519">
-      <button class="btn btn-sm btn-primary" onclick="saveAdminId()">حفظ وتحميل</button>
+    <div class="controls">
+
+      <select id="statusFilter" onchange="loadOrders()">
+
+        <option value="PENDING_VERIFICATION">
+          بانتظار التحقق
+        </option>
+
+        <option value="PROCESSING">
+          قيد المعالجة
+        </option>
+
+        <option value="DELIVERED">
+          تم التسليم
+        </option>
+
+        <option value="CANCELLED">
+          ملغي
+        </option>
+
+      </select>
+
+      <button
+        class="btn btn-primary"
+        onclick="loadOrders()"
+      >
+        🔄 تحديث
+      </button>
+
     </div>
 
-    <div class="card">
-      <div id="loading" class="loading">جاري تحميل البيانات...</div>
-      <div id="status" class="status"></div>
-      
-      <div id="tableContainer" style="display: none;">
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>#ID</th>
-                <th>المنتج / المنصة / الرابط</th>
-                <th>بيانات العميل</th>
-                <th>التفاصيل المالية</th>
-                <th>الحالة</th>
-                <th>التاريخ</th>
-                <th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody id="ordersTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
   </div>
 
-  <script>
-    const API = 'https://taskora.taskora.workers.dev';
 
-const urlParams = new URLSearchParams(window.location.search);
+  <!-- ADMIN ID -->
+
+  <div class="admin-id-input">
+
+    <label>
+      🔑 معرف الأدمن:
+    </label>
+
+    <input
+      type="text"
+      id="adminIdInput"
+      placeholder="مثال: 7171208519"
+    >
+
+    <button
+      class="btn btn-sm btn-primary"
+      onclick="saveAdminId()"
+    >
+      حفظ وتحميل
+    </button>
+
+  </div>
+
+
+  <!-- INFORMATION -->
+
+  <div class="info-box">
+
+    <strong>نظام الأرباح:</strong>
+
+    ربح المستخدم يتم حسابه تلقائيًا بواسطة السيرفر عند انتقال الطلب إلى
+    <strong>DELIVERED</strong> فقط، بنسبة
+    <strong>5%</strong> من سعر المنتج المعتمد للطلب.
+
+    وإذا كان للمستخدم مُحيل، يتم احتساب
+    <strong>20%</strong> من ربح المستخدم للمُحيل تلقائيًا.
+
+    الأدمن لا يدخل قيمة الربح يدويًا.
+
+  </div>
+
+
+  <!-- MAIN CARD -->
+
+  <div class="card">
+
+    <div
+      id="loading"
+      class="loading"
+    >
+      جاري تحميل البيانات...
+    </div>
+
+    <div
+      id="status"
+      class="status"
+    ></div>
+
+
+    <div
+      id="tableContainer"
+      style="display:none;"
+    >
+
+      <div class="table-container">
+
+        <table>
+
+          <thead>
+
+            <tr>
+
+              <th>#ID</th>
+
+              <th>
+                المنتج / المنصة / الرابط
+              </th>
+
+              <th>
+                بيانات العميل
+              </th>
+
+              <th>
+                السعر والأرباح
+              </th>
+
+              <th>
+                الحالة
+              </th>
+
+              <th>
+                التاريخ
+              </th>
+
+              <th>
+                الإجراءات
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody id="ordersTableBody"></tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<script>
+
+const API =
+  'https://taskora.taskora.workers.dev';
+
+
+const urlParams =
+  new URLSearchParams(window.location.search);
+
 
 let adminId =
   urlParams.get('admin_id') ||
   localStorage.getItem('taskora_admin_id') ||
   '';
 
+
 /*
  * تخزين الطلبات الحالية حسب ID
- * حتى لا نضع بيانات العميل والرابط مباشرة داخل onclick.
  */
 let marketingOrders = {};
 
-    if (adminId) {
-      document.getElementById('adminIdInput').value = adminId;
-      loadOrders();
-    } else {
-      document.getElementById('loading').style.display = 'none';
-      showStatus('❌ Access denied: admin_id is missing in URL. Example: ?admin_id=7171208519', 'error');
-    }
 
-    function saveAdminId() {
-      const input = document.getElementById('adminIdInput').value.trim();
-      if (input) {
-        adminId = input;
-        localStorage.setItem('taskora_admin_id', adminId);
-        // تحديث الرابط في المتصفح دون إعادة التحميل
-        const newUrl = new URL(window.location);
-        newUrl.searchParams.set('admin_id', adminId);
-        window.history.replaceState({}, '', newUrl);
-        showStatus('✅ تم حفظ معرف الأدمن', 'success');
-        loadOrders();
-      }
-    }
+/*
+ * عند فتح الصفحة
+ */
 
-    function showStatus(message, type) {
-      const statusBox = document.getElementById('status');
-      statusBox.textContent = message;
-      statusBox.className = 'status ' + type;
-      setTimeout(() => { statusBox.className = 'status'; }, 4000);
-    }
+if (adminId) {
 
-    function escapeHtml(value) {
+  document.getElementById(
+    'adminIdInput'
+  ).value = adminId;
+
+  loadOrders();
+
+} else {
+
+  document.getElementById(
+    'loading'
+  ).style.display = 'none';
+
+  showStatus(
+    '❌ Access denied: admin_id is missing in URL. Example: ?admin_id=7171208519',
+    'error'
+  );
+
+}
+
+
+/*
+ * حفظ Admin ID
+ */
+
+function saveAdminId() {
+
+  const input =
+    document.getElementById(
+      'adminIdInput'
+    ).value.trim();
+
+  if (!input) {
+
+    showStatus(
+      '⚠️ يرجى إدخال معرف الأدمن',
+      'error'
+    );
+
+    return;
+  }
+
+  adminId = input;
+
+  localStorage.setItem(
+    'taskora_admin_id',
+    adminId
+  );
+
+
+  const newUrl =
+    new URL(window.location);
+
+  newUrl.searchParams.set(
+    'admin_id',
+    adminId
+  );
+
+  window.history.replaceState(
+    {},
+    '',
+    newUrl
+  );
+
+
+  showStatus(
+    '✅ تم حفظ معرف الأدمن',
+    'success'
+  );
+
+
+  loadOrders();
+}
+
+
+/*
+ * رسائل الحالة
+ */
+
+function showStatus(message, type) {
+
+  const statusBox =
+    document.getElementById('status');
+
+  statusBox.textContent = message;
+
+  statusBox.className =
+    'status ' + type;
+
+  setTimeout(() => {
+
+    statusBox.className = 'status';
+
+  }, 4000);
+}
+
+
+/*
+ * حماية HTML
+ */
+
+function escapeHtml(value) {
+
   return String(value ?? '')
+
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
-    async function loadOrders() {
-      if (!adminId) {
-        showStatus('⚠️ يرجى إدخال معرف الأدمن أولاً', 'error');
-        return;
-      }
 
-      const status = document.getElementById('statusFilter').value;
-      const tbody = document.getElementById('ordersTableBody');
-      const loading = document.getElementById('loading');
-      const tableContainer = document.getElementById('tableContainer');
 
-      loading.style.display = 'block';
-      tableContainer.style.display = 'none';
-      tbody.innerHTML = '';
+/*
+ * تحويل رقم آمن
+ */
 
-      try {
-        const response = await fetch(`${API}/api/admin/marketing/orders?status=${status}&admin_id=${encodeURIComponent(adminId)}`);
-        const data = await response.json();
+function money(value) {
 
-        if (!response.ok || !data.success) {
-          throw new Error(data.message || 'فشل تحميل البيانات');
-        }
+  const number =
+    parseFloat(value);
 
-        if (data.data.length === 0) {
-  tbody.innerHTML = `
-    <tr>
-      <td colspan="7" style="text-align:center; padding:40px; color:#666;">
-        لا توجد طلبات في هذه الحالة
-      </td>
-    </tr>
-  `;
-} else {
+  return Number.isFinite(number)
+    ? number.toFixed(2)
+    : '0.00';
+}
 
-  marketingOrders = {};
 
-  data.data.forEach(order => {
+/*
+ * تحميل الطلبات
+ */
 
-    // حفظ الطلب لاستخدامه من أزرار النسخ وفتح الرابط
-    marketingOrders[order.id] = order;
+async function loadOrders() {
 
-    const customerInfo = `
-      👤 ${escapeHtml(order.customer_name)}
-      \n📱 ${escapeHtml(order.customer_phone)}
-      \n📍 ${escapeHtml(order.customer_city || '-')}
-      \n🏠 ${escapeHtml(order.customer_address)}
-    `;
+  if (!adminId) {
 
-    const financials = `
-      <div class="financials">
-        سعر المورد:
-        <span class="cost">
-          $${parseFloat(order.base_price || 0).toFixed(2)}
-        </span><br>
-
-        هامش Taskora:
-        <span class="profit">
-          +$${parseFloat(order.margin_amount || 0).toFixed(2)}
-        </span><br>
-
-        ربح المستخدم:
-        <span class="cost">
-          -$${parseFloat(order.user_expected_profit || 0).toFixed(2)}
-        </span><br>
-
-        <hr style="border-color:#e5e7eb;margin:6px 0;">
-
-        صافي ربحك:
-        <span class="net">
-          $${parseFloat(order.taskora_net_profit || 0).toFixed(2)}
-        </span>
-      </div>
-    `;
-
-    const date = new Date(order.created_at).toLocaleString(
-      'ar-EG',
-      {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }
+    showStatus(
+      '⚠️ يرجى إدخال معرف الأدمن أولاً',
+      'error'
     );
 
-    /*
-     * رابط المنتج الأصلي عند المورد.
-     * هذا الرابط لا يعرض سعر المورد أو هامش Taskora.
-     */
-    const productLink = order.product_url
-      ? `
-        <a
-          href="${escapeHtml(order.product_url)}"
-          target="_blank"
-          rel="noopener noreferrer"
-          style="
-            display:inline-block;
-            margin-top:6px;
-            color:#2563eb;
-            font-size:12px;
-            text-decoration:none;
-          "
-        >
-          🔗 فتح رابط المنتج
-        </a>
-      `
-      : `
-        <div style="margin-top:6px;color:#94a3b8;font-size:12px;">
-          ⚠️ رابط المنتج غير متوفر
-        </div>
-      `;
+    return;
+  }
 
-    let actionButtons = '';
 
-    if (order.status === 'PENDING') {
+  const status =
+    document.getElementById(
+      'statusFilter'
+    ).value;
 
-      /*
-       * PENDING:
-       * مسموح فقط:
-       * PENDING → PROCESSING
-       * PENDING → CANCELLED
-       */
-      actionButtons = `
-        <button
-          class="btn btn-sm btn-primary"
-          onclick="copyCustomerInfo(${order.id})"
-        >
-          📋 نسخ بيانات العميل
-        </button>
 
-        <button
-          class="btn btn-sm"
-          style="background:#0f766e;color:white;"
-          onclick="copyOrderInfo(${order.id})"
-        >
-          📦 نسخ بيانات الطلب
-        </button>
+  const tbody =
+    document.getElementById(
+      'ordersTableBody'
+    );
 
-        <select onchange="updateStatus(${order.id}, this.value)">
-          <option value="">تغيير الحالة...</option>
 
-          <option value="PROCESSING">
-            🔄 بدء المعالجة
-          </option>
+  const loading =
+    document.getElementById(
+      'loading'
+    );
 
-          <option value="CANCELLED" style="color:red;">
-            ❌ إلغاء
-          </option>
-        </select>
-      `;
 
-    } else if (order.status === 'PROCESSING') {
+  const tableContainer =
+    document.getElementById(
+      'tableContainer'
+    );
 
-      /*
-       * PROCESSING:
-       * مسموح فقط:
-       * PROCESSING → DELIVERED
-       * PROCESSING → CANCELLED
-       */
-      actionButtons = `
-        <button
-          class="btn btn-sm btn-primary"
-          onclick="copyCustomerInfo(${order.id})"
-        >
-          📋 نسخ بيانات العميل
-        </button>
 
-        <button
-          class="btn btn-sm"
-          style="background:#0f766e;color:white;"
-          onclick="copyOrderInfo(${order.id})"
-        >
-          📦 نسخ بيانات الطلب
-        </button>
+  loading.style.display =
+    'block';
 
-        <select onchange="updateStatus(${order.id}, this.value)">
-          <option value="">تغيير الحالة...</option>
+  tableContainer.style.display =
+    'none';
 
-          <option
-            value="DELIVERED"
-            style="color:green;font-weight:bold;"
+  tbody.innerHTML = '';
+
+
+  try {
+
+    const response = await fetch(
+      `${API}/api/admin/marketing/orders?status=${encodeURIComponent(status)}&admin_id=${encodeURIComponent(adminId)}`
+    );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
+
+      throw new Error(
+        data.message ||
+        'فشل تحميل البيانات'
+      );
+    }
+
+
+    const orders =
+      Array.isArray(data.data)
+        ? data.data
+        : [];
+
+
+    marketingOrders = {};
+
+
+    if (orders.length === 0) {
+
+      tbody.innerHTML = `
+
+        <tr>
+
+          <td
+            colspan="7"
+            style="
+              text-align:center;
+              padding:40px;
+              color:#666;
+            "
           >
-            ✅ تم التسليم (إضافة الربح)
-          </option>
 
-          <option
-            value="CANCELLED"
-            style="color:red;"
-          >
-            ❌ إلغاء
-          </option>
-        </select>
+            لا توجد طلبات في هذه الحالة
+
+          </td>
+
+        </tr>
+
       `;
 
     } else {
 
-      actionButtons = `
-        <span style="color:#64748b;font-size:12px;">
-          مكتمل / مغلق
-        </span>
-      `;
+      orders.forEach(order => {
+
+        marketingOrders[
+          order.id
+        ] = order;
+
+
+        /*
+         * بيانات العميل
+         */
+
+        const customerInfo = `
+
+👤 ${escapeHtml(order.customer_name)}
+
+📱 ${escapeHtml(order.customer_phone)}
+
+📍 ${escapeHtml(
+  order.customer_city || '-'
+)}
+
+🏠 ${escapeHtml(
+  order.customer_address
+)}
+
+        `;
+
+
+        /*
+         * السعر المعتمد
+         *
+         * في النظام الجديد:
+         * declared_price هو أساس ربح المستخدم
+         */
+
+        const declaredPrice =
+          order.declared_price ??
+          order.final_product_price ??
+          0;
+
+
+        /*
+         * الربح المحسوب من السيرفر
+         */
+
+        const userProfit =
+          order.user_expected_profit ??
+          0;
+
+
+        const referralProfit =
+          order.referral_commission ??
+          order.referral_earnings ??
+          0;
+
+
+        const taskoraNet =
+          order.taskora_net_profit ??
+          0;
+
+
+        const financials = `
+
+          <div class="financials">
+
+            سعر المنتج المعتمد:
+
+            <span class="price">
+
+              $${money(declaredPrice)}
+
+            </span>
+
+            <br>
+
+            ربح المستخدم عند التسليم:
+
+            <span class="profit">
+
+              $${money(userProfit)}
+
+            </span>
+
+            <br>
+
+            عمولة الإحالة:
+
+            <span class="referral">
+
+              $${money(referralProfit)}
+
+            </span>
+
+            <br>
+
+            الشحن:
+
+            <span>
+
+              $${money(
+                order.shipping_cost
+              )}
+
+            </span>
+
+            <hr
+              style="
+                border-color:#e5e7eb;
+                margin:6px 0;
+              "
+            >
+
+            صافي Taskora:
+
+            <span class="net">
+
+              $${money(taskoraNet)}
+
+            </span>
+
+            <div class="price-note">
+
+              ربح المستخدم النهائي يحسب عند
+              DELIVERED بنسبة 5% من السعر المعتمد.
+
+            </div>
+
+          </div>
+
+        `;
+
+
+        /*
+         * التاريخ
+         */
+
+        const date =
+          order.created_at
+            ? new Date(
+                order.created_at
+              ).toLocaleString(
+                'ar-EG',
+                {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                }
+              )
+            : '-';
+
+
+        /*
+         * رابط المنتج
+         */
+
+        const productLink =
+          order.product_url
+
+          ? `
+
+            <a
+              href="${escapeHtml(
+                order.product_url
+              )}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="product-link"
+            >
+
+              🔗 فتح رابط المنتج
+
+            </a>
+
+          `
+
+          : `
+
+            <div
+              style="
+                margin-top:6px;
+                color:#94a3b8;
+                font-size:12px;
+              "
+            >
+
+              ⚠️ رابط المنتج غير متوفر
+
+            </div>
+
+          `;
+
+
+        /*
+         * الإجراءات
+         */
+
+        let actionButtons = '';
+
+
+        /*
+         * PENDING_VERIFICATION
+         */
+
+        if (
+          order.status ===
+          'PENDING_VERIFICATION'
+        ) {
+
+          actionButtons = `
+
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="copyCustomerInfo(${order.id})"
+            >
+
+              📋 نسخ بيانات العميل
+
+            </button>
+
+
+            <button
+              class="btn btn-sm btn-info"
+              onclick="copyOrderInfo(${order.id})"
+            >
+
+              📦 نسخ بيانات الطلب
+
+            </button>
+
+
+            <select
+              onchange="
+                updateStatus(
+                  ${order.id},
+                  this.value
+                )
+              "
+            >
+
+              <option value="">
+                تغيير الحالة...
+              </option>
+
+              <option value="PROCESSING">
+                🔄 بدء المعالجة
+              </option>
+
+              <option
+                value="CANCELLED"
+                style="color:red;"
+              >
+                ❌ إلغاء
+              </option>
+
+            </select>
+
+          `;
+
+
+        /*
+         * PROCESSING
+         */
+
+        } else if (
+          order.status ===
+          'PROCESSING'
+        ) {
+
+          actionButtons = `
+
+            <button
+              class="btn btn-sm btn-primary"
+              onclick="copyCustomerInfo(${order.id})"
+            >
+
+              📋 نسخ بيانات العميل
+
+            </button>
+
+
+            <button
+              class="btn btn-sm btn-info"
+              onclick="copyOrderInfo(${order.id})"
+            >
+
+              📦 نسخ بيانات الطلب
+
+            </button>
+
+
+            <select
+              onchange="
+                updateStatus(
+                  ${order.id},
+                  this.value
+                )
+              "
+            >
+
+              <option value="">
+                تغيير الحالة...
+              </option>
+
+              <option
+                value="DELIVERED"
+                style="
+                  color:green;
+                  font-weight:bold;
+                "
+              >
+
+                ✅ تم التسليم
+                وإضافة الأرباح تلقائيًا
+
+              </option>
+
+              <option
+                value="CANCELLED"
+                style="color:red;"
+              >
+
+                ❌ إلغاء
+
+              </option>
+
+            </select>
+
+          `;
+
+
+        } else {
+
+          actionButtons = `
+
+            <span
+              style="
+                color:#64748b;
+                font-size:12px;
+              "
+            >
+
+              مكتمل / مغلق
+
+            </span>
+
+          `;
+
+        }
+
+
+        /*
+         * الصف
+         */
+
+        const row = `
+
+          <tr>
+
+            <td>
+
+              <strong>
+                #${escapeHtml(order.id)}
+              </strong>
+
+            </td>
+
+
+            <td>
+
+              <div class="product-name">
+
+                ${escapeHtml(
+                  order.product_name
+                )}
+
+              </div>
+
+
+              <div class="provider-name">
+
+                ${escapeHtml(
+                  order.provider_name || '-'
+                )}
+
+              </div>
+
+
+              ${productLink}
+
+            </td>
+
+
+            <td class="customer-info">
+
+              ${customerInfo}
+
+            </td>
+
+
+            <td>
+
+              ${financials}
+
+            </td>
+
+
+            <td>
+
+              <span
+                class="
+                  status-badge
+                  status-${escapeHtml(
+                    order.status
+                  )}
+                "
+              >
+
+                ${escapeHtml(
+                  order.status
+                )}
+
+              </span>
+
+            </td>
+
+
+            <td
+              style="
+                font-size:12px;
+                color:#64748b;
+                white-space:nowrap;
+              "
+            >
+
+              ${date}
+
+            </td>
+
+
+            <td class="actions">
+
+              ${actionButtons}
+
+            </td>
+
+          </tr>
+
+        `;
+
+
+        tbody.innerHTML += row;
+
+      });
+
     }
 
-    const row = `
-      <tr>
 
-        <td>
-          <strong>#${order.id}</strong>
-        </td>
+    loading.style.display =
+      'none';
 
-        <td>
+    tableContainer.style.display =
+      'block';
 
-          <div style="font-weight:bold;color:#2563eb;">
-            ${escapeHtml(order.product_name)}
-          </div>
 
-          <div
-            style="
-              font-size:11px;
-              color:#64748b;
-              margin-top:4px;
-            "
-          >
-            ${escapeHtml(order.provider_name)}
-          </div>
+  } catch (error) {
 
-          ${productLink}
+    console.error(error);
 
-        </td>
+    loading.style.display =
+      'none';
 
-        <td
-          style="
-            white-space:pre-line;
-            color:#334155;
-          "
-        >
-          ${customerInfo}
-        </td>
+    showStatus(
+      '❌ ' + error.message,
+      'error'
+    );
 
-        <td>
-          ${financials}
-        </td>
+  }
 
-        <td>
-          <span class="status-badge status-${escapeHtml(order.status)}">
-            ${escapeHtml(order.status)}
-          </span>
-        </td>
-
-        <td
-          style="
-            font-size:12px;
-            color:#64748b;
-            white-space:nowrap;
-          "
-        >
-          ${date}
-        </td>
-
-        <td class="actions">
-          ${actionButtons}
-        </td>
-
-      </tr>
-    `;
-
-    tbody.innerHTML += row;
-  });
 }
 
-        loading.style.display = 'none';
-        tableContainer.style.display = 'block';
 
-      } catch (error) {
-        console.error(error);
-        loading.style.display = 'none';
-        showStatus('❌ ' + error.message, 'error');
-      }
-    }
+/*
+ * نسخ بيانات العميل
+ */
 
-    function copyCustomerInfo(orderId) {
+function copyCustomerInfo(orderId) {
 
-  const order = marketingOrders[orderId];
+  const order =
+    marketingOrders[orderId];
+
 
   if (!order) {
-    showStatus('❌ لم يتم العثور على بيانات الطلب', 'error');
+
+    showStatus(
+      '❌ لم يتم العثور على بيانات الطلب',
+      'error'
+    );
+
     return;
   }
 
+
   const text =
+
 `اسم العميل: ${order.customer_name || ''}
+
 رقم الهاتف: ${order.customer_phone || ''}
+
 المدينة: ${order.customer_city || '-'}
+
 العنوان: ${order.customer_address || ''}`;
 
-  navigator.clipboard.writeText(text)
+
+  navigator.clipboard
+    .writeText(text)
+
     .then(() => {
+
       showStatus(
         '✅ تم نسخ بيانات العميل للحافظة بنجاح',
         'success'
       );
+
     })
+
     .catch(() => {
+
       showStatus(
-        '❌ فشل النسخ. يرجى النسخ يدوياً',
+        '❌ فشل النسخ. يرجى النسخ يدويًا',
         'error'
       );
+
     });
+
 }
-    
+
+
+/*
+ * نسخ بيانات الطلب
+ */
+
 function copyOrderInfo(orderId) {
 
-  const order = marketingOrders[orderId];
+  const order =
+    marketingOrders[orderId];
+
 
   if (!order) {
-    showStatus('❌ لم يتم العثور على بيانات الطلب', 'error');
+
+    showStatus(
+      '❌ لم يتم العثور على بيانات الطلب',
+      'error'
+    );
+
     return;
   }
 
+
+  const declaredPrice =
+    order.declared_price ??
+    order.final_product_price ??
+    0;
+
+
   const text =
+
 `رقم الطلب: #${order.id}
+
 المنتج: ${order.product_name || ''}
+
 المنصة: ${order.provider_name || ''}
+
 رابط المنتج: ${order.product_url || ''}
 
 اسم العميل: ${order.customer_name || ''}
+
 رقم الهاتف: ${order.customer_phone || ''}
+
 المدينة: ${order.customer_city || '-'}
+
 العنوان: ${order.customer_address || ''}
 
-سعر البيع للعميل: $${parseFloat(order.final_product_price || 0).toFixed(2)}
-الشحن: $${parseFloat(order.shipping_cost || 0).toFixed(2)}
-إجمالي COD: $${parseFloat(order.total_price || 0).toFixed(2)}`;
+سعر المنتج المعتمد: $${money(declaredPrice)}
 
-  navigator.clipboard.writeText(text)
+الشحن: $${money(order.shipping_cost)}
+
+إجمالي COD: $${money(order.total_price)}`;
+
+
+  navigator.clipboard
+    .writeText(text)
+
     .then(() => {
+
       showStatus(
         '✅ تم نسخ بيانات الطلب ورابط المنتج بنجاح',
         'success'
       );
+
     })
+
     .catch(() => {
+
       showStatus(
-        '❌ فشل النسخ. يرجى النسخ يدوياً',
+        '❌ فشل النسخ. يرجى النسخ يدويًا',
         'error'
       );
+
     });
+
 }
-    
-    async function updateStatus(orderId, newStatus) {
-      if (!newStatus) return;
-      
-      if (newStatus === 'DELIVERED') {
-        const confirmed = confirm('⚠️ تحذير هام:\n\nهل أنت متأكد تماماً من أن هذا الطلب تم تسليمه بنجاح؟\n\nعند التأكيد، سيتم إضافة ربح المستخدم تلقائياً إلى رصيده في النظام، ولا يمكن التراجع عن هذه العملية.');
-        if (!confirmed) {
-          // إعادة تعيين القائمة المنسدلة
-          loadOrders();
-          return;
-        }
-      }
 
-      try {
-        const response = await fetch(`${API}/api/admin/marketing/orders/${orderId}/status?admin_id=${encodeURIComponent(adminId)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus })
-        });
-        
-        const data = await response.json();
 
-        if (response.ok && data.success) {
-          showStatus('✅ ' + data.message, 'success');
-          loadOrders(); // إعادة تحميل الجدول لتحديث الحالة
-        } else {
-          showStatus('❌ ' + (data.message || 'فشل تحديث الحالة'), 'error');
-          loadOrders(); // إعادة تعيين القائمة
-        }
-      } catch (error) {
-        console.error(error);
-        showStatus('❌ خطأ في الاتصال بالسيرفر', 'error');
-        loadOrders();
-      }
+/*
+ * تغيير الحالة
+ *
+ * الـ API الحالي يقبل:
+ * { status, admin_notes }
+ *
+ * ولا يتم إرسال مبلغ ربح يدوي.
+ */
+
+async function updateStatus(
+  orderId,
+  newStatus
+) {
+
+  if (!newStatus) {
+    return;
+  }
+
+
+  /*
+   * تأكيد التسليم
+   */
+
+  if (
+    newStatus ===
+    'DELIVERED'
+  ) {
+
+    const confirmed =
+      confirm(
+
+`⚠️ تأكيد التسليم
+
+هل أنت متأكد أن طلب العميل تم تسليمه بنجاح؟
+
+عند تأكيد DELIVERED سيقوم السيرفر تلقائيًا بـ:
+
+• حساب ربح المستخدم بنسبة 5%
+• إضافة الربح إلى رصيد المستخدم
+• تسجيل الربح في earnings
+• احتساب 20% للمُحيل إن وجد
+• منع إضافة الربح مرة ثانية
+
+لا تدخل أي مبلغ ربح يدويًا.`
+
+      );
+
+
+    if (!confirmed) {
+
+      loadOrders();
+
+      return;
+
     }
-  </script>
+
+  }
+
+
+  /*
+   * إلغاء الطلب
+   */
+
+  if (
+    newStatus ===
+    'CANCELLED'
+  ) {
+
+    const confirmed =
+      confirm(
+        'هل أنت متأكد من إلغاء هذا الطلب؟'
+      );
+
+
+    if (!confirmed) {
+
+      loadOrders();
+
+      return;
+
+    }
+
+  }
+
+
+  try {
+
+    const response =
+      await fetch(
+
+        `${API}/api/admin/marketing/orders/${encodeURIComponent(orderId)}/status?admin_id=${encodeURIComponent(adminId)}`,
+
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+
+            status:
+              newStatus,
+
+            admin_notes:
+              ''
+
+          })
+
+        }
+
+      );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      response.ok &&
+      data.success
+    ) {
+
+      showStatus(
+        '✅ ' +
+        (
+          data.message ||
+          'تم تحديث حالة الطلب بنجاح'
+        ),
+        'success'
+      );
+
+
+      loadOrders();
+
+
+    } else {
+
+      showStatus(
+        '❌ ' +
+        (
+          data.message ||
+          'فشل تحديث الحالة'
+        ),
+        'error'
+      );
+
+
+      loadOrders();
+
+    }
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      '❌ خطأ في الاتصال بالسيرفر',
+      'error'
+    );
+
+    loadOrders();
+
+  }
+
+}
+
+</script>
+
 </body>
 </html>
