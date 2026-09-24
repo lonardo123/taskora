@@ -7056,13 +7056,16 @@ app.post('/api/quiz/settings', verifyAdmin, async (c) => {
 // 1. جلب المنصات النشطة
 app.get('/api/marketing/providers', async (c) => {
   try {
-    const result = await pool.query(`
-      SELECT id, name, country_code, fixed_shipping_cost
-      FROM marketing_providers
-      WHERE is_active = true
-      ORDER BY country_code ASC, name ASC
-    `);
+    const country = c.req.query('country');
+    if (!country) return c.json({ success: false, message: 'Country is required' }, 400);
 
+    const result = await pool.query(`
+      SELECT id, name, country_code, base_url, mode, fixed_shipping_cost 
+      FROM marketing_providers 
+      WHERE country_code = $1 AND is_active = true 
+      ORDER BY name ASC
+    `, [country.toUpperCase()]);
+    
     return c.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('❌ /api/marketing/providers:', err);
