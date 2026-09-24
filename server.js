@@ -7404,12 +7404,8 @@ app.post(
 
 
       // ==========================================================
-      // التحقق من حالة الطلب
-      // ==========================================================
-
-      const allowedStatuses = ['PENDING_VERIFICATION', 'PENDING', 'PROCESSING', 'DELIVERED', 'CANCELLED'];
-
-// ... (بعد جلب الطلب)
+// التحقق من انتقال حالة الطلب بالترتيب الصحيح (مصحح)
+// ==========================================================
 const currentStatus = String(order.status || '').trim().toUpperCase();
 
 const validTransition =
@@ -7420,9 +7416,11 @@ const validTransition =
 
 if (!validTransition) {
   await client.query('ROLLBACK');
-  return c.json({ success: false, message: `Invalid status transition: ${currentStatus} → ${normalizedStatus}` }, 400);
+  return c.json({ 
+    success: false, 
+    message: `Invalid status transition: ${currentStatus} → ${normalizedStatus}` 
+  }, 400);
 }
-
 
       // ==========================================================
       // بدء Transaction
