@@ -8225,6 +8225,156 @@ app.get(
 
 
 // =====================================================
+// تعديل السعر المعتمد لطلب التسويق بواسطة الأدمن
+// لا يتم إضافة أي ربح هنا
+// الربح يحسب ويضاف فقط عند DELIVERED
+// =====================================================
+
+app.put('/api/admin/marketing/orders/:id/price', verifyAdmin, async (c) => {
+  const client = await pool.connect();
+
+  try {
+    const orderId = c.req.param('id');
+
+    const { price } = await c.req.json();
+
+    const newPrice = Number(price);
+
+    // التحقق من السعر
+    if (!Number.isFinite(newPrice) || newPrice <= 0) {
+      return c.json({
+        success: false,
+        message: 'سعر المنتج يجب أن يكون رقمًا أكبر من صفر'
+      }, 400);
+    }
+
+    // قراءة الطلب مع قفل الصف لمنع التعديل المتزامن
+    const orderResult = await client.query(`
+      SELECT
+        id,
+        status,
+        base_price,
+        final_product_price,
+        shipping_cost,
+        user_expected_profit,
+        taskora_net_profit
+      FROM marketing_orders
+      WHERE id = $1
+      FOR UPDATE
+    `, [orderId]);
+
+    if (orderResult.rows.length === 0) {
+      return c.json({
+        success: false,
+        message: 'الطلب غير موجود'
+      }, 404);
+    }
+
+    const order = orderResult.rows[0];
+
+    // لا يسمح بتعديل السعر بعد التسليم أو الإلغاء
+    if (
+      order.status === 'DELIVERED' ||
+      order.status === 'CANCELLED'
+    ) {
+      return c.json({
+        success: false,
+        message: 'لا يمكن تعديل سعر طلب تم تسليمه أو إلغاؤه'
+      }, 400);
+    }
+
+    // =====================================================
+    // السعر الجديد هو السعر المعتمد للطلب
+    // =====================================================
+
+    const basePrice = Number(newPrice);
+
+    const finalProductPrice = Number(
+      basePrice.toFixed(6)
+    );
+
+    // الشحن الموجود للطلب يبقى كما هو
+    const shippingCost = Number(
+      order.shipping_cost || 0
+    );
+
+    const totalPrice = Number(
+      (finalProductPrice + shippingCost).toFixed(6)
+    );
+
+    // =====================================================
+    // ربح المستخدم = السعر المعتمد × 5%
+    // =====================================================
+
+    const userExpectedProfit = Number(
+      (finalProductPrice * 0.05).toFixed(6)
+    );
+
+    // لا نحسب ربح Taskora يدويًا هنا
+    // يبقى كما هو في النظام الحالي
+    const taskoraNetProfit = Number(
+      order.taskora_net_profit || 0
+    );
+
+    await client.query('BEGIN');
+
+    await client.query(`
+      UPDATE marketing_orders
+      SET
+        base_price = $1,
+        final_product_price = $2,
+        total_price = $3,
+        user_expected_profit = $4,
+        taskora_net_profit = $5,
+        updated_at = NOW()
+      WHERE id = $6
+    `, [
+      basePrice,
+      finalProductPrice,
+      totalPrice,
+      userExpectedProfit,
+      taskoraNetProfit,
+      orderId
+    ]);
+
+    await client.query('COMMIT');
+
+    return c.json({
+      success: true,
+      message: 'تم تعديل سعر المنتج وإعادة حساب ربح المستخدم بنجاح',
+      data: {
+        order_id: orderId,
+        base_price: basePrice,
+        final_product_price: finalProductPrice,
+        shipping_cost: shippingCost,
+        total_price: totalPrice,
+        user_expected_profit: userExpectedProfit
+      }
+    });
+
+  } catch (error) {
+
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+
+    console.error(
+      '❌ Admin marketing order price update error:',
+      error
+    );
+
+    return c.json({
+      success: false,
+      message: 'حدث خطأ أثناء تعديل سعر الطلب'
+    }, 500);
+
+  } finally {
+    client.release();
+  }
+});
+
+
+// =====================================================
 // 5. [ADMIN ONLY]
 // تحديث حالة طلب التسويق
 //
