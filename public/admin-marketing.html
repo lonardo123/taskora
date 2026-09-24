@@ -351,6 +351,56 @@
         width: 100%;
       }
     }
+
+    .price-editor {
+  margin-top: 8px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+}
+
+.price-editor label {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.price-editor-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.price-editor input {
+  width: 90px;
+  padding: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  direction: ltr;
+}
+
+.price-editor button {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #2563eb;
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.price-editor button:hover {
+  background: #1d4ed8;
+}
+
+.price-editor button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
   </style>
 </head>
 
@@ -816,9 +866,9 @@ async function loadOrders() {
          */
 
         const declaredPrice =
-          order.declared_price ??
-          order.final_product_price ??
-          0;
+  order.base_price ??
+  order.final_product_price ??
+  0;
 
 
         /*
@@ -843,73 +893,128 @@ async function loadOrders() {
 
         const financials = `
 
-          <div class="financials">
+  <div class="financials">
 
-            سعر المنتج المعتمد:
+    سعر المنتج المعتمد:
 
-            <span class="price">
+    <span class="price">
 
-              $${money(declaredPrice)}
+      $${money(declaredPrice)}
 
-            </span>
+    </span>
 
-            <br>
+    <br>
 
-            ربح المستخدم عند التسليم:
+    ربح المستخدم عند التسليم:
 
-            <span class="profit">
+    <span class="profit">
 
-              $${money(userProfit)}
+      $${money(userProfit)}
 
-            </span>
+    </span>
 
-            <br>
+    <br>
 
-            عمولة الإحالة:
+    عمولة الإحالة:
 
-            <span class="referral">
+    <span class="referral">
 
-              $${money(referralProfit)}
+      $${money(referralProfit)}
 
-            </span>
+    </span>
 
-            <br>
+    <br>
 
-            الشحن:
+    الشحن:
 
-            <span>
+    <span>
 
-              $${money(
-                order.shipping_cost
-              )}
+      $${money(
+        order.shipping_cost
+      )}
 
-            </span>
+    </span>
 
-            <hr
-              style="
-                border-color:#e5e7eb;
-                margin:6px 0;
-              "
+    <br>
+
+    إجمالي COD:
+
+    <span class="price">
+
+      $${money(order.total_price)}
+
+    </span>
+
+    <hr
+      style="
+        border-color:#e5e7eb;
+        margin:6px 0;
+      "
+    >
+
+    صافي Taskora:
+
+    <span class="net">
+
+      $${money(taskoraNet)}
+
+    </span>
+
+
+    ${
+      order.status !== 'DELIVERED' &&
+      order.status !== 'CANCELLED'
+      ? `
+
+        <div class="price-editor">
+
+          <label>
+            ✏️ تعديل السعر المعتمد
+          </label>
+
+          <div class="price-editor-row">
+
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              id="price-${order.id}"
+              value="${escapeHtml(
+                money(declaredPrice)
+              )}"
             >
 
-            صافي Taskora:
-
-            <span class="net">
-
-              $${money(taskoraNet)}
-
-            </span>
-
-            <div class="price-note">
-
-              ربح المستخدم النهائي يحسب عند
-              DELIVERED بنسبة 5% من السعر المعتمد.
-
-            </div>
+            <button
+              type="button"
+              onclick="updateOrderPrice(${order.id})"
+            >
+              💾 حفظ
+            </button>
 
           </div>
 
-        `;
+        </div>
+
+      `
+      : ''
+    }
+
+
+    <div class="price-note">
+
+      ربح المستخدم يحسب تلقائيًا عند
+      DELIVERED بنسبة 5% من السعر المعتمد.
+
+      <br>
+
+      عمولة المُحيل = 20% من ربح المستخدم عند
+      DELIVERED فقط.
+
+    </div>
+
+  </div>
+
+`;
 
 
         /*
@@ -1318,11 +1423,223 @@ function copyCustomerInfo(orderId) {
 
 }
 
+/*
+ * تعديل سعر المنتج المعتمد
+ *
+ * الأدمن يعدل السعر فقط.
+ * السيرفر يعيد حساب ربح المستخدم تلقائيًا.
+ *
+ * لا يتم إضافة أي ربح عند تعديل السعر.
+ * الإضافة الفعلية تتم فقط عند DELIVERED.
+ */
 
+async function updateOrderPrice(orderId) {
+
+  const input =
+    document.getElementById(
+      `price-${orderId}`
+    );
+
+  if (!input) {
+
+    showStatus(
+      '❌ لم يتم العثور على حقل السعر',
+      'error'
+    );
+
+    return;
+  }
+
+
+  const price =
+    parseFloat(
+      input.value
+    );
+
+
+  if (
+    !Number.isFinite(price) ||
+    price <= 0
+  ) {
+
+    showStatus(
+      '⚠️ أدخل سعرًا صحيحًا أكبر من صفر',
+      'error'
+    );
+
+    return;
+  }
+
+
+  const order =
+    marketingOrders[orderId];
+
+
+  if (!order) {
+
+    showStatus(
+      '❌ لم يتم العثور على بيانات الطلب',
+      'error'
+    );
+
+    return;
+  }
+
+
+  if (
+    order.status === 'DELIVERED' ||
+    order.status === 'CANCELLED'
+  ) {
+
+    showStatus(
+      '❌ لا يمكن تعديل سعر طلب مغلق',
+      'error'
+    );
+
+    return;
+  }
+
+
+  const confirmed =
+    confirm(
+
+`تعديل سعر المنتج
+
+السعر الحالي:
+$${money(
+  order.base_price ??
+  order.final_product_price ??
+  0
+)}
+
+السعر الجديد:
+$${money(price)}
+
+سيقوم السيرفر تلقائيًا بحساب:
+
+• ربح المستخدم = السعر الجديد × 5%
+• عمولة المُحيل = ربح المستخدم × 20% عند DELIVERED
+
+لن تتم إضافة أي ربح الآن.
+
+هل تريد حفظ السعر الجديد؟`
+
+    );
+
+
+  if (!confirmed) {
+    return;
+  }
+
+
+  const button =
+    input
+      .closest('.price-editor')
+      ?.querySelector('button');
+
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'جاري الحفظ...';
+  }
+
+
+  try {
+
+    const response =
+      await fetch(
+
+        `${API}/api/admin/marketing/orders/${encodeURIComponent(orderId)}/price?admin_id=${encodeURIComponent(adminId)}`,
+
+        {
+          method: 'PUT',
+
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+
+          body: JSON.stringify({
+
+            price: price
+
+          })
+
+        }
+
+      );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      response.ok &&
+      data.success
+    ) {
+
+      showStatus(
+        '✅ ' +
+        (
+          data.message ||
+          'تم تعديل السعر بنجاح'
+        ),
+        'success'
+      );
+
+
+      await loadOrders();
+
+
+    } else {
+
+      showStatus(
+        '❌ ' +
+        (
+          data.message ||
+          'فشل تعديل السعر'
+        ),
+        'error'
+      );
+
+
+      if (button) {
+        button.disabled = false;
+        button.textContent = '💾 حفظ';
+      }
+
+    }
+
+
+  } catch (error) {
+
+    console.error(
+      'Update order price error:',
+      error
+    );
+
+
+    showStatus(
+      '❌ خطأ في الاتصال بالسيرفر',
+      'error'
+    );
+
+
+    if (button) {
+      button.disabled = false;
+      button.textContent = '💾 حفظ';
+    }
+
+  }
+
+}
+
+  
 /*
  * نسخ بيانات الطلب
  */
-
+  
 function copyOrderInfo(orderId) {
 
   const order =
@@ -1341,9 +1658,9 @@ function copyOrderInfo(orderId) {
 
 
   const declaredPrice =
-    order.declared_price ??
-    order.final_product_price ??
-    0;
+  order.base_price ??
+  order.final_product_price ??
+  0;
 
 
   const text =
