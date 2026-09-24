@@ -7048,22 +7048,59 @@ app.post('/api/quiz/settings', verifyAdmin, async (c) => {
 
 
 
+// =====================================================
+// 🛒 MARKETING & DROP-SHIPPING SYSTEM
+// 🏪 NEW SYSTEM:
+// Country → Stores → Real Store → Customer Order →
+// Register Order → PENDING_VERIFICATION →
+// PROCESSING → DELIVERED → Add Profit
+// =====================================================
+
 
 // =====================================================
-// 🛒 MARKETING & DROP-SHIPPING SYSTEM (LIVE FETCH)
+// 1. جلب المنصات النشطة للمستخدم
+//
+// بدون country:
+// يعيد جميع المنصات النشطة لبناء قائمة الدول.
+//
+// مع country:
+// يعيد المتاجر النشطة التابعة للدولة فقط.
+//
+// النظام الجديد لا يحتاج إلى Scraping هنا.
+// base_url يستخدم لفتح المتجر الحقيقي.
 // =====================================================
 
-// 1. جلب المنصات النشطة
 app.get('/api/marketing/providers', async (c) => {
+
   try {
 
-    const country = c.req.query('country');
+    const country =
+      c.req.query('country');
 
     let result;
 
+    // ==================================================
+    // عند اختيار دولة
+    // ==================================================
+
     if (country) {
 
+      const normalizedCountry =
+        String(country)
+          .trim()
+          .toUpperCase();
+
+      if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
+
+        return c.json({
+          success: false,
+          message: 'Invalid country code'
+        }, 400);
+
+      }
+
       result = await pool.query(`
+
         SELECT
           id,
           name,
@@ -7071,22 +7108,29 @@ app.get('/api/marketing/providers', async (c) => {
           base_url,
           mode,
           fixed_shipping_cost
+
         FROM marketing_providers
+
         WHERE country_code = $1
           AND is_active = true
+
         ORDER BY name ASC
+
       `, [
-        country.toUpperCase()
+        normalizedCountry
       ]);
 
-    } else {
+    }
 
-      /*
-       * عند عدم إرسال country:
-       * نرجع جميع المنصات النشطة.
-       * الصفحة تستخدم هذا الجزء لبناء قائمة الدول.
-       */
+    // ==================================================
+    // بدون دولة:
+    // جميع المنصات النشطة
+    // ==================================================
+
+    else {
+
       result = await pool.query(`
+
         SELECT
           id,
           name,
@@ -7094,16 +7138,25 @@ app.get('/api/marketing/providers', async (c) => {
           base_url,
           mode,
           fixed_shipping_cost
+
         FROM marketing_providers
+
         WHERE is_active = true
-        ORDER BY country_code ASC, name ASC
+
+        ORDER BY
+          country_code ASC,
+          name ASC
+
       `);
 
     }
 
     return c.json({
+
       success: true,
+
       data: result.rows
+
     });
 
   } catch (err) {
@@ -7114,343 +7167,1092 @@ app.get('/api/marketing/providers', async (c) => {
     );
 
     return c.json({
+
       success: false,
+
       message: 'Server error'
+
     }, 500);
 
   }
+
 });
 
 
 
-// 3. إنشاء طلب جديد (مع إعادة الحساب الحي لضمان الأمان 100%)
-app.post('/api/marketing/orders', async (c) => {
-  const client = await pool.connect();
-  try {
-    const { user_id, provider_id, product_url, product_name, customer_name, customer_phone, customer_address, customer_city } = await c.req.json();
+// =====================================================
+// 2. المسار القديم لإنشاء الطلب.
+//
+// هذا المسار يعتمد على:
+// - product_url
+// - جلب صفحة المنتج
+// - selector_price
+//
+// وهو ليس جزءًا من النظام اليدوي الجديد.
+//
+// أبقيناه موجودًا حتى لا نحذف مسارًا قد تستخدمه أجزاء
+// أخرى من المشروع.
+//
+// النظام الجديد يستخدم:
+// /api/marketing/manual-order
+// =====================================================
 
-    if (!user_id || !provider_id || !product_url || !customer_name || !customer_phone || !customer_address) {
-      return c.json({ success: false, message: 'Missing required fields' }, 400);
+app.post('/api/marketing/orders', async (c) => {
+
+  const client =
+    await pool.connect();
+
+  try {
+
+    const {
+      user_id,
+      provider_id,
+      product_url,
+      product_name,
+      customer_name,
+      customer_phone,
+      customer_address,
+      customer_city
+    } = await c.req.json();
+
+
+    if (
+      !user_id ||
+      !provider_id ||
+      !product_url ||
+      !customer_name ||
+      !customer_phone ||
+      !customer_address
+    ) {
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Missing required fields'
+
+      }, 400);
+
     }
+
 
     await client.query('BEGIN');
 
-    // جلب إعدادات المنصة الحالية
-    const providerRes = await client.query(`
-  SELECT
-    id,
-    name,
-    base_url,
-    base_margin_percentage,
-    user_profit_percentage,
-    fixed_shipping_cost,
-    selector_price
-  FROM marketing_providers
-  WHERE id = $1
-    AND is_active = true
-`, [provider_id]);
-    
-    if (providerRes.rows.length === 0) {
+
+    // ==================================================
+    // جلب المنصة
+    // ==================================================
+
+    const providerRes =
+      await client.query(`
+
+        SELECT
+          id,
+          name,
+          base_url,
+          base_margin_percentage,
+          user_profit_percentage,
+          fixed_shipping_cost,
+          selector_price
+
+        FROM marketing_providers
+
+        WHERE id = $1
+          AND is_active = true
+
+      `, [
+        provider_id
+      ]);
+
+
+    if (
+      providerRes.rows.length === 0
+    ) {
+
       await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'Provider not found' }, 404);
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Provider not found'
+
+      }, 404);
+
     }
 
-    const provider = providerRes.rows[0];
-// ==========================================================
-// التحقق من أن رابط المنتج تابع لنفس منصة المورد
-// ==========================================================
 
-let supplierProductUrl;
+    const provider =
+      providerRes.rows[0];
 
-try {
-  supplierProductUrl = new URL(product_url);
-  const supplierBaseUrl = new URL(provider.base_url);
 
-  if (supplierProductUrl.origin !== supplierBaseUrl.origin) {
-    await client.query('ROLLBACK');
+    // ==================================================
+    // التحقق من رابط المنتج
+    // ==================================================
+
+    let supplierProductUrl;
+
+    try {
+
+      supplierProductUrl =
+        new URL(product_url);
+
+      const supplierBaseUrl =
+        new URL(provider.base_url);
+
+
+      if (
+        supplierProductUrl.origin !==
+        supplierBaseUrl.origin
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid product URL for this provider.'
+
+        }, 400);
+
+      }
+
+    } catch {
+
+      await client.query(
+        'ROLLBACK'
+      );
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Invalid product URL.'
+
+      }, 400);
+
+    }
+
+
+    // ==================================================
+    // التحقق من Selector السعر
+    // ==================================================
+
+    if (!provider.selector_price) {
+
+      await client.query(
+        'ROLLBACK'
+      );
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Provider price selector is not configured.'
+
+      }, 500);
+
+    }
+
+
+    // ==================================================
+    // جلب صفحة المنتج
+    // ==================================================
+
+    const response =
+      await fetch(
+        supplierProductUrl.href,
+        {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+
+    if (!response.ok) {
+
+      await client.query(
+        'ROLLBACK'
+      );
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Could not access the supplier product page.'
+
+      }, 502);
+
+    }
+
+
+    // ==================================================
+    // استخراج السعر
+    // ==================================================
+
+    let verifiedBasePrice = 0;
+
+
+    const priceRewriter =
+      new HTMLRewriter()
+
+        .on(
+          provider.selector_price,
+          {
+
+            text(text) {
+
+              if (
+                verifiedBasePrice > 0
+              ) {
+                return;
+              }
+
+
+              const value =
+                text.text.trim();
+
+
+              if (!value) {
+                return;
+              }
+
+
+              const priceMatch =
+                value.match(
+                  /[\d,]+(?:\.\d+)?/
+                );
+
+
+              if (priceMatch) {
+
+                const parsed =
+                  parseFloat(
+                    priceMatch[0]
+                      .replace(/,/g, '')
+                  );
+
+
+                if (
+                  Number.isFinite(parsed) &&
+                  parsed > 0
+                ) {
+
+                  verifiedBasePrice =
+                    parsed;
+
+                }
+
+              }
+
+            }
+
+          }
+        );
+
+
+    await priceRewriter
+      .transform(response)
+      .text();
+
+
+    const basePrice =
+      verifiedBasePrice;
+
+
+    if (
+      !basePrice ||
+      !Number.isFinite(basePrice)
+    ) {
+
+      await client.query(
+        'ROLLBACK'
+      );
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Could not verify live product price. Please try again.'
+
+      }, 500);
+
+    }
+
+
+    // ==================================================
+    // الحسابات القديمة لهذا المسار فقط
+    // ==================================================
+
+    const marginPercent =
+      parseFloat(
+        provider.base_margin_percentage
+      );
+
+    const userProfitPercent =
+      parseFloat(
+        provider.user_profit_percentage
+      );
+
+    const shippingCost =
+      parseFloat(
+        provider.fixed_shipping_cost
+      );
+
+
+    const marginAmount =
+      basePrice *
+      (marginPercent / 100);
+
+
+    const userExpectedProfit =
+      marginAmount *
+      (userProfitPercent / 100);
+
+
+    const taskoraNetProfit =
+      marginAmount -
+      userExpectedProfit;
+
+
+    const finalProductPrice =
+      basePrice +
+      marginAmount;
+
+
+    const totalPrice =
+      finalProductPrice +
+      shippingCost;
+
+
+    // ==================================================
+    // حفظ الطلب
+    // ==================================================
+
+    const orderRes =
+      await client.query(`
+
+        INSERT INTO marketing_orders (
+
+          user_id,
+          provider_id,
+          product_name,
+          product_url,
+
+          customer_name,
+          customer_phone,
+          customer_address,
+          customer_city,
+
+          base_price,
+          margin_amount,
+          final_product_price,
+          shipping_cost,
+          total_price,
+          user_expected_profit,
+          taskora_net_profit
+
+        )
+
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
+          $14,
+          $15
+        )
+
+        RETURNING id
+
+      `, [
+
+        user_id,
+        provider_id,
+        product_name,
+        product_url,
+
+        customer_name,
+        customer_phone,
+        customer_address,
+        customer_city,
+
+        basePrice,
+        marginAmount,
+        finalProductPrice,
+        shippingCost,
+        totalPrice,
+        userExpectedProfit,
+        taskoraNetProfit
+
+      ]);
+
+
+    await client.query(
+      'COMMIT'
+    );
+
 
     return c.json({
-      success: false,
-      message: 'Invalid product URL for this provider.'
-    }, 400);
-  }
 
-} catch {
-  await client.query('ROLLBACK');
+      success: true,
 
-  return c.json({
-    success: false,
-    message: 'Invalid product URL.'
-  }, 400);
-}
+      message:
+        'Order created successfully',
 
+      order_id:
+        orderRes.rows[0].id
 
-// ==========================================================
-// التحقق من وجود Selector السعر
-// ==========================================================
-
-if (!provider.selector_price) {
-  await client.query('ROLLBACK');
-
-  return c.json({
-    success: false,
-    message: 'Provider price selector is not configured.'
-  }, 500);
-}
-    // ⚠️ هنا نقوم بجلب السعر الحي مرة أخرى وقت إنشاء الطلب لضمان عدم التلاعب
-    // (في الإنتاج، يمكن تحسين هذا بتخزين مؤقت لمدة 5 دقائق، لكن الجلب الحي هو الأضمن حسب طلبك)
-    const response = await fetch(supplierProductUrl.href, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
-    
-    // استخراج السعر الحي باستخدام نفس CSS selector الخاص بالمنصة
-if (!response.ok) {
-  await client.query('ROLLBACK');
 
-  return c.json({
-    success: false,
-    message: 'Could not access the supplier product page.'
-  }, 502);
-}
-
-let verifiedBasePrice = 0;
-if (!provider.selector_price) {
-  await client.query('ROLLBACK');
-
-  return c.json({
-    success: false,
-    message: 'Provider price selector is not configured.'
-  }, 500);
-}
-const priceRewriter = new HTMLRewriter()
-  .on(provider.selector_price, {
-    text(text) {
-
-      if (verifiedBasePrice > 0) return;
-
-      const value = text.text.trim();
-
-      if (!value) return;
-
-      const priceMatch =
-        value.match(/[\d,]+(?:\.\d+)?/);
-
-      if (priceMatch) {
-
-        const parsed =
-          parseFloat(
-            priceMatch[0].replace(/,/g, '')
-          );
-
-        if (
-          Number.isFinite(parsed) &&
-          parsed > 0
-        ) {
-          verifiedBasePrice = parsed;
-        }
-      }
-    }
-  });
-
-await priceRewriter.transform(response).text();
-
-const basePrice = verifiedBasePrice;
-
-if (!basePrice || !Number.isFinite(basePrice)) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'Could not verify live product price. Please try again.' }, 500);
-    }
-
-    // الحسابات الآمنة
-    const marginPercent = parseFloat(provider.base_margin_percentage);
-    const userProfitPercent = parseFloat(provider.user_profit_percentage);
-    const shippingCost = parseFloat(provider.fixed_shipping_cost);
-
-    const marginAmount = basePrice * (marginPercent / 100);
-    const userExpectedProfit = marginAmount * (userProfitPercent / 100);
-    const taskoraNetProfit = marginAmount - userExpectedProfit;
-    const finalProductPrice = basePrice + marginAmount;
-    const totalPrice = finalProductPrice + shippingCost;
-
-    // حفظ الطلب
-    const orderRes = await client.query(`
-      INSERT INTO marketing_orders (
-        user_id, provider_id, product_name, product_url,
-        customer_name, customer_phone, customer_address, customer_city,
-        base_price, margin_amount, final_product_price, shipping_cost, 
-        total_price, user_expected_profit, taskora_net_profit
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-      RETURNING id
-    `, [
-      user_id, provider_id, product_name, product_url,
-      customer_name, customer_phone, customer_address, customer_city,
-      basePrice, marginAmount, finalProductPrice, shippingCost, 
-      totalPrice, userExpectedProfit, taskoraNetProfit
-    ]);
-
-    await client.query('COMMIT');
-    return c.json({ success: true, message: 'Order created successfully', order_id: orderRes.rows[0].id });
 
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ /api/marketing/orders:', err);
-    return c.json({ success: false, message: 'Failed to create order' }, 500);
-  } finally {
-    client.release();
-  }
-});
 
-
-// =====================================================
-// 🛒 MARKETING: MANUAL BROWSE & REPORT SYSTEM
-// =====================================================
-app.post('/api/marketing/manual-order', async (c) => {
-  const client = await pool.connect();
-  try {
-    const { user_id, provider_id, product_name, declared_price, image_url, customer_name, customer_phone, customer_address, customer_city } = await c.req.json();
-
-    if (!user_id || !provider_id || !product_name || !declared_price || !customer_name || !customer_phone || !customer_address) {
-      return c.json({ success: false, message: 'Missing required fields' }, 400);
+    try {
+      await client.query(
+        'ROLLBACK'
+      );
+    } catch (rollbackError) {
+      console.error(
+        '❌ Marketing old order rollback:',
+        rollbackError
+      );
     }
 
-    await client.query('BEGIN');
 
-    const providerRes = await client.query(
-      'SELECT base_margin_percentage, user_profit_percentage, fixed_shipping_cost FROM marketing_providers WHERE id = $1 AND is_active = true', 
-      [provider_id]
+    console.error(
+      '❌ /api/marketing/orders:',
+      err
     );
-    
-    if (providerRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'Provider not found or inactive' }, 404);
-    }
 
-    const provider = providerRes.rows[0];
-    const dPrice = parseFloat(declared_price);
-    
-    if (isNaN(dPrice) || dPrice <= 0) {
-      await client.query('ROLLBACK');
-      return c.json({ success: false, message: 'Invalid declared price' }, 400);
-    }
 
-    const marginPercent = parseFloat(provider.base_margin_percentage);
-    const userProfitPercent = parseFloat(provider.user_profit_percentage);
-    const shippingCost = parseFloat(provider.fixed_shipping_cost);
+    return c.json({
 
-    const marginAmount = dPrice * (marginPercent / 100);
-    const userExpectedProfit = marginAmount * (userProfitPercent / 100);
-    const taskoraNetProfit = marginAmount - userExpectedProfit;
-    const finalProductPrice = dPrice + marginAmount;
-    const totalPrice = finalProductPrice + shippingCost;
+      success: false,
 
-    const orderRes = await client.query(`
-      INSERT INTO marketing_orders (
-        user_id, provider_id, product_name, product_url,
-        customer_name, customer_phone, customer_address, customer_city,
-        base_price, margin_amount, final_product_price, shipping_cost, 
-        total_price, user_expected_profit, taskora_net_profit, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'PENDING_VERIFICATION')
-      RETURNING id
-    `, [
-      user_id, provider_id, product_name, image_url || null,
-      customer_name, customer_phone, customer_address, customer_city,
-      dPrice, marginAmount, finalProductPrice, shippingCost, 
-      totalPrice, userExpectedProfit, taskoraNetProfit
-    ]);
+      message:
+        'Failed to create order'
 
-    await client.query('COMMIT');
-    return c.json({ success: true, message: 'Order submitted for admin verification', order_id: orderRes.rows[0].id });
+    }, 500);
 
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ /api/marketing/manual-order:', err);
-    return c.json({ success: false, message: 'Failed to create order' }, 500);
+
   } finally {
+
     client.release();
+
   }
+
 });
 
-// 4. [ADMIN ONLY] جلب الطلبات مع كافة التفاصيل المالية
-app.get('/api/admin/marketing/orders', verifyAdmin, async (c) => {
-  try {
-    const status = c.req.query('status') || 'PENDING';
-    const result = await pool.query(`
-      SELECT 
-  o.id,
-  o.user_id,
-  o.status,
-  o.created_at,
-  o.updated_at,
-  o.customer_name,
-  o.customer_phone,
-  o.customer_city,
-  o.customer_address,
-  o.product_name,
-  o.product_url,
-  pr.name AS provider_name,
-  o.base_price,
-  o.margin_amount,
-  o.final_product_price,
-  o.shipping_cost,
-  o.total_price,
-  o.user_expected_profit,
-  o.taskora_net_profit,
-  o.admin_notes
-      FROM marketing_orders o
-      JOIN marketing_providers pr ON o.provider_id = pr.id
-      WHERE o.status = $1
-      ORDER BY o.created_at DESC
-    `, [status]);
 
-    return c.json({ success: true, data: result.rows });
-  } catch (err) {
-    console.error('❌ /api/admin/marketing/orders:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
-  }
-});
 
-// =====================================================================
-// 5. [ADMIN ONLY]
-// تحديث حالة الطلب وإضافة ربح المستخدم عند التسليم
+// =====================================================
+// 3. 🛒 النظام الجديد
+// MANUAL BROWSE & REPORT SYSTEM
 //
-// الحالات المسموح بها:
-// PENDING
-// PROCESSING
-// DELIVERED
-// CANCELLED
+// المستخدم:
+// 1. يختار الدولة.
+// 2. يختار المتجر.
+// 3. يفتح المتجر الحقيقي.
+// 4. يطلب المنتج من المتجر.
+// 5. يعود إلى Taskora.
+// 6. يسجل بيانات الطلب.
 //
-// عند DELIVERED:
-// 1. إضافة user_expected_profit للمستخدم
-// 2. تسجيل الربح في earnings
-// 3. حساب 5% Referral Commission
-// 4. إضافة العمولة لصاحب الإحالة
-// 5. تسجيل referral_earnings
-// 6. تسجيل العمولة في earnings
-//
-// كل العمليات داخل Transaction واحدة.
-// =====================================================================
-
-// =====================================================================
-// 5. [ADMIN ONLY]
-// تحديث حالة الطلب وإضافة ربح المستخدم عند التسليم
-//
-// الحالات المسموح بها:
-// PENDING
+// الحالة الأولى:
 // PENDING_VERIFICATION
+//
+// لا يتم إضافة الربح هنا.
+// الربح يضاف فقط عند DELIVERED.
+// =====================================================
+
+app.post(
+  '/api/marketing/manual-order',
+  async (c) => {
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      const {
+        user_id,
+        provider_id,
+        product_name,
+        declared_price,
+        image_url,
+        customer_name,
+        customer_phone,
+        customer_address,
+        customer_city
+      } = await c.req.json();
+
+
+      // ==================================================
+      // التحقق من البيانات المطلوبة
+      // ==================================================
+
+      if (
+        !user_id ||
+        !provider_id ||
+        !product_name ||
+        declared_price === undefined ||
+        declared_price === null ||
+        !customer_name ||
+        !customer_phone ||
+        !customer_address
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Missing required fields'
+
+        }, 400);
+
+      }
+
+
+      await client.query(
+        'BEGIN'
+      );
+
+
+      // ==================================================
+      // التحقق من المستخدم
+      // ==================================================
+
+      const userRes =
+        await client.query(`
+
+          SELECT
+            telegram_id
+
+          FROM users
+
+          WHERE telegram_id = $1
+
+          FOR SHARE
+
+        `, [
+          user_id
+        ]);
+
+
+      if (
+        userRes.rows.length === 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'User not found'
+
+        }, 404);
+
+      }
+
+
+      // ==================================================
+      // جلب المتجر النشط
+      // ==================================================
+
+      const providerRes =
+        await client.query(`
+
+          SELECT
+            id,
+            name,
+            base_url,
+            fixed_shipping_cost
+
+          FROM marketing_providers
+
+          WHERE id = $1
+            AND is_active = true
+
+        `, [
+          provider_id
+        ]);
+
+
+      if (
+        providerRes.rows.length === 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Provider not found or inactive'
+
+        }, 404);
+
+      }
+
+
+      const provider =
+        providerRes.rows[0];
+
+
+      // ==================================================
+      // السعر الذي أدخله المستخدم
+      // ==================================================
+
+      const dPrice =
+        parseFloat(
+          declared_price
+        );
+
+
+      if (
+        !Number.isFinite(dPrice) ||
+        dPrice <= 0
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid declared price'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // النظام الجديد:
+      //
+      // ربح المستخدم المتوقع = 5% من سعر المنتج.
+      //
+      // مثال:
+      // سعر المنتج = $10
+      // الربح المتوقع = $0.50
+      //
+      // لا يتم دفع الربح الآن.
+      // ==================================================
+
+      const userExpectedProfit =
+        Number(
+          (
+            dPrice * 0.05
+          ).toFixed(6)
+        );
+
+
+      // ==================================================
+      // في النظام اليدوي لا يتم إعادة حساب سعر المنتج
+      // من الموقع.
+      //
+      // السعر المدخل هو سعر المنتج الذي سجله المستخدم.
+      // ==================================================
+
+      const basePrice =
+        dPrice;
+
+
+      const marginAmount =
+        0;
+
+
+      const finalProductPrice =
+        dPrice;
+
+
+      const shippingCost =
+        Number(
+          provider.fixed_shipping_cost || 0
+        );
+
+
+      const totalPrice =
+        finalProductPrice +
+        shippingCost;
+
+
+      // ==================================================
+      // لا توجد عملية تسعير تلقائية من Taskora في
+      // النظام اليدوي الجديد.
+      //
+      // لذلك taskora_net_profit يسجل 0 هنا.
+      // ==================================================
+
+      const taskoraNetProfit =
+        0;
+
+
+      // ==================================================
+      // حفظ الطلب
+      //
+      // product_url يستخدم هنا لتخزين image_url
+      // لأن جدول marketing_orders الحالي لا يحتوي
+      // على image_url مستقل.
+      // ==================================================
+
+      const orderRes =
+        await client.query(`
+
+          INSERT INTO marketing_orders (
+
+            user_id,
+            provider_id,
+            product_name,
+            product_url,
+
+            customer_name,
+            customer_phone,
+            customer_address,
+            customer_city,
+
+            base_price,
+            margin_amount,
+            final_product_price,
+            shipping_cost,
+            total_price,
+            user_expected_profit,
+            taskora_net_profit,
+
+            status
+
+          )
+
+          VALUES (
+
+            $1,
+            $2,
+            $3,
+            $4,
+
+            $5,
+            $6,
+            $7,
+            $8,
+
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            $15,
+
+            'PENDING_VERIFICATION'
+
+          )
+
+          RETURNING id
+
+        `, [
+
+          user_id,
+          provider_id,
+          String(product_name).trim(),
+          image_url
+            ? String(image_url).trim()
+            : null,
+
+          String(customer_name).trim(),
+          String(customer_phone).trim(),
+          String(customer_address).trim(),
+
+          customer_city
+            ? String(customer_city).trim()
+            : null,
+
+          basePrice,
+          marginAmount,
+          finalProductPrice,
+          shippingCost,
+          totalPrice,
+          userExpectedProfit,
+          taskoraNetProfit
+
+        ]);
+
+
+      await client.query(
+        'COMMIT'
+      );
+
+
+      return c.json({
+
+        success: true,
+
+        message:
+          'Order submitted for admin verification',
+
+        order_id:
+          orderRes.rows[0].id,
+
+        status:
+          'PENDING_VERIFICATION'
+
+      });
+
+
+    } catch (err) {
+
+      try {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+      } catch (rollbackError) {
+
+        console.error(
+          '❌ Marketing manual order rollback error:',
+          rollbackError
+        );
+
+      }
+
+
+      console.error(
+        '❌ /api/marketing/manual-order:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Failed to create order'
+
+      }, 500);
+
+
+    } finally {
+
+      client.release();
+
+    }
+
+  }
+);
+
+
+
+// =====================================================
+// 4. [ADMIN ONLY]
+// جلب طلبات التسويق
+//
+// الافتراضي:
+// PENDING_VERIFICATION
+//
+// يتم جلب:
+// - بيانات الطلب
+// - بيانات المستخدم
+// - بيانات المتجر
+// - بيانات العميل
+// - بيانات المنتج
+// - رابط صورة المنتج
+// - البيانات المالية
+// =====================================================
+
+app.get(
+  '/api/admin/marketing/orders',
+  verifyAdmin,
+  async (c) => {
+
+    try {
+
+      const status =
+        String(
+          c.req.query('status') ||
+          'PENDING_VERIFICATION'
+        )
+          .trim()
+          .toUpperCase();
+
+
+      const allowedStatuses = [
+        'PENDING_VERIFICATION',
+        'PENDING',
+        'PROCESSING',
+        'DELIVERED',
+        'CANCELLED'
+      ];
+
+
+      if (
+        !allowedStatuses.includes(status)
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid order status'
+
+        }, 400);
+
+      }
+
+
+      const result =
+        await pool.query(`
+
+          SELECT
+
+            o.id,
+            o.user_id,
+            o.status,
+
+            o.created_at,
+            o.updated_at,
+
+            o.customer_name,
+            o.customer_phone,
+            o.customer_city,
+            o.customer_address,
+
+            o.product_name,
+            o.product_url,
+
+            pr.id AS provider_id,
+            pr.name AS provider_name,
+            pr.country_code AS provider_country,
+            pr.base_url AS provider_base_url,
+
+            u.name AS user_name,
+            u.username AS user_username,
+            u.telegram_id AS user_telegram_id,
+
+            o.base_price,
+            o.margin_amount,
+            o.final_product_price,
+            o.shipping_cost,
+            o.total_price,
+            o.user_expected_profit,
+            o.taskora_net_profit,
+
+            o.admin_notes
+
+          FROM marketing_orders o
+
+          JOIN marketing_providers pr
+            ON o.provider_id = pr.id
+
+          LEFT JOIN users u
+            ON o.user_id = u.telegram_id
+
+          WHERE o.status = $1
+
+          ORDER BY
+            o.created_at DESC
+
+        `, [
+          status
+        ]);
+
+
+      return c.json({
+
+        success: true,
+
+        data:
+          result.rows
+
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        '❌ /api/admin/marketing/orders:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Server error'
+
+      }, 500);
+
+    }
+
+  }
+);
+
+
+
+// =====================================================
+// 5. [ADMIN ONLY]
+// تحديث حالة طلب التسويق
+//
+// المسار:
+// PENDING_VERIFICATION
+//        ↓
 // PROCESSING
+//        ↓
 // DELIVERED
-// CANCELLED
+//
+// أو:
+//
+// PENDING_VERIFICATION → CANCELLED
+// PROCESSING → CANCELLED
+//
+// لا يسمح:
+// PENDING_VERIFICATION → DELIVERED
 //
 // عند DELIVERED:
-// 1. إضافة user_expected_profit للمستخدم
-// 2. تسجيل الربح في earnings
-// 3. حساب 5% Referral Commission
-// 4. إضافة العمولة لصاحب الإحالة
-// 5. تسجيل referral_earnings
-// 6. تسجيل العمولة في earnings
+// - إضافة ربح المستخدم
+// - تسجيل earnings
+// - حساب Referral Commission
+// - إضافة Referral Commission
+// - تسجيل referral_earnings
+// - تسجيل referral earnings
 //
-// كل العمليات داخل Transaction واحدة.
-// =====================================================================
+// كل العمليات داخل Transaction.
+// =====================================================
 
 app.post(
   '/api/admin/marketing/orders/:id/status',
@@ -7461,24 +8263,44 @@ app.post(
 
     try {
 
-      // ==========================================================
-      // الحصول على اتصال قاعدة البيانات
-      // ==========================================================
+      // ==================================================
+      // الاتصال بقاعدة البيانات
+      // ==================================================
 
-      client = await pool.connect();
+      client =
+        await pool.connect();
 
 
-      // ==========================================================
-      // الحصول على Order ID
-      // ==========================================================
+      // ==================================================
+      // Order ID
+      // ==================================================
 
       const orderId =
         c.req.param('id');
 
 
-      // ==========================================================
-      // قراءة بيانات الطلب الجديد
-      // ==========================================================
+      if (
+        !orderId ||
+        !/^\d+$/.test(
+          String(orderId)
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid order ID'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // قراءة البيانات
+      // ==================================================
 
       const {
         status,
@@ -7486,9 +8308,9 @@ app.post(
       } = await c.req.json();
 
 
-      // ==========================================================
-      // التحقق من الحالة الجديدة
-      // ==========================================================
+      // ==================================================
+      // الحالة الجديدة
+      // ==================================================
 
       const normalizedStatus =
         String(status || '')
@@ -7497,41 +8319,50 @@ app.post(
 
 
       const allowedStatuses = [
-        'PENDING',
         'PENDING_VERIFICATION',
+        'PENDING',
         'PROCESSING',
         'DELIVERED',
         'CANCELLED'
       ];
 
 
-      if (!allowedStatuses.includes(normalizedStatus)) {
+      if (
+        !allowedStatuses.includes(
+          normalizedStatus
+        )
+      ) {
 
         return c.json({
+
           success: false,
-          message: `Invalid order status: ${normalizedStatus}`
+
+          message:
+            `Invalid order status: ${normalizedStatus}`
+
         }, 400);
 
       }
 
 
-      // ==========================================================
+      // ==================================================
       // بدء Transaction
-      // ==========================================================
+      // ==================================================
 
       await client.query(
         'BEGIN'
       );
 
 
-      // ==========================================================
+      // ==================================================
       // جلب الطلب وقفل السجل
-      // ==========================================================
+      // ==================================================
 
       const orderRes =
         await client.query(`
 
           SELECT
+
             id,
             user_id,
             provider_id,
@@ -7550,10 +8381,6 @@ app.post(
         ]);
 
 
-      // ==========================================================
-      // التحقق من وجود الطلب
-      // ==========================================================
-
       if (
         orderRes.rows.length === 0
       ) {
@@ -7562,74 +8389,110 @@ app.post(
           'ROLLBACK'
         );
 
-
         return c.json({
+
           success: false,
-          message: 'Order not found'
+
+          message:
+            'Order not found'
+
         }, 404);
 
       }
 
 
-      // ==========================================================
-      // بيانات الطلب
-      // ==========================================================
-
       const order =
         orderRes.rows[0];
 
 
-      // ==========================================================
+      // ==================================================
       // الحالة الحالية
-      // ==========================================================
+      // ==================================================
 
       const currentStatus =
-        String(order.status || '')
+        String(
+          order.status || ''
+        )
           .trim()
           .toUpperCase();
 
 
-      // ==========================================================
-      // التحقق من انتقال حالة الطلب بالترتيب الصحيح
-      // ==========================================================
+      // ==================================================
+      // انتقالات الحالات المسموحة
+      // ==================================================
 
       const validTransition =
 
+        // PENDING_VERIFICATION → PROCESSING
+        // PENDING_VERIFICATION → CANCELLED
+
         (
-          currentStatus === 'PENDING_VERIFICATION' &&
+          currentStatus ===
+            'PENDING_VERIFICATION' &&
+
           (
-            normalizedStatus === 'PROCESSING' ||
-            normalizedStatus === 'CANCELLED'
+            normalizedStatus ===
+              'PROCESSING' ||
+
+            normalizedStatus ===
+              'CANCELLED'
           )
         )
 
         ||
 
+        // PENDING → PROCESSING
+        // PENDING → CANCELLED
+        //
+        // أبقيناه للتوافق مع أي طلب قديم.
+
         (
-          currentStatus === 'PENDING' &&
+          currentStatus ===
+            'PENDING' &&
+
           (
-            normalizedStatus === 'PROCESSING' ||
-            normalizedStatus === 'CANCELLED'
+            normalizedStatus ===
+              'PROCESSING' ||
+
+            normalizedStatus ===
+              'CANCELLED'
           )
         )
 
         ||
 
+        // PROCESSING → DELIVERED
+        // PROCESSING → CANCELLED
+
         (
-          currentStatus === 'PROCESSING' &&
+          currentStatus ===
+            'PROCESSING' &&
+
           (
-            normalizedStatus === 'DELIVERED' ||
-            normalizedStatus === 'CANCELLED'
+            normalizedStatus ===
+              'DELIVERED' ||
+
+            normalizedStatus ===
+              'CANCELLED'
           )
         )
 
         ||
 
+        // السماح بتحديث الملاحظات فقط
+        // إذا كانت الحالة بالفعل DELIVERED
+        // أو CANCELLED.
+
         (
-          currentStatus === normalizedStatus &&
+          currentStatus ===
+            normalizedStatus &&
+
           (
-            normalizedStatus === 'DELIVERED' ||
-            normalizedStatus === 'CANCELLED'
+            normalizedStatus ===
+              'DELIVERED' ||
+
+            normalizedStatus ===
+              'CANCELLED'
           )
         );
 
@@ -7653,23 +8516,29 @@ app.post(
       }
 
 
-      // ==========================================================
-      // منع تنفيذ DELIVERED أكثر من مرة
-      // ==========================================================
+      // ==================================================
+      // هل هذه أول عملية DELIVERED؟
+      // ==================================================
 
       const isNewDelivery =
-        normalizedStatus === 'DELIVERED' &&
-        currentStatus !== 'DELIVERED';
+        normalizedStatus ===
+          'DELIVERED' &&
+
+        currentStatus !==
+          'DELIVERED';
 
 
-      // ==========================================================
-      // إذا كان الطلب DELIVERED بالفعل
-      // فلا نضيف الربح مرة ثانية.
-      // ==========================================================
+      // ==================================================
+      // إذا كان DELIVERED بالفعل
+      // لا نضيف الربح مرة ثانية.
+      // ==================================================
 
       if (
-        normalizedStatus === 'DELIVERED' &&
-        currentStatus === 'DELIVERED'
+        normalizedStatus ===
+          'DELIVERED' &&
+
+        currentStatus ===
+          'DELIVERED'
       ) {
 
         await client.query(`
@@ -7677,10 +8546,15 @@ app.post(
           UPDATE marketing_orders
 
           SET
-            admin_notes =
-              COALESCE($1, admin_notes),
 
-            updated_at = NOW()
+            admin_notes =
+              COALESCE(
+                $1,
+                admin_notes
+              ),
+
+            updated_at =
+              NOW()
 
           WHERE id = $2
 
@@ -7716,16 +8590,15 @@ app.post(
       }
 
 
-      // ==========================================================
-      // تنفيذ التسليم لأول مرة
-      // ==========================================================
+      // ==================================================
+      // تنفيذ ربح المستخدم عند DELIVERED فقط
+      // ==================================================
 
       if (isNewDelivery) {
 
-
-        // ========================================================
-        // التحقق من ربح المستخدم
-        // ========================================================
+        // ================================================
+        // ربح المستخدم
+        // ================================================
 
         const userProfit =
           Number(
@@ -7734,7 +8607,9 @@ app.post(
 
 
         if (
-          !Number.isFinite(userProfit) ||
+          !Number.isFinite(
+            userProfit
+          ) ||
           userProfit <= 0
         ) {
 
@@ -7755,9 +8630,9 @@ app.post(
         }
 
 
-        // ========================================================
-        // التحقق من وجود المستخدم
-        // ========================================================
+        // ================================================
+        // التحقق من المستخدم وقفل السجل
+        // ================================================
 
         const userRes =
           await client.query(`
@@ -7797,9 +8672,9 @@ app.post(
         }
 
 
-        // ========================================================
-        // 1. إضافة ربح التسويق إلى رصيد المستخدم
-        // ========================================================
+        // ================================================
+        // 1. إضافة ربح التسويق للمستخدم
+        // ================================================
 
         const balanceRes =
           await client.query(`
@@ -7807,7 +8682,10 @@ app.post(
             UPDATE users
 
             SET balance =
-              COALESCE(balance, 0) + $1
+              COALESCE(
+                balance,
+                0
+              ) + $1
 
             WHERE telegram_id = $2
 
@@ -7840,26 +8718,30 @@ app.post(
         }
 
 
-        // ========================================================
-        // 2. تسجيل ربح المستخدم في earnings
-        // ========================================================
+        // ================================================
+        // 2. تسجيل ربح المستخدم
+        // ================================================
 
         await client.query(`
 
           INSERT INTO earnings (
+
             user_id,
             source,
             amount,
             description,
             created_at
+
           )
 
           VALUES (
+
             $1,
             'marketing_profit',
             $2,
             $3,
             NOW()
+
           )
 
         `, [
@@ -7873,31 +8755,30 @@ app.post(
         ]);
 
 
-        // ========================================================
-        // 3. حساب عمولة الإحالة
+        // ================================================
+        // 3. عمولة الإحالة
         //
-        // 5% من ربح المستخدم
+        // النظام الجديد:
+        //
+        // Referral Commission = 20%
+        // من ربح التسويق الخاص بالمستخدم.
         //
         // مثال:
-        //
-        // user profit = $0.80
-        //
-        // referral = $0.80 × 5%
-        //
-        // referral = $0.04
-        // ========================================================
+        // ربح المستخدم = $0.50
+        // عمولة الإحالة = $0.10
+        // ================================================
 
         const referralCommission =
           Number(
             (
-              userProfit * 0.05
+              userProfit * 0.20
             ).toFixed(6)
           );
 
 
-        // ========================================================
-        // 4. إذا كان هناك Referral
-        // ========================================================
+        // ================================================
+        // 4. البحث عن صاحب الإحالة
+        // ================================================
 
         if (
           referralCommission > 0 &&
@@ -7905,7 +8786,6 @@ app.post(
             referralCommission
           )
         ) {
-
 
           const referralRes =
             await client.query(`
@@ -7928,23 +8808,18 @@ app.post(
             ]);
 
 
-          // ======================================================
-          // يوجد صاحب إحالة
-          // ======================================================
-
           if (
             referralRes.rows.length > 0
           ) {
-
 
             const referrerId =
               referralRes.rows[0]
                 .referrer_id;
 
 
-            // ====================================================
-            // التحقق من وجود صاحب الإحالة
-            // ====================================================
+            // ==========================================
+            // قفل حساب صاحب الإحالة
+            // ==========================================
 
             const referrerRes =
               await client.query(`
@@ -7967,10 +8842,9 @@ app.post(
               referrerRes.rows.length > 0
             ) {
 
-
-              // ==================================================
-              // 5. إضافة العمولة لصاحب الإحالة
-              // ==================================================
+              // ========================================
+              // 5. إضافة عمولة الإحالة
+              // ========================================
 
               const referralBalanceRes =
                 await client.query(`
@@ -7980,15 +8854,16 @@ app.post(
                   SET
 
                     balance =
-                      COALESCE(balance, 0)
-                      + $1,
+                      COALESCE(
+                        balance,
+                        0
+                      ) + $1,
 
                     referral_earnings =
                       COALESCE(
                         referral_earnings,
                         0
-                      )
-                      + $1
+                      ) + $1
 
                   WHERE telegram_id = $2
 
@@ -8014,24 +8889,28 @@ app.post(
               }
 
 
-              // ==================================================
-              // 6. تسجيل Referral Earnings
-              // ==================================================
+              // ========================================
+              // 6. تسجيل referral_earnings
+              // ========================================
 
               await client.query(`
 
                 INSERT INTO referral_earnings (
+
                   referrer_id,
                   referee_id,
                   amount,
                   created_at
+
                 )
 
                 VALUES (
+
                   $1,
                   $2,
                   $3,
                   NOW()
+
                 )
 
               `, [
@@ -8045,26 +8924,30 @@ app.post(
               ]);
 
 
-              // ==================================================
+              // ========================================
               // 7. تسجيل العمولة في earnings
-              // ==================================================
+              // ========================================
 
               await client.query(`
 
                 INSERT INTO earnings (
+
                   user_id,
                   source,
                   amount,
                   description,
                   created_at
+
                 )
 
                 VALUES (
+
                   $1,
                   'referral_bonus',
                   $2,
                   $3,
                   NOW()
+
                 )
 
               `, [
@@ -8073,7 +8956,7 @@ app.post(
 
                 referralCommission,
 
-                `5% referral commission from Marketing Order #${orderId}`
+                `20% referral commission from Marketing Order #${orderId}`
 
               ]);
 
@@ -8086,9 +8969,9 @@ app.post(
       }
 
 
-      // ==========================================================
+      // ==================================================
       // تحديث حالة الطلب
-      // ==========================================================
+      // ==================================================
 
       await client.query(`
 
@@ -8104,7 +8987,8 @@ app.post(
               admin_notes
             ),
 
-          updated_at = NOW()
+          updated_at =
+            NOW()
 
         WHERE id = $3
 
@@ -8119,18 +9003,14 @@ app.post(
       ]);
 
 
-      // ==========================================================
+      // ==================================================
       // إنهاء Transaction
-      // ==========================================================
+      // ==================================================
 
       await client.query(
         'COMMIT'
       );
 
-
-      // ==========================================================
-      // الرد
-      // ==========================================================
 
       return c.json({
 
@@ -8152,11 +9032,6 @@ app.post(
 
 
     } catch (err) {
-
-
-      // ==========================================================
-      // إلغاء Transaction عند حدوث أي خطأ
-      // ==========================================================
 
       if (client) {
 
@@ -8205,667 +9080,1673 @@ app.post(
   }
 );
 
+
+
 // =====================================================
-// 🏪 ADMIN - MANAGE MARKETING PROVIDERS (CRUD)
+// 🏪 ADMIN - MANAGE MARKETING PROVIDERS
 // =====================================================
 
-// 1. جلب كل المنصات (مع إحصائيات)
-app.get('/api/admin/marketing/providers', verifyAdmin, async (c) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        p.id,
-        p.name,
-        p.country_code,
-        p.base_url,
-        p.product_url_pattern,
-        p.base_margin_percentage,
-        p.user_profit_percentage,
-        p.fixed_shipping_cost,
-        p.selector_name,
-        p.selector_price,
-        p.selector_image,
-        p.is_active,
-        p.created_at,
-        p.mode,
-        p.api_endpoint,
-        p.api_search_path,
-        p.api_product_path,
-        COUNT(o.id) AS total_orders,
-        COALESCE(SUM(o.taskora_net_profit), 0) AS total_profit
-      FROM marketing_providers p
-      LEFT JOIN marketing_orders o
-        ON o.provider_id = p.id
-      GROUP BY p.id
-      ORDER BY p.created_at DESC
-    `);
 
-    return c.json({
-      success: true,
-      data: result.rows
-    });
 
-  } catch (err) {
-    console.error('❌ GET /api/admin/marketing/providers:', err);
+// =====================================================
+// 6. جلب جميع المنصات
+// =====================================================
 
-    return c.json({
-      success: false,
-      message: 'Server error'
-    }, 500);
-  }
-});
-// 2. إضافة منصة جديدة
-app.post('/api/admin/marketing/providers', verifyAdmin, async (c) => {
-  try {
-    const {
-      name,
-      country_code,
-      base_url,
-      product_url_pattern,
-      mode,
-      api_endpoint,
-      api_key,
-      api_search_path,
-      api_product_path,
-      base_margin_percentage,
-      user_profit_percentage,
-      fixed_shipping_cost,
-      selector_name,
-      selector_price,
-      selector_image,
-      is_active
-    } = await c.req.json();
-
-    if (!name || !country_code || !base_url) {
-      return c.json({
-        success: false,
-        message: 'Name, country, and Base URL are required'
-      }, 400);
-    }
-
-    const normalizedCountry = String(country_code).trim().toUpperCase();
-
-    if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
-      return c.json({
-        success: false,
-        message: 'Country code must be exactly 2 letters'
-      }, 400);
-    }
-
-    let parsedBaseUrl;
+app.get(
+  '/api/admin/marketing/providers',
+  verifyAdmin,
+  async (c) => {
 
     try {
-      parsedBaseUrl = new URL(String(base_url).trim());
 
-      if (!['http:', 'https:'].includes(parsedBaseUrl.protocol)) {
-        throw new Error('Invalid protocol');
-      }
-    } catch {
+      const result =
+        await pool.query(`
+
+          SELECT
+
+            p.id,
+            p.name,
+            p.country_code,
+            p.base_url,
+            p.product_url_pattern,
+
+            p.base_margin_percentage,
+            p.user_profit_percentage,
+            p.fixed_shipping_cost,
+
+            p.selector_name,
+            p.selector_price,
+            p.selector_image,
+
+            p.is_active,
+            p.created_at,
+
+            p.mode,
+
+            p.api_endpoint,
+            p.api_search_path,
+            p.api_product_path,
+
+            COUNT(o.id) AS total_orders,
+
+            COALESCE(
+              SUM(
+                o.taskora_net_profit
+              ),
+              0
+            ) AS total_profit
+
+          FROM marketing_providers p
+
+          LEFT JOIN marketing_orders o
+            ON o.provider_id = p.id
+
+          GROUP BY p.id
+
+          ORDER BY
+            p.created_at DESC
+
+        `);
+
+
       return c.json({
+
+        success: true,
+
+        data:
+          result.rows
+
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        '❌ GET /api/admin/marketing/providers:',
+        err
+      );
+
+
+      return c.json({
+
         success: false,
-        message: 'Invalid Base URL'
-      }, 400);
+
+        message:
+          'Server error'
+
+      }, 500);
+
     }
 
-    const normalizedMode =
-      String(mode || 'SCRAPING').trim().toUpperCase();
+  }
+);
 
-    if (!['SCRAPING', 'API'].includes(normalizedMode)) {
-      return c.json({
-        success: false,
-        message: 'Mode must be SCRAPING or API'
-      }, 400);
-    }
 
-    const margin = Number(base_margin_percentage ?? 20);
-    const userProfit = Number(user_profit_percentage ?? 40);
-    const shipping = Number(fixed_shipping_cost ?? 0);
 
-    if (
-      !Number.isFinite(margin) ||
-      margin < 0 ||
-      margin > 100
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid base margin percentage'
-      }, 400);
-    }
+// =====================================================
+// 7. إضافة منصة جديدة
+//
+// الأنماط:
+// MANUAL
+// API
+//
+// MANUAL:
+// المتجر الحقيقي يفتح للمستخدم في تبويب جديد.
+//
+// API:
+// المنصة يمكن ربطها لاحقًا عبر API.
+// =====================================================
 
-    if (
-      !Number.isFinite(userProfit) ||
-      userProfit < 0 ||
-      userProfit > 100
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid user profit percentage'
-      }, 400);
-    }
+app.post(
+  '/api/admin/marketing/providers',
+  verifyAdmin,
+  async (c) => {
 
-    if (
-      !Number.isFinite(shipping) ||
-      shipping < 0
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid shipping cost'
-      }, 400);
-    }
+    try {
 
-    if (normalizedMode === 'API' && !api_endpoint) {
-      return c.json({
-        success: false,
-        message: 'API Endpoint is required when mode is API'
-      }, 400);
-    }
-
-    const result = await pool.query(`
-      INSERT INTO marketing_providers (
+      const {
         name,
         country_code,
         base_url,
         product_url_pattern,
-        base_margin_percentage,
-        user_profit_percentage,
-        fixed_shipping_cost,
-        selector_name,
-        selector_price,
-        selector_image,
-        is_active,
         mode,
         api_endpoint,
         api_key,
         api_search_path,
-        api_product_path
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12, $13, $14, $15, $16
-      )
-      RETURNING
-        id,
-        name,
-        country_code,
-        base_url,
-        product_url_pattern,
+        api_product_path,
+
         base_margin_percentage,
         user_profit_percentage,
         fixed_shipping_cost,
+
         selector_name,
         selector_price,
         selector_image,
-        is_active,
-        mode,
-        api_endpoint,
-        api_search_path,
-        api_product_path,
-        created_at
-    `, [
-      String(name).trim(),
-      normalizedCountry,
-      parsedBaseUrl.href,
-      product_url_pattern ? String(product_url_pattern).trim() : null,
-      margin,
-      userProfit,
-      shipping,
-      selector_name ? String(selector_name).trim() : '.product-title',
-      selector_price ? String(selector_price).trim() : '.price',
-      selector_image ? String(selector_image).trim() : '.product-image img',
-      is_active !== false,
-      normalizedMode,
-      api_endpoint ? String(api_endpoint).trim() : null,
-      api_key ? String(api_key).trim() : null,
-      api_search_path ? String(api_search_path).trim() : null,
-      api_product_path ? String(api_product_path).trim() : null
-    ]);
 
-    return c.json({
-      success: true,
-      message: '✅ Provider added',
-      data: result.rows[0]
-    });
+        is_active
 
-  } catch (err) {
-    console.error('❌ POST /api/admin/marketing/providers:', err);
+      } = await c.req.json();
 
-    return c.json({
-      success: false,
-      message: 'Failed to add provider'
-    }, 500);
-  }
-});
-// 3. تعديل منصة موجودة
-app.put('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
-  try {
-    const providerId = c.req.param('id');
 
-    const {
-      name,
-      country_code,
-      base_url,
-      product_url_pattern,
-      base_margin_percentage,
-      user_profit_percentage,
-      fixed_shipping_cost,
-      selector_name,
-      selector_price,
-      selector_image,
-      is_active,
-      mode,
-      api_endpoint,
-      api_key,
-      api_search_path,
-      api_product_path
-    } = await c.req.json();
+      // ==================================================
+      // البيانات الأساسية
+      // ==================================================
 
-    if (!providerId || !/^\d+$/.test(String(providerId))) {
-      return c.json({
-        success: false,
-        message: 'Invalid provider ID'
-      }, 400);
-    }
+      if (
+        !name ||
+        !country_code ||
+        !base_url
+      ) {
 
-    let normalizedCountry = null;
-
-    if (country_code !== undefined && country_code !== null) {
-      normalizedCountry = String(country_code).trim().toUpperCase();
-
-      if (!/^[A-Z]{2}$/.test(normalizedCountry)) {
         return c.json({
+
           success: false,
-          message: 'Country code must be exactly 2 letters'
+
+          message:
+            'Name, country, and Base URL are required'
+
         }, 400);
+
       }
-    }
 
-    let normalizedBaseUrl = null;
 
-    if (base_url !== undefined && base_url !== null) {
+      // ==================================================
+      // Country Code
+      // ==================================================
+
+      const normalizedCountry =
+        String(country_code)
+          .trim()
+          .toUpperCase();
+
+
+      if (
+        !/^[A-Z]{2}$/.test(
+          normalizedCountry
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Country code must be exactly 2 letters'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // Base URL
+      // ==================================================
+
+      let parsedBaseUrl;
+
       try {
-        const parsedBaseUrl = new URL(String(base_url).trim());
 
-        if (!['http:', 'https:'].includes(parsedBaseUrl.protocol)) {
-          throw new Error('Invalid protocol');
+        parsedBaseUrl =
+          new URL(
+            String(base_url).trim()
+          );
+
+
+        if (
+          ![
+            'http:',
+            'https:'
+          ].includes(
+            parsedBaseUrl.protocol
+          )
+        ) {
+
+          throw new Error(
+            'Invalid protocol'
+          );
+
         }
 
-        normalizedBaseUrl = parsedBaseUrl.href;
       } catch {
+
         return c.json({
+
           success: false,
-          message: 'Invalid Base URL'
+
+          message:
+            'Invalid Base URL'
+
         }, 400);
+
       }
-    }
 
-    let normalizedMode = null;
 
-    if (mode !== undefined && mode !== null) {
-      normalizedMode = String(mode).trim().toUpperCase();
+      // ==================================================
+      // Mode
+      // ==================================================
 
-      if (!['SCRAPING', 'API'].includes(normalizedMode)) {
+      const normalizedMode =
+        String(
+          mode || 'MANUAL'
+        )
+          .trim()
+          .toUpperCase();
+
+
+      if (
+        ![
+          'MANUAL',
+          'API'
+        ].includes(
+          normalizedMode
+        )
+      ) {
+
         return c.json({
+
           success: false,
-          message: 'Mode must be SCRAPING or API'
+
+          message:
+            'Mode must be MANUAL or API'
+
         }, 400);
+
       }
-    }
 
-    const margin =
-      base_margin_percentage !== undefined &&
-      base_margin_percentage !== null
-        ? Number(base_margin_percentage)
-        : null;
 
-    const userProfit =
-      user_profit_percentage !== undefined &&
-      user_profit_percentage !== null
-        ? Number(user_profit_percentage)
-        : null;
+      // ==================================================
+      // النسب المالية
+      //
+      // نحتفظ بها في DB للتوافق مع schema الحالي.
+      // ==================================================
 
-    const shipping =
-      fixed_shipping_cost !== undefined &&
-      fixed_shipping_cost !== null
-        ? Number(fixed_shipping_cost)
-        : null;
+      const margin =
+        Number(
+          base_margin_percentage ?? 20
+        );
 
-    if (
-      margin !== null &&
-      (!Number.isFinite(margin) || margin < 0 || margin > 100)
-    ) {
+
+      const userProfit =
+        Number(
+          user_profit_percentage ?? 40
+        );
+
+
+      const shipping =
+        Number(
+          fixed_shipping_cost ?? 0
+        );
+
+
+      if (
+        !Number.isFinite(margin) ||
+        margin < 0 ||
+        margin > 100
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid base margin percentage'
+
+        }, 400);
+
+      }
+
+
+      if (
+        !Number.isFinite(userProfit) ||
+        userProfit < 0 ||
+        userProfit > 100
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid user profit percentage'
+
+        }, 400);
+
+      }
+
+
+      if (
+        !Number.isFinite(shipping) ||
+        shipping < 0
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid shipping cost'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // API فقط يحتاج API Endpoint
+      // ==================================================
+
+      if (
+        normalizedMode === 'API' &&
+        !api_endpoint
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'API Endpoint is required when mode is API'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // INSERT
+      // ==================================================
+
+      const result =
+        await pool.query(`
+
+          INSERT INTO marketing_providers (
+
+            name,
+            country_code,
+            base_url,
+            product_url_pattern,
+
+            base_margin_percentage,
+            user_profit_percentage,
+            fixed_shipping_cost,
+
+            selector_name,
+            selector_price,
+            selector_image,
+
+            is_active,
+
+            mode,
+
+            api_endpoint,
+            api_key,
+            api_search_path,
+            api_product_path
+
+          )
+
+          VALUES (
+
+            $1,
+            $2,
+            $3,
+            $4,
+
+            $5,
+            $6,
+            $7,
+
+            $8,
+            $9,
+            $10,
+
+            $11,
+
+            $12,
+
+            $13,
+            $14,
+            $15,
+            $16
+
+          )
+
+          RETURNING
+
+            id,
+            name,
+            country_code,
+            base_url,
+            product_url_pattern,
+
+            base_margin_percentage,
+            user_profit_percentage,
+            fixed_shipping_cost,
+
+            selector_name,
+            selector_price,
+            selector_image,
+
+            is_active,
+
+            mode,
+
+            api_endpoint,
+            api_search_path,
+            api_product_path,
+
+            created_at
+
+        `, [
+
+          String(name).trim(),
+
+          normalizedCountry,
+
+          parsedBaseUrl.href,
+
+          product_url_pattern
+            ? String(
+                product_url_pattern
+              ).trim()
+            : null,
+
+          margin,
+
+          userProfit,
+
+          shipping,
+
+          selector_name
+            ? String(
+                selector_name
+              ).trim()
+            : '.product-title',
+
+          selector_price
+            ? String(
+                selector_price
+              ).trim()
+            : '.price',
+
+          selector_image
+            ? String(
+                selector_image
+              ).trim()
+            : '.product-image img',
+
+          is_active !== false,
+
+          normalizedMode,
+
+          api_endpoint
+            ? String(
+                api_endpoint
+              ).trim()
+            : null,
+
+          api_key
+            ? String(
+                api_key
+              ).trim()
+            : null,
+
+          api_search_path
+            ? String(
+                api_search_path
+              ).trim()
+            : null,
+
+          api_product_path
+            ? String(
+                api_product_path
+              ).trim()
+            : null
+
+        ]);
+
+
       return c.json({
-        success: false,
-        message: 'Invalid base margin percentage'
-      }, 400);
-    }
 
-    if (
-      userProfit !== null &&
-      (!Number.isFinite(userProfit) || userProfit < 0 || userProfit > 100)
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid user profit percentage'
-      }, 400);
-    }
+        success: true,
 
-    if (
-      shipping !== null &&
-      (!Number.isFinite(shipping) || shipping < 0)
-    ) {
-      return c.json({
-        success: false,
-        message: 'Invalid shipping cost'
-      }, 400);
-    }
+        message:
+          '✅ Provider added',
 
-    const result = await pool.query(`
-      UPDATE marketing_providers SET
-        name = COALESCE($2, name),
-        country_code = COALESCE($3, country_code),
-        base_url = COALESCE($4, base_url),
-        product_url_pattern = COALESCE($5, product_url_pattern),
-        base_margin_percentage = COALESCE($6, base_margin_percentage),
-        user_profit_percentage = COALESCE($7, user_profit_percentage),
-        fixed_shipping_cost = COALESCE($8, fixed_shipping_cost),
-        selector_name = COALESCE($9, selector_name),
-        selector_price = COALESCE($10, selector_price),
-        selector_image = COALESCE($11, selector_image),
-        is_active = COALESCE($12, is_active),
-        mode = COALESCE($13, mode),
-        api_endpoint = COALESCE($14, api_endpoint),
-        api_key = COALESCE($15, api_key),
-        api_search_path = COALESCE($16, api_search_path),
-        api_product_path = COALESCE($17, api_product_path)
-      WHERE id = $1
-      RETURNING
-        id,
-        name,
-        country_code,
-        base_url,
-        product_url_pattern,
-        base_margin_percentage,
-        user_profit_percentage,
-        fixed_shipping_cost,
-        selector_name,
-        selector_price,
-        selector_image,
-        is_active,
-        mode,
-        api_endpoint,
-        api_search_path,
-        api_product_path,
-        created_at
-    `, [
-      providerId,
-      name !== undefined ? String(name).trim() : null,
-      normalizedCountry,
-      normalizedBaseUrl,
-      product_url_pattern !== undefined
-        ? (product_url_pattern ? String(product_url_pattern).trim() : null)
-        : null,
-      margin,
-      userProfit,
-      shipping,
-      selector_name !== undefined
-        ? (selector_name ? String(selector_name).trim() : null)
-        : null,
-      selector_price !== undefined
-        ? (selector_price ? String(selector_price).trim() : null)
-        : null,
-      selector_image !== undefined
-        ? (selector_image ? String(selector_image).trim() : null)
-        : null,
-      is_active !== undefined ? Boolean(is_active) : null,
-      normalizedMode,
-      api_endpoint !== undefined
-        ? (api_endpoint ? String(api_endpoint).trim() : null)
-        : null,
-      api_key !== undefined
-        ? (api_key ? String(api_key).trim() : null)
-        : null,
-      api_search_path !== undefined
-        ? (api_search_path ? String(api_search_path).trim() : null)
-        : null,
-      api_product_path !== undefined
-        ? (api_product_path ? String(api_product_path).trim() : null)
-        : null
-    ]);
+        data:
+          result.rows[0]
 
-    if (result.rows.length === 0) {
-      return c.json({
-        success: false,
-        message: 'Provider not found'
-      }, 404);
-    }
+      });
 
-    return c.json({
-      success: true,
-      message: '✅ Provider updated',
-      data: result.rows[0]
-    });
 
-  } catch (err) {
-    console.error('❌ PUT /api/admin/marketing/providers/:id:', err);
+    } catch (err) {
 
-    return c.json({
-      success: false,
-      message: 'Failed to update provider'
-    }, 500);
-  }
-});
-
-// 4. حذف منصة (تفعيل/تعطيل فقط لحماية البيانات)
-app.delete('/api/admin/marketing/providers/:id', verifyAdmin, async (c) => {
-  try {
-    const providerId = c.req.param('id');
-
-    // التحقق من وجود طلبات مرتبطة
-    const ordersCheck = await pool.query(
-      'SELECT COUNT(*) FROM marketing_orders WHERE provider_id = $1',
-      [providerId]
-    );
-    const ordersCount = parseInt(ordersCheck.rows[0].count);
-
-    if (ordersCount > 0) {
-      // إذا كان هناك طلبات، نقوم بالتعطيل فقط بدلاً من الحذف
-      await pool.query(
-        'UPDATE marketing_providers SET is_active = false WHERE id = $1',
-        [providerId]
+      console.error(
+        '❌ POST /api/admin/marketing/providers:',
+        err
       );
-      return c.json({ 
-        success: true, 
-        message: `⚠️ Provider disabled (has ${ordersCount} orders). Use "Activate" to restore.` 
-      });
-    }
 
-    // حذف كامل إذا لم يكن هناك طلبات
-    await pool.query('DELETE FROM marketing_providers WHERE id = $1', [providerId]);
-    return c.json({ success: true, message: '✅ Provider deleted' });
-  } catch (err) {
-    console.error('❌ DELETE /api/admin/marketing/providers/:id:', err);
-    return c.json({ success: false, message: 'Failed to delete provider' }, 500);
-  }
-});
 
-// 5. اختبار الاتصال بالمنصة
-app.post('/api/admin/marketing/providers/:id/test', verifyAdmin, async (c) => {
-  try {
-    const providerId = c.req.param('id');
-
-    const body = await c.req.json().catch(() => ({}));
-
-    const testQuery =
-      String(body.test_query || 'watch').trim();
-
-    const providerRes = await pool.query(`
-      SELECT
-        id,
-        name,
-        base_url,
-        mode,
-        selector_name,
-        selector_price,
-        selector_image,
-        api_endpoint,
-        api_search_path
-      FROM marketing_providers
-      WHERE id = $1
-    `, [providerId]);
-
-    if (providerRes.rows.length === 0) {
       return c.json({
+
         success: false,
-        message: 'Provider not found'
-      }, 404);
+
+        message:
+          'Failed to add provider'
+
+      }, 500);
+
     }
 
-    const provider = providerRes.rows[0];
+  }
+);
 
-    /*
-     * حالياً اختبار المنصة يختبر Scraping فقط.
-     * API mode سيتم ربطه لاحقاً بطريقة API محددة،
-     * لأن كل API له طريقة استجابة مختلفة.
-     */
-    if (String(provider.mode).toUpperCase() === 'API') {
-      if (!provider.api_endpoint) {
-        return c.json({
-          success: false,
-          message: 'API Endpoint is not configured'
-        }, 400);
-      }
 
-      let apiUrl;
 
-      try {
-        apiUrl = new URL(provider.api_endpoint);
+// =====================================================
+// 8. تعديل منصة موجودة
+// =====================================================
 
-        if (!['http:', 'https:'].includes(apiUrl.protocol)) {
-          throw new Error('Invalid protocol');
-        }
-      } catch {
-        return c.json({
-          success: false,
-          message: 'Invalid API Endpoint'
-        }, 400);
-      }
-
-      const response = await fetch(apiUrl.href, {
-        headers: {
-          'User-Agent': 'Taskora-Provider-Test/1.0',
-          'Accept': 'application/json,text/plain,*/*'
-        }
-      });
-
-      return c.json({
-        success: response.ok,
-        message: response.ok
-          ? '✅ API Endpoint is reachable'
-          : `❌ API connection failed: HTTP ${response.status}`,
-        details: {
-          mode: 'API',
-          status: response.status,
-          endpoint: apiUrl.href
-        }
-      });
-    }
-
-    let testUrl;
+app.put(
+  '/api/admin/marketing/providers/:id',
+  verifyAdmin,
+  async (c) => {
 
     try {
-      const baseUrl = new URL(provider.base_url);
 
-      /*
-       * إذا كان Base URL يحتوي على {query}
-       * نستبدله مباشرة.
-       */
-      if (provider.base_url.includes('{query}')) {
-        testUrl = provider.base_url.replace(
-          /\{query\}/gi,
-          encodeURIComponent(testQuery)
-        );
-      } else {
-        /*
-         * لا نفترض مسار بحث خاص بالمنصة.
-         * نستخدم Base URL كما هو لاختبار الوصول.
-         */
-        testUrl = baseUrl.href;
+      const providerId =
+        c.req.param('id');
+
+
+      const {
+        name,
+        country_code,
+        base_url,
+        product_url_pattern,
+
+        base_margin_percentage,
+        user_profit_percentage,
+        fixed_shipping_cost,
+
+        selector_name,
+        selector_price,
+        selector_image,
+
+        is_active,
+
+        mode,
+
+        api_endpoint,
+        api_key,
+        api_search_path,
+        api_product_path
+
+      } = await c.req.json();
+
+
+      // ==================================================
+      // Provider ID
+      // ==================================================
+
+      if (
+        !providerId ||
+        !/^\d+$/.test(
+          String(providerId)
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid provider ID'
+
+        }, 400);
+
       }
-    } catch {
-      return c.json({
-        success: false,
-        message: 'Invalid provider Base URL'
-      }, 400);
-    }
 
-    const response = await fetch(testUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept':
-          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language':
-          'en-US,en;q=0.8'
+
+      // ==================================================
+      // Country
+      // ==================================================
+
+      let normalizedCountry =
+        null;
+
+
+      if (
+        country_code !== undefined &&
+        country_code !== null
+      ) {
+
+        normalizedCountry =
+          String(country_code)
+            .trim()
+            .toUpperCase();
+
+
+        if (
+          !/^[A-Z]{2}$/.test(
+            normalizedCountry
+          )
+        ) {
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Country code must be exactly 2 letters'
+
+          }, 400);
+
+        }
+
       }
-    });
 
-    if (!response.ok) {
+
+      // ==================================================
+      // Base URL
+      // ==================================================
+
+      let normalizedBaseUrl =
+        null;
+
+
+      if (
+        base_url !== undefined &&
+        base_url !== null
+      ) {
+
+        try {
+
+          const parsedBaseUrl =
+            new URL(
+              String(base_url).trim()
+            );
+
+
+          if (
+            ![
+              'http:',
+              'https:'
+            ].includes(
+              parsedBaseUrl.protocol
+            )
+          ) {
+
+            throw new Error(
+              'Invalid protocol'
+            );
+
+          }
+
+
+          normalizedBaseUrl =
+            parsedBaseUrl.href;
+
+        } catch {
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Invalid Base URL'
+
+          }, 400);
+
+        }
+
+      }
+
+
+      // ==================================================
+      // Mode
+      // ==================================================
+
+      let normalizedMode =
+        null;
+
+
+      if (
+        mode !== undefined &&
+        mode !== null
+      ) {
+
+        normalizedMode =
+          String(mode)
+            .trim()
+            .toUpperCase();
+
+
+        if (
+          ![
+            'MANUAL',
+            'API'
+          ].includes(
+            normalizedMode
+          )
+        ) {
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Mode must be MANUAL or API'
+
+          }, 400);
+
+        }
+
+      }
+
+
+      // ==================================================
+      // النسب
+      // ==================================================
+
+      const margin =
+
+        base_margin_percentage !==
+          undefined &&
+
+        base_margin_percentage !==
+          null
+
+          ? Number(
+              base_margin_percentage
+            )
+
+          : null;
+
+
+      const userProfit =
+
+        user_profit_percentage !==
+          undefined &&
+
+        user_profit_percentage !==
+          null
+
+          ? Number(
+              user_profit_percentage
+            )
+
+          : null;
+
+
+      const shipping =
+
+        fixed_shipping_cost !==
+          undefined &&
+
+        fixed_shipping_cost !==
+          null
+
+          ? Number(
+              fixed_shipping_cost
+            )
+
+          : null;
+
+
+      if (
+        margin !== null &&
+
+        (
+          !Number.isFinite(
+            margin
+          ) ||
+
+          margin < 0 ||
+
+          margin > 100
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid base margin percentage'
+
+        }, 400);
+
+      }
+
+
+      if (
+        userProfit !== null &&
+
+        (
+          !Number.isFinite(
+            userProfit
+          ) ||
+
+          userProfit < 0 ||
+
+          userProfit > 100
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid user profit percentage'
+
+        }, 400);
+
+      }
+
+
+      if (
+        shipping !== null &&
+
+        (
+          !Number.isFinite(
+            shipping
+          ) ||
+
+          shipping < 0
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid shipping cost'
+
+        }, 400);
+
+      }
+
+
+      // ==================================================
+      // تحديث المنصة
+      // ==================================================
+
+      const result =
+        await pool.query(`
+
+          UPDATE marketing_providers
+
+          SET
+
+            name =
+              COALESCE(
+                $2,
+                name
+              ),
+
+            country_code =
+              COALESCE(
+                $3,
+                country_code
+              ),
+
+            base_url =
+              COALESCE(
+                $4,
+                base_url
+              ),
+
+            product_url_pattern =
+              COALESCE(
+                $5,
+                product_url_pattern
+              ),
+
+            base_margin_percentage =
+              COALESCE(
+                $6,
+                base_margin_percentage
+              ),
+
+            user_profit_percentage =
+              COALESCE(
+                $7,
+                user_profit_percentage
+              ),
+
+            fixed_shipping_cost =
+              COALESCE(
+                $8,
+                fixed_shipping_cost
+              ),
+
+            selector_name =
+              COALESCE(
+                $9,
+                selector_name
+              ),
+
+            selector_price =
+              COALESCE(
+                $10,
+                selector_price
+              ),
+
+            selector_image =
+              COALESCE(
+                $11,
+                selector_image
+              ),
+
+            is_active =
+              COALESCE(
+                $12,
+                is_active
+              ),
+
+            mode =
+              COALESCE(
+                $13,
+                mode
+              ),
+
+            api_endpoint =
+              COALESCE(
+                $14,
+                api_endpoint
+              ),
+
+            api_key =
+              COALESCE(
+                $15,
+                api_key
+              ),
+
+            api_search_path =
+              COALESCE(
+                $16,
+                api_search_path
+              ),
+
+            api_product_path =
+              COALESCE(
+                $17,
+                api_product_path
+              )
+
+          WHERE id = $1
+
+          RETURNING
+
+            id,
+            name,
+            country_code,
+            base_url,
+            product_url_pattern,
+
+            base_margin_percentage,
+            user_profit_percentage,
+            fixed_shipping_cost,
+
+            selector_name,
+            selector_price,
+            selector_image,
+
+            is_active,
+
+            mode,
+
+            api_endpoint,
+            api_search_path,
+            api_product_path,
+
+            created_at
+
+        `, [
+
+          providerId,
+
+          name !== undefined
+            ? String(name).trim()
+            : null,
+
+          normalizedCountry,
+
+          normalizedBaseUrl,
+
+          product_url_pattern !==
+            undefined
+
+            ? (
+                product_url_pattern
+                  ? String(
+                      product_url_pattern
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          margin,
+
+          userProfit,
+
+          shipping,
+
+          selector_name !==
+            undefined
+
+            ? (
+                selector_name
+                  ? String(
+                      selector_name
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          selector_price !==
+            undefined
+
+            ? (
+                selector_price
+                  ? String(
+                      selector_price
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          selector_image !==
+            undefined
+
+            ? (
+                selector_image
+                  ? String(
+                      selector_image
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          is_active !== undefined
+            ? Boolean(is_active)
+            : null,
+
+          normalizedMode,
+
+          api_endpoint !==
+            undefined
+
+            ? (
+                api_endpoint
+                  ? String(
+                      api_endpoint
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          api_key !==
+            undefined
+
+            ? (
+                api_key
+                  ? String(
+                      api_key
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          api_search_path !==
+            undefined
+
+            ? (
+                api_search_path
+                  ? String(
+                      api_search_path
+                    ).trim()
+                  : null
+              )
+
+            : null,
+
+          api_product_path !==
+            undefined
+
+            ? (
+                api_product_path
+                  ? String(
+                      api_product_path
+                    ).trim()
+                  : null
+              )
+
+            : null
+
+        ]);
+
+
+      if (
+        result.rows.length === 0
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Provider not found'
+
+        }, 404);
+
+      }
+
+
       return c.json({
-        success: false,
-        message: `❌ Connection failed: HTTP ${response.status}`
+
+        success: true,
+
+        message:
+          '✅ Provider updated',
+
+        data:
+          result.rows[0]
+
       });
+
+
+    } catch (err) {
+
+      console.error(
+        '❌ PUT /api/admin/marketing/providers/:id:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Failed to update provider'
+
+      }, 500);
+
     }
 
-    const html = await response.text();
-
-    const selectorName =
-      String(provider.selector_name || '').trim();
-
-    const selectorPrice =
-      String(provider.selector_price || '').trim();
-
-    const selectorImage =
-      String(provider.selector_image || '').trim();
-
-    /*
-     * هذا اختبار اتصال + وجود نصوص الـ selectors داخل HTML.
-     * لا نعتبره إثباتاً أن استخراج المنتجات صحيح 100%.
-     */
-    const selectorsFound = {
-      name:
-        selectorName.length > 0 &&
-        html.includes(selectorName),
-
-      price:
-        selectorPrice.length > 0 &&
-        html.includes(selectorPrice),
-
-      image:
-        selectorImage.length > 0 &&
-        html.includes(selectorImage)
-    };
-
-    return c.json({
-      success: true,
-      message: '✅ Connection successful',
-      details: {
-        mode: 'SCRAPING',
-        status: response.status,
-        html_size: html.length,
-        test_url: testUrl,
-        selectors_found: selectorsFound
-      }
-    });
-
-  } catch (err) {
-    console.error('❌ Test provider error:', err);
-
-    return c.json({
-      success: false,
-      message: 'Test failed: ' + err.message
-    }, 500);
   }
-});
+);
+
+
+
+// =====================================================
+// 9. حذف / تعطيل منصة
+//
+// إذا كانت المنصة مرتبطة بطلبات:
+// تعطيل فقط.
+//
+// إذا لم تكن مرتبطة بطلبات:
+// حذف كامل.
+// =====================================================
+
+app.delete(
+  '/api/admin/marketing/providers/:id',
+  verifyAdmin,
+  async (c) => {
+
+    try {
+
+      const providerId =
+        c.req.param('id');
+
+
+      if (
+        !providerId ||
+        !/^\d+$/.test(
+          String(providerId)
+        )
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid provider ID'
+
+        }, 400);
+
+      }
+
+
+      const ordersCheck =
+        await pool.query(
+
+          `
+
+            SELECT
+              COUNT(*) AS count
+
+            FROM marketing_orders
+
+            WHERE provider_id = $1
+
+          `,
+
+          [
+            providerId
+          ]
+
+        );
+
+
+      const ordersCount =
+        parseInt(
+          ordersCheck.rows[0].count,
+          10
+        );
+
+
+      // ==================================================
+      // توجد طلبات مرتبطة
+      // ==================================================
+
+      if (
+        ordersCount > 0
+      ) {
+
+        await pool.query(`
+
+          UPDATE marketing_providers
+
+          SET
+            is_active = false
+
+          WHERE id = $1
+
+        `, [
+          providerId
+        ]);
+
+
+        return c.json({
+
+          success: true,
+
+          message:
+            `⚠️ Provider disabled (has ${ordersCount} orders). Use "Activate" to restore.`
+
+        });
+
+      }
+
+
+      // ==================================================
+      // لا توجد طلبات
+      // ==================================================
+
+      await pool.query(`
+
+        DELETE FROM marketing_providers
+
+        WHERE id = $1
+
+      `, [
+        providerId
+      ]);
+
+
+      return c.json({
+
+        success: true,
+
+        message:
+          '✅ Provider deleted'
+
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        '❌ DELETE /api/admin/marketing/providers/:id:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Failed to delete provider'
+
+      }, 500);
+
+    }
+
+  }
+);
+
+
+
+// =====================================================
+// 10. اختبار الاتصال بالمنصة
+//
+// MANUAL:
+// اختبار Base URL فقط.
+//
+// API:
+// اختبار API Endpoint.
+//
+// لا يوجد Scraping في النظام الجديد.
+// =====================================================
+
+app.post(
+  '/api/admin/marketing/providers/:id/test',
+  verifyAdmin,
+  async (c) => {
+
+    try {
+
+      const providerId =
+        c.req.param('id');
+
+
+      const body =
+        await c.req
+          .json()
+          .catch(
+            () => ({})
+          );
+
+
+      const providerRes =
+        await pool.query(`
+
+          SELECT
+
+            id,
+            name,
+            base_url,
+            mode,
+
+            api_endpoint,
+            api_search_path
+
+          FROM marketing_providers
+
+          WHERE id = $1
+
+        `, [
+          providerId
+        ]);
+
+
+      if (
+        providerRes.rows.length === 0
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Provider not found'
+
+        }, 404);
+
+      }
+
+
+      const provider =
+        providerRes.rows[0];
+
+
+      const normalizedMode =
+        String(
+          provider.mode || 'MANUAL'
+        )
+          .trim()
+          .toUpperCase();
+
+
+      // ==================================================
+      // API
+      // ==================================================
+
+      if (
+        normalizedMode === 'API'
+      ) {
+
+        if (
+          !provider.api_endpoint
+        ) {
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'API Endpoint is not configured'
+
+          }, 400);
+
+        }
+
+
+        let apiUrl;
+
+        try {
+
+          apiUrl =
+            new URL(
+              provider.api_endpoint
+            );
+
+
+          if (
+            ![
+              'http:',
+              'https:'
+            ].includes(
+              apiUrl.protocol
+            )
+          ) {
+
+            throw new Error(
+              'Invalid protocol'
+            );
+
+          }
+
+        } catch {
+
+          return c.json({
+
+            success: false,
+
+            message:
+              'Invalid API Endpoint'
+
+          }, 400);
+
+        }
+
+
+        const response =
+          await fetch(
+            apiUrl.href,
+            {
+              headers: {
+
+                'User-Agent':
+                  'Taskora-Provider-Test/1.0',
+
+                'Accept':
+                  'application/json,text/plain,*/*'
+
+              }
+            }
+          );
+
+
+        return c.json({
+
+          success:
+            response.ok,
+
+          message:
+            response.ok
+
+              ? '✅ API Endpoint is reachable'
+
+              : `❌ API connection failed: HTTP ${response.status}`,
+
+          details: {
+
+            mode:
+              'API',
+
+            status:
+              response.status,
+
+            endpoint:
+              apiUrl.href
+
+          }
+
+        });
+
+      }
+
+
+      // ==================================================
+      // MANUAL
+      // ==================================================
+
+      let testUrl;
+
+
+      try {
+
+        const baseUrl =
+          new URL(
+            provider.base_url
+          );
+
+
+        testUrl =
+          baseUrl.href;
+
+
+      } catch {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            'Invalid provider Base URL'
+
+        }, 400);
+
+      }
+
+
+      const response =
+        await fetch(
+          testUrl,
+          {
+            headers: {
+
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+
+              'Accept':
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+
+              'Accept-Language':
+                'en-US,en;q=0.8'
+
+            }
+
+          }
+        );
+
+
+      if (
+        !response.ok
+      ) {
+
+        return c.json({
+
+          success: false,
+
+          message:
+            `❌ Connection failed: HTTP ${response.status}`
+
+        });
+
+      }
+
+
+      return c.json({
+
+        success: true,
+
+        message:
+          '✅ Store connection successful',
+
+        details: {
+
+          mode:
+            'MANUAL',
+
+          status:
+            response.status,
+
+          test_url:
+            testUrl
+
+        }
+
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        '❌ Test provider error:',
+        err
+      );
+
+
+      return c.json({
+
+        success: false,
+
+        message:
+          'Test failed: ' +
+          err.message
+
+      }, 500);
+
+    }
+
+  }
+);
+
+
 
 
 
