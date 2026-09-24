@@ -1,401 +1,1940 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
+
 <head>
+
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>إدارة منصات التسويق</title>
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>
+    إدارة منصات التسويق
+  </title>
+
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f8; color: #222; }
-    .container { width: 100%; max-width: 1000px; margin: 0 auto; padding: 20px; }
-    .header { background: #ffffff; border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { margin: 0; font-size: 22px; color: #2563eb; }
-    .card { background: #ffffff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); margin-bottom: 20px; }
-    
-    .btn { border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-success { background: #16a34a; color: white; }
-    .btn-danger { background: #dc2626; color: white; }
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
 
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
-    th { background: #f8fafc; color: #64748b; font-weight: 600; }
-    tr:hover { background: #f8fafc; }
+    * {
+      box-sizing: border-box;
+    }
 
-    .status-active { background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }
-    .status-inactive { background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }
+    body {
+      margin: 0;
+      font-family:
+        'Segoe UI',
+        Tahoma,
+        Geneva,
+        Verdana,
+        sans-serif;
 
-    /* Modal Styles */
-    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 20px; }
-    .modal.active { display: flex; }
-    .modal-content { background: #ffffff; border-radius: 14px; padding: 25px; width: 100%; max-width: 600px; max-height: 90vh; overflow-y: auto; }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .modal-header h2 { margin: 0; font-size: 20px; color: #2563eb; }
-    
-    .field { margin-bottom: 15px; }
-    .field label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 14px; color: #334155; }
-    .field input, .field select { width: 100%; padding: 10px; border: 1px solid #d5d9de; border-radius: 8px; font-size: 14px; outline: none; }
-    .field input:focus, .field select:focus { border-color: #2563eb; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    
-    .status { margin-top: 15px; padding: 12px; border-radius: 8px; display: none; font-size: 14px; text-align: center; }
-    .status.success { display: block; background: #dcfce7; color: #166534; }
-    .status.error { display: block; background: #fee2e2; color: #991b1b; }
-    .loading { text-align: center; padding: 40px; color: #666; }
+      background: #f4f6f8;
+      color: #222;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+
+      box-shadow:
+        0 2px 10px rgba(0,0,0,0.08);
+
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+      color: #2563eb;
+    }
+
+    .header p {
+      margin: 5px 0 0;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 20px;
+
+      box-shadow:
+        0 2px 10px rgba(0,0,0,0.08);
+
+      margin-bottom: 20px;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+
+      font-size: 14px;
+      font-weight: bold;
+
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1d4ed8;
+    }
+
+    .btn-success {
+      background: #16a34a;
+      color: white;
+    }
+
+    .btn-danger {
+      background: #dc2626;
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      text-align: right;
+
+      border-bottom:
+        1px solid #e5e7eb;
+
+      font-size: 14px;
+    }
+
+    th {
+      background: #f8fafc;
+      color: #64748b;
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background: #f8fafc;
+    }
+
+    .status-active {
+      background: #dcfce7;
+      color: #166534;
+
+      padding: 4px 10px;
+      border-radius: 20px;
+
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .status-inactive {
+      background: #fee2e2;
+      color: #991b1b;
+
+      padding: 4px 10px;
+      border-radius: 20px;
+
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .modal {
+      display: none;
+
+      position: fixed;
+      top: 0;
+      left: 0;
+
+      width: 100%;
+      height: 100%;
+
+      background:
+        rgba(0,0,0,0.5);
+
+      z-index: 1000;
+
+      justify-content: center;
+      align-items: center;
+
+      padding: 20px;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: #ffffff;
+
+      border-radius: 14px;
+      padding: 25px;
+
+      width: 100%;
+      max-width: 650px;
+
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      margin-bottom: 20px;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 20px;
+      color: #2563eb;
+    }
+
+    .field {
+      margin-bottom: 15px;
+    }
+
+    .field label {
+      display: block;
+
+      font-weight: bold;
+
+      margin-bottom: 6px;
+
+      font-size: 14px;
+      color: #334155;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+
+      padding: 10px;
+
+      border:
+        1px solid #d5d9de;
+
+      border-radius: 8px;
+
+      font-size: 14px;
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: #2563eb;
+    }
+
+    .form-row {
+      display: grid;
+
+      grid-template-columns:
+        1fr 1fr;
+
+      gap: 15px;
+    }
+
+    .status {
+      margin-top: 15px;
+
+      padding: 12px;
+
+      border-radius: 8px;
+
+      display: none;
+
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .status.success {
+      display: block;
+
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status.error {
+      display: block;
+
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .info-box {
+      background: #eff6ff;
+
+      border:
+        1px solid #bfdbfe;
+
+      color: #1e40af;
+
+      border-radius: 8px;
+
+      padding: 12px;
+
+      margin-bottom: 15px;
+
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .section-box {
+      background: #f8fafc;
+
+      padding: 15px;
+
+      border-radius: 8px;
+
+      border:
+        1px solid #e5e7eb;
+
+      margin-bottom: 15px;
+    }
+
+    .section-title {
+      font-weight: bold;
+
+      color: #334155;
+
+      margin-bottom: 12px;
+    }
 
     @media (max-width: 600px) {
-      .form-row { grid-template-columns: 1fr; }
-      .header { flex-direction: column; gap: 15px; text-align: center; }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+      }
+
     }
+
   </style>
+
 </head>
+
+
 <body>
 
-  <div class="container">
-    <div class="header">
-      <div>
-        <h1>🏪 إدارة منصات التسويق (Providers)</h1>
-        <p style="margin: 5px 0 0; color: #666; font-size: 14px;">إضافة وتعديل منصات الجلب الحي (Scraping / API)</p>
-      </div>
-      <button class="btn btn-primary" onclick="openModal()">➕ إضافة منصة جديدة</button>
+
+<div class="container">
+
+
+  <!-- HEADER -->
+
+  <div class="header">
+
+    <div>
+
+      <h1>
+        🏪 إدارة منصات التسويق
+      </h1>
+
+      <p>
+        إضافة وتعديل منصات الجلب الحي Scraping / API
+      </p>
+
     </div>
 
-    <div class="card">
-      <div id="loading" class="loading">جاري تحميل البيانات...</div>
-      <div id="status" class="status"></div>
-      
-      <div id="tableContainer" style="display: none; overflow-x: auto;">
-        <table>
-          <thead>
-            <tr>
-              <th>الاسم</th>
-              <th>الدولة</th>
-              <th>الوضع (Mode)</th>
-              <th>هامش الأدمن</th>
-              <th>ربح المستخدم</th>
-              <th>الحالة</th>
-              <th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody id="providersTableBody"></tbody>
-        </table>
-      </div>
-    </div>
+
+    <button
+      class="btn btn-primary"
+      onclick="openModal()"
+    >
+
+      ➕ إضافة منصة جديدة
+
+    </button>
+
   </div>
 
-  <!-- Modal Form -->
-  <div id="providerModal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 id="modalTitle">إضافة منصة جديدة</h2>
-        <button class="btn btn-sm btn-danger" onclick="closeModal()">✕</button>
-      </div>
-      
-      <form id="providerForm">
-        <input type="hidden" id="providerId">
-        
-        <div class="form-row">
-          <div class="field">
-            <label>اسم المنصة *</label>
-            <input type="text" id="name" required placeholder="مثال: Vendo السعودية">
-          </div>
-          <div class="field">
-            <label>رمز الدولة *</label>
-            <input type="text" id="country_code" required maxlength="2" placeholder="SA, EG, AE" style="text-transform: uppercase;">
-          </div>
-        </div>
 
-        <div class="field">
-    <label>الرابط الأساسي للموقع (Base URL) *</label>
-    <input type="text" id="base_url" required placeholder="https://vendosaudi.dukan.shop/">
-    <small style="color: #64748b; font-size: 12px;">
-        ⚠️ ضع الرابط الأساسي للموقع أو الصفحة الرئيسية للمنتجات. يستخدمه النظام كنقطة بداية للبحث حسب طريقة الجلب المتاحة.
-    </small>
+  <!-- MAIN CARD -->
+
+  <div class="card">
+
+    <div
+      id="loading"
+      class="loading"
+    >
+
+      جاري تحميل البيانات...
+
+    </div>
+
+
+    <div
+      id="status"
+      class="status"
+    ></div>
+
+
+    <div
+      id="tableContainer"
+      style="
+        display:none;
+        overflow-x:auto;
+      "
+    >
+
+      <table>
+
+        <thead>
+
+          <tr>
+
+            <th>
+              الاسم
+            </th>
+
+            <th>
+              الدولة
+            </th>
+
+            <th>
+              الوضع
+            </th>
+
+            <th>
+              هامش التسعير
+            </th>
+
+            <th>
+              نسبة إعداد الربح
+            </th>
+
+            <th>
+              الشحن
+            </th>
+
+            <th>
+              الحالة
+            </th>
+
+            <th>
+              الإجراءات
+            </th>
+
+          </tr>
+
+        </thead>
+
+
+        <tbody
+          id="providersTableBody"
+        ></tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
 </div>
 
+
+<!-- MODAL -->
+
+<div
+  id="providerModal"
+  class="modal"
+>
+
+  <div class="modal-content">
+
+
+    <div class="modal-header">
+
+      <h2 id="modalTitle">
+        إضافة منصة جديدة
+      </h2>
+
+      <button
+        class="btn btn-sm btn-danger"
+        onclick="closeModal()"
+      >
+
+        ✕
+
+      </button>
+
+    </div>
+
+
+    <div class="info-box">
+
+      <strong>تنبيه:</strong>
+
+      ربح المستخدم الفعلي في الطلب اليدوي الجديد
+      لا يتم إدخاله من هذه الصفحة.
+
+      عند وصول الطلب إلى
+      <strong>DELIVERED</strong>
+      يحسب السيرفر ربح المستخدم تلقائيًا بنسبة
+      <strong>5%</strong>
+      من سعر المنتج المعتمد للطلب.
+
+      وإذا كان هناك مُحيل، يتم احتساب
+      <strong>20%</strong>
+      من ربح المستخدم تلقائيًا.
+
+    </div>
+
+
+    <form id="providerForm">
+
+
+      <input
+        type="hidden"
+        id="providerId"
+      >
+
+
+      <!-- BASIC -->
+
+      <div class="section-box">
+
+        <div class="section-title">
+          بيانات المنصة
+        </div>
+
+
         <div class="form-row">
+
+
           <div class="field">
-            <label>وضع الجلب (Mode)</label>
-            <select id="mode" onchange="toggleApiFields()">
-              <option value="SCRAPING">🕷️ Scraping (جلب من HTML)</option>
-              <option value="API">🔌 API (عند توفر الـ API)</option>
-            </select>
+
+            <label>
+              اسم المنصة *
+            </label>
+
+            <input
+              type="text"
+              id="name"
+              required
+              placeholder="مثال: Vendo السعودية"
+            >
+
           </div>
+
+
           <div class="field">
-            <label>حالة المنصة</label>
+
+            <label>
+              رمز الدولة *
+            </label>
+
+            <input
+              type="text"
+              id="country_code"
+              required
+              maxlength="2"
+              placeholder="SA, EG, AE"
+              style="text-transform:uppercase;"
+            >
+
+          </div>
+
+
+        </div>
+
+
+        <div class="field">
+
+          <label>
+            الرابط الأساسي للموقع *
+          </label>
+
+          <input
+            type="text"
+            id="base_url"
+            required
+            placeholder="https://example.com/"
+          >
+
+          <small
+            style="
+              color:#64748b;
+              font-size:12px;
+            "
+          >
+
+            يستخدمه النظام كنقطة بداية للجلب والبحث.
+
+          </small>
+
+        </div>
+
+
+        <div class="form-row">
+
+
+          <div class="field">
+
+            <label>
+              وضع الجلب
+            </label>
+
+            <select
+              id="mode"
+              onchange="toggleApiFields()"
+            >
+
+              <option value="SCRAPING">
+                🕷️ Scraping
+              </option>
+
+              <option value="API">
+                🔌 API
+              </option>
+
+            </select>
+
+          </div>
+
+
+          <div class="field">
+
+            <label>
+              حالة المنصة
+            </label>
+
             <select id="is_active">
-              <option value="true">✅ نشطة</option>
-              <option value="false">⛔ معطلة</option>
+
+              <option value="true">
+                ✅ نشطة
+              </option>
+
+              <option value="false">
+                ⛔ معطلة
+              </option>
+
             </select>
+
           </div>
+
+
         </div>
 
-        <!-- حقول Scraping -->
-        <div id="scrapingFields">
-          <div class="form-row">
-            <div class="field">
-              <label>محدد اسم المنتج (CSS Selector)</label>
-              <input type="text" id="selector_name" value=".product-title" placeholder=".product-title">
-            </div>
-            <div class="field">
-              <label>محدد السعر (CSS Selector)</label>
-              <input type="text" id="selector_price" value=".price" placeholder=".price">
-            </div>
-          </div>
-          <div class="field">
-            <label>محدد الصورة (CSS Selector)</label>
-            <input type="text" id="selector_image" value=".product-image img" placeholder=".product-image img">
-          </div>
+      </div>
+
+
+      <!-- SCRAPING -->
+
+      <div
+        id="scrapingFields"
+        class="section-box"
+      >
+
+        <div class="section-title">
+          إعدادات Scraping
         </div>
 
-        <!-- حقول API -->
-        <div id="apiFields" style="display: none; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+
+        <div class="form-row">
+
+
           <div class="field">
-            <label>رابط الـ API الأساسي (Endpoint)</label>
-            <input type="text" id="api_endpoint" placeholder="https://api.example.com/v1">
+
+            <label>
+              محدد اسم المنتج
+            </label>
+
+            <input
+              type="text"
+              id="selector_name"
+              value=".product-title"
+              placeholder=".product-title"
+            >
+
           </div>
+
+
           <div class="field">
-  <label>مفتاح الـ API (API Key)</label>
-  <input
-    type="password"
-    id="api_key"
-    placeholder="اتركه فارغاً للإبقاء على المفتاح الحالي"
-  >
-</div>
-          <div class="form-row">
-            <div class="field">
-              <label>مسار البحث (Search Path)</label>
-              <input type="text" id="api_search_path" placeholder="/products?q={query}">
-            </div>
-            <div class="field">
-              <label>مسار المنتج (Product Path)</label>
-              <input type="text" id="api_product_path" placeholder="/products/{id}">
-            </div>
+
+            <label>
+              محدد السعر
+            </label>
+
+            <input
+              type="text"
+              id="selector_price"
+              value=".price"
+              placeholder=".price"
+            >
+
           </div>
+
+
         </div>
 
-        <div class="form-row" style="margin-top: 15px;">
-          <div class="field">
-            <label>نسبة هامش الأدمن (%)</label>
-            <input type="number" id="base_margin_percentage" value="20" min="0" max="100" step="0.1">
-          </div>
-          <div class="field">
-            <label>نسبة ربح المستخدم من الهامش (%)</label>
-            <input type="number" id="user_profit_percentage" value="40" min="0" max="100" step="0.1">
-          </div>
-        </div>
+
         <div class="field">
-          <label>تكلفة الشحن الثابتة ($)</label>
-          <input type="number" id="fixed_shipping_cost" value="0" min="0" step="0.01">
+
+          <label>
+            محدد الصورة
+          </label>
+
+          <input
+            type="text"
+            id="selector_image"
+            value=".product-image img"
+            placeholder=".product-image img"
+          >
+
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-          <button type="submit" class="btn btn-success" style="flex: 1;" id="saveBtn">💾 حفظ</button>
-          <button type="button" class="btn" style="flex: 1; background: #e5e7eb;" onclick="closeModal()">إلغاء</button>
+      </div>
+
+
+      <!-- API -->
+
+      <div
+        id="apiFields"
+        class="section-box"
+        style="display:none;"
+      >
+
+        <div class="section-title">
+          إعدادات API
         </div>
-      </form>
-    </div>
+
+
+        <div class="field">
+
+          <label>
+            رابط API الأساسي
+          </label>
+
+          <input
+            type="text"
+            id="api_endpoint"
+            placeholder="https://api.example.com/v1"
+          >
+
+        </div>
+
+
+        <div class="field">
+
+          <label>
+            مفتاح API
+          </label>
+
+          <input
+            type="password"
+            id="api_key"
+            placeholder="اتركه فارغًا للإبقاء على المفتاح الحالي"
+          >
+
+        </div>
+
+
+        <div class="form-row">
+
+
+          <div class="field">
+
+            <label>
+              مسار البحث
+            </label>
+
+            <input
+              type="text"
+              id="api_search_path"
+              placeholder="/products?q={query}"
+            >
+
+          </div>
+
+
+          <div class="field">
+
+            <label>
+              مسار المنتج
+            </label>
+
+            <input
+              type="text"
+              id="api_product_path"
+              placeholder="/products/{id}"
+            >
+
+          </div>
+
+
+        </div>
+
+      </div>
+
+
+      <!-- PRICING -->
+
+      <div class="section-box">
+
+        <div class="section-title">
+          إعدادات تسعير المنصة
+        </div>
+
+
+        <div class="form-row">
+
+
+          <div class="field">
+
+            <label>
+              نسبة هامش التسعير (%)
+            </label>
+
+            <input
+              type="number"
+              id="base_margin_percentage"
+              value="20"
+              min="0"
+              max="100"
+              step="0.1"
+            >
+
+            <small
+              style="
+                color:#64748b;
+                font-size:11px;
+              "
+            >
+
+              إعداد تسعير العرض للمنتجات القادمة من المنصة.
+
+            </small>
+
+          </div>
+
+
+          <div class="field">
+
+            <label>
+              نسبة ربح المستخدم من الهامش (%)
+            </label>
+
+            <input
+              type="number"
+              id="user_profit_percentage"
+              value="40"
+              min="0"
+              max="100"
+              step="0.1"
+            >
+
+            <small
+              style="
+                color:#64748b;
+                font-size:11px;
+              "
+            >
+
+              هذا الحقل جزء من إعدادات المنصة الحالية.
+
+              الربح النهائي للطلب اليدوي عند
+              DELIVERED
+              يحسب وفق نظام الـ5% الجديد.
+
+            </small>
+
+          </div>
+
+
+        </div>
+
+
+        <div class="field">
+
+          <label>
+            تكلفة الشحن الثابتة ($)
+          </label>
+
+          <input
+            type="number"
+            id="fixed_shipping_cost"
+            value="0"
+            min="0"
+            step="0.01"
+          >
+
+        </div>
+
+      </div>
+
+
+      <!-- BUTTONS -->
+
+      <div
+        style="
+          display:flex;
+          gap:10px;
+          margin-top:20px;
+        "
+      >
+
+        <button
+          type="submit"
+          class="btn btn-success"
+          style="flex:1;"
+          id="saveBtn"
+        >
+
+          💾 حفظ
+
+        </button>
+
+
+        <button
+          type="button"
+          class="btn"
+          style="
+            flex:1;
+            background:#e5e7eb;
+          "
+          onclick="closeModal()"
+        >
+
+          إلغاء
+
+        </button>
+
+      </div>
+
+
+    </form>
+
   </div>
 
-  <script>
-    const API = 'https://taskora.taskora.workers.dev';
-    const urlParams = new URLSearchParams(window.location.search);
-    const adminId = urlParams.get('admin_id');
+</div>
 
-    if (!adminId) {
-      document.getElementById('loading').style.display = 'none';
-      showStatus('❌ Access denied: admin_id is missing in URL. Example: ?admin_id=7171208519', 'error');
+
+<script>
+
+
+const API =
+  'https://taskora.taskora.workers.dev';
+
+
+const urlParams =
+  new URLSearchParams(
+    window.location.search
+  );
+
+
+const adminId =
+  urlParams.get('admin_id');
+
+
+/*
+ * التحقق من Admin ID
+ */
+
+if (!adminId) {
+
+  document.getElementById(
+    'loading'
+  ).style.display = 'none';
+
+
+  showStatus(
+    '❌ Access denied: admin_id is missing in URL. Example: ?admin_id=7171208519',
+    'error'
+  );
+
+} else {
+
+  loadProviders();
+
+}
+
+
+/*
+ * رسائل الحالة
+ */
+
+function showStatus(
+  message,
+  type
+) {
+
+  const statusBox =
+    document.getElementById(
+      'status'
+    );
+
+
+  statusBox.textContent =
+    message;
+
+
+  statusBox.className =
+    'status ' + type;
+
+
+  setTimeout(() => {
+
+    statusBox.className =
+      'status';
+
+  }, 4000);
+
+}
+
+
+/*
+ * تحميل المنصات
+ */
+
+async function loadProviders() {
+
+  try {
+
+    const response =
+      await fetch(
+
+        `${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`
+
+      );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
+
+      throw new Error(
+        data.message ||
+        'فشل تحميل البيانات'
+      );
+
+    }
+
+
+    const providers =
+      Array.isArray(data.data)
+        ? data.data
+        : [];
+
+
+    const tbody =
+      document.getElementById(
+        'providersTableBody'
+      );
+
+
+    tbody.innerHTML = '';
+
+
+    if (
+      providers.length === 0
+    ) {
+
+      tbody.innerHTML = `
+
+        <tr>
+
+          <td
+            colspan="8"
+            style="
+              text-align:center;
+              padding:20px;
+              color:#666;
+            "
+          >
+
+            لا توجد منصات مضافة حاليًا
+
+          </td>
+
+        </tr>
+
+      `;
+
     } else {
-      loadProviders();
-    }
 
-    function showStatus(message, type) {
-      const statusBox = document.getElementById('status');
-      statusBox.textContent = message;
-      statusBox.className = 'status ' + type;
-      setTimeout(() => { statusBox.className = 'status'; }, 4000);
-    }
 
-    async function loadProviders() {
-      try {
-        const response = await fetch(`${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`);
-        const data = await response.json();
+      providers.forEach(
+        p => {
 
-        if (!response.ok || !data.success) {
-          throw new Error(data.message || 'فشل تحميل البيانات');
-        }
+          const statusBadge =
+            p.is_active
 
-        const tbody = document.getElementById('providersTableBody');
-        tbody.innerHTML = '';
+            ? `
+              <span class="status-active">
+                نشطة
+              </span>
+            `
 
-        if (data.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px; color: #666;">لا توجد منصات مضافة حالياً</td></tr>';
-        } else {
-          data.data.forEach(p => {
-            const statusBadge = p.is_active 
-              ? '<span class="status-active">نشطة</span>' 
-              : '<span class="status-inactive">معطلة</span>';
-            
-            const modeBadge = p.mode === 'API' ? '🔌 API' : '🕷️ Scraping';
-
-            tbody.innerHTML += `
-              <tr>
-                <td><strong>${p.name}</strong></td>
-                <td>${p.country_code}</td>
-                <td>${modeBadge}</td>
-                <td>${parseFloat(p.base_margin_percentage).toFixed(1)}%</td>
-                <td>${parseFloat(p.user_profit_percentage).toFixed(1)}%</td>
-                <td>${statusBadge}</td>
-                <td>
-                  <button class="btn btn-sm btn-primary" onclick="editProvider(${p.id})">تعديل</button>
-                  <button class="btn btn-sm btn-danger" onclick="deleteProvider(${p.id})">حذف</button>
-                </td>
-              </tr>
+            : `
+              <span class="status-inactive">
+                معطلة
+              </span>
             `;
-          });
+
+
+          const modeBadge =
+            p.mode === 'API'
+
+            ? '🔌 API'
+
+            : '🕷️ Scraping';
+
+
+          const margin =
+            parseFloat(
+              p.base_margin_percentage
+            );
+
+
+          const userPercentage =
+            parseFloat(
+              p.user_profit_percentage
+            );
+
+
+          const shipping =
+            parseFloat(
+              p.fixed_shipping_cost
+            );
+
+
+          tbody.innerHTML += `
+
+            <tr>
+
+              <td>
+
+                <strong>
+                  ${escapeHtml(
+                    p.name
+                  )}
+                </strong>
+
+              </td>
+
+
+              <td>
+
+                ${escapeHtml(
+                  p.country_code
+                )}
+
+              </td>
+
+
+              <td>
+                ${modeBadge}
+              </td>
+
+
+              <td>
+
+                ${
+                  Number.isFinite(margin)
+                    ? margin.toFixed(1)
+                    : '0.0'
+                }%
+
+              </td>
+
+
+              <td>
+
+                ${
+                  Number.isFinite(
+                    userPercentage
+                  )
+                    ? userPercentage.toFixed(1)
+                    : '0.0'
+                }%
+
+              </td>
+
+
+              <td>
+
+                $${Number.isFinite(shipping)
+                  ? shipping.toFixed(2)
+                  : '0.00'}
+
+              </td>
+
+
+              <td>
+
+                ${statusBadge}
+
+              </td>
+
+
+              <td>
+
+                <button
+                  class="btn btn-sm btn-primary"
+                  onclick="editProvider(${Number(p.id)})"
+                >
+
+                  تعديل
+
+                </button>
+
+
+                <button
+                  class="btn btn-sm btn-danger"
+                  onclick="deleteProvider(${Number(p.id)})"
+                >
+
+                  حذف
+
+                </button>
+
+              </td>
+
+            </tr>
+
+          `;
+
         }
+      );
 
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('tableContainer').style.display = 'block';
-
-      } catch (error) {
-        console.error(error);
-        document.getElementById('loading').style.display = 'none';
-        showStatus('❌ ' + error.message, 'error');
-      }
     }
 
-    function toggleApiFields() {
-      const mode = document.getElementById('mode').value;
-      document.getElementById('scrapingFields').style.display = mode === 'SCRAPING' ? 'block' : 'none';
-      document.getElementById('apiFields').style.display = mode === 'API' ? 'block' : 'none';
+
+    document.getElementById(
+      'loading'
+    ).style.display = 'none';
+
+
+    document.getElementById(
+      'tableContainer'
+    ).style.display = 'block';
+
+
+  } catch (error) {
+
+    console.error(error);
+
+
+    document.getElementById(
+      'loading'
+    ).style.display = 'none';
+
+
+    showStatus(
+      '❌ ' + error.message,
+      'error'
+    );
+
+  }
+
+}
+
+
+/*
+ * حماية HTML
+ */
+
+function escapeHtml(value) {
+
+  return String(value ?? '')
+
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+}
+
+
+/*
+ * إظهار / إخفاء API
+ */
+
+function toggleApiFields() {
+
+  const mode =
+    document.getElementById(
+      'mode'
+    ).value;
+
+
+  document.getElementById(
+    'scrapingFields'
+  ).style.display =
+    mode === 'SCRAPING'
+      ? 'block'
+      : 'none';
+
+
+  document.getElementById(
+    'apiFields'
+  ).style.display =
+    mode === 'API'
+      ? 'block'
+      : 'none';
+
+}
+
+
+/*
+ * فتح إضافة منصة
+ */
+
+function openModal() {
+
+  document.getElementById(
+    'providerForm'
+  ).reset();
+
+
+  document.getElementById(
+    'providerId'
+  ).value = '';
+
+
+  document.getElementById(
+    'modalTitle'
+  ).textContent =
+    'إضافة منصة جديدة';
+
+
+  document.getElementById(
+    'mode'
+  ).value =
+    'SCRAPING';
+
+
+  document.getElementById(
+    'is_active'
+  ).value =
+    'true';
+
+
+  document.getElementById(
+    'base_margin_percentage'
+  ).value =
+    '20';
+
+
+  document.getElementById(
+    'user_profit_percentage'
+  ).value =
+    '40';
+
+
+  document.getElementById(
+    'fixed_shipping_cost'
+  ).value =
+    '0';
+
+
+  toggleApiFields();
+
+
+  document.getElementById(
+    'providerModal'
+  ).classList.add(
+    'active'
+  );
+
+}
+
+
+/*
+ * إغلاق النافذة
+ */
+
+function closeModal() {
+
+  document.getElementById(
+    'providerModal'
+  ).classList.remove(
+    'active'
+  );
+
+}
+
+
+/*
+ * تعديل منصة
+ */
+
+async function editProvider(id) {
+
+  try {
+
+    const response =
+      await fetch(
+
+        `${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`
+
+      );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
+
+      throw new Error(
+        data.message ||
+        'فشل تحميل بيانات المنصات'
+      );
+
     }
 
-    function openModal() {
-      document.getElementById('providerForm').reset();
-      document.getElementById('providerId').value = '';
-      document.getElementById('modalTitle').textContent = 'إضافة منصة جديدة';
-      document.getElementById('mode').value = 'SCRAPING';
-      toggleApiFields();
-      document.getElementById('providerModal').classList.add('active');
+
+    const p =
+      data.data.find(
+        item =>
+          Number(item.id) ===
+          Number(id)
+      );
+
+
+    if (!p) {
+
+      showStatus(
+        '❌ لم يتم العثور على المنصة',
+        'error'
+      );
+
+      return;
+
     }
 
-    function closeModal() {
-      document.getElementById('providerModal').classList.remove('active');
-    }
 
-    async function editProvider(id) {
-      try {
-        const response = await fetch(`${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`);
-        const data = await response.json();
-        const p = data.data.find(item => item.id === id);
-        if (!p) return;
+    document.getElementById(
+      'providerId'
+    ).value =
+      p.id;
 
-        document.getElementById('providerId').value = p.id;
-        document.getElementById('name').value = p.name;
-        document.getElementById('country_code').value = p.country_code;
-        document.getElementById('base_url').value = p.base_url;
-        document.getElementById('mode').value = p.mode || 'SCRAPING';
-        document.getElementById('is_active').value = p.is_active.toString();
-        document.getElementById('selector_name').value = p.selector_name || '.product-title';
-        document.getElementById('selector_price').value = p.selector_price || '.price';
-        document.getElementById('selector_image').value = p.selector_image || '.product-image img';
-        document.getElementById('api_endpoint').value = p.api_endpoint || '';
-        document.getElementById('api_key').value = '';
-        document.getElementById('api_search_path').value = p.api_search_path || '';
-        document.getElementById('api_product_path').value = p.api_product_path || '';
-        document.getElementById('base_margin_percentage').value = p.base_margin_percentage;
-        document.getElementById('user_profit_percentage').value = p.user_profit_percentage;
-        document.getElementById('fixed_shipping_cost').value = p.fixed_shipping_cost;
 
-        document.getElementById('modalTitle').textContent = 'تعديل المنصة';
-        toggleApiFields();
-        document.getElementById('providerModal').classList.add('active');
-      } catch (error) {
-        showStatus('❌ فشل تحميل بيانات المنصة', 'error');
-      }
-    }
+    document.getElementById(
+      'name'
+    ).value =
+      p.name || '';
 
-    document.getElementById('providerForm').addEventListener('submit', async function(e) {
+
+    document.getElementById(
+      'country_code'
+    ).value =
+      p.country_code || '';
+
+
+    document.getElementById(
+      'base_url'
+    ).value =
+      p.base_url || '';
+
+
+    document.getElementById(
+      'mode'
+    ).value =
+      p.mode || 'SCRAPING';
+
+
+    document.getElementById(
+      'is_active'
+    ).value =
+      String(
+        p.is_active
+      );
+
+
+    document.getElementById(
+      'selector_name'
+    ).value =
+      p.selector_name ||
+      '.product-title';
+
+
+    document.getElementById(
+      'selector_price'
+    ).value =
+      p.selector_price ||
+      '.price';
+
+
+    document.getElementById(
+      'selector_image'
+    ).value =
+      p.selector_image ||
+      '.product-image img';
+
+
+    document.getElementById(
+      'api_endpoint'
+    ).value =
+      p.api_endpoint || '';
+
+
+    /*
+     * لا نعرض مفتاح API الحالي.
+     */
+
+    document.getElementById(
+      'api_key'
+    ).value =
+      '';
+
+
+    document.getElementById(
+      'api_search_path'
+    ).value =
+      p.api_search_path || '';
+
+
+    document.getElementById(
+      'api_product_path'
+    ).value =
+      p.api_product_path || '';
+
+
+    document.getElementById(
+      'base_margin_percentage'
+    ).value =
+      p.base_margin_percentage ?? 20;
+
+
+    document.getElementById(
+      'user_profit_percentage'
+    ).value =
+      p.user_profit_percentage ?? 40;
+
+
+    document.getElementById(
+      'fixed_shipping_cost'
+    ).value =
+      p.fixed_shipping_cost ?? 0;
+
+
+    document.getElementById(
+      'modalTitle'
+    ).textContent =
+      'تعديل المنصة';
+
+
+    toggleApiFields();
+
+
+    document.getElementById(
+      'providerModal'
+    ).classList.add(
+      'active'
+    );
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      '❌ فشل تحميل بيانات المنصة',
+      'error'
+    );
+
+  }
+
+}
+
+
+/*
+ * حفظ المنصة
+ */
+
+document
+  .getElementById(
+    'providerForm'
+  )
+  .addEventListener(
+    'submit',
+    async function(e) {
+
       e.preventDefault();
-      const saveBtn = document.getElementById('saveBtn');
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'جاري الحفظ...';
 
-      const id = document.getElementById('providerId').value;
-      const mode = document.getElementById('mode').value;
+
+      const saveBtn =
+        document.getElementById(
+          'saveBtn'
+        );
+
+
+      saveBtn.disabled =
+        true;
+
+
+      saveBtn.textContent =
+        'جاري الحفظ...';
+
+
+      const id =
+        document.getElementById(
+          'providerId'
+        ).value;
+
+
+      const mode =
+        document.getElementById(
+          'mode'
+        ).value;
+
+
+      const apiKeyInput =
+        document.getElementById(
+          'api_key'
+        ).value.trim();
+
 
       const payload = {
-        name: document.getElementById('name').value,
-        country_code: document.getElementById('country_code').value.toUpperCase(),
-        base_url: document.getElementById('base_url').value,
-        mode: mode,
-        is_active: document.getElementById('is_active').value === 'true',
-        selector_name: document.getElementById('selector_name').value,
-        selector_price: document.getElementById('selector_price').value,
-        selector_image: document.getElementById('selector_image').value,
-        api_endpoint: mode === 'API' ? document.getElementById('api_endpoint').value : null,
-        api_key: mode === 'API'
-  ? (document.getElementById('api_key').value.trim() || null)
-  : null,
-        api_search_path: mode === 'API' ? document.getElementById('api_search_path').value : null,
-        api_product_path: mode === 'API' ? document.getElementById('api_product_path').value : null,
-        base_margin_percentage: parseFloat(document.getElementById('base_margin_percentage').value),
-        user_profit_percentage: parseFloat(document.getElementById('user_profit_percentage').value),
-        fixed_shipping_cost: parseFloat(document.getElementById('fixed_shipping_cost').value)
+
+        name:
+          document.getElementById(
+            'name'
+          ).value.trim(),
+
+
+        country_code:
+          document.getElementById(
+            'country_code'
+          ).value
+          .trim()
+          .toUpperCase(),
+
+
+        base_url:
+          document.getElementById(
+            'base_url'
+          ).value.trim(),
+
+
+        mode:
+          mode,
+
+
+        is_active:
+          document.getElementById(
+            'is_active'
+          ).value ===
+          'true',
+
+
+        selector_name:
+          document.getElementById(
+            'selector_name'
+          ).value.trim(),
+
+
+        selector_price:
+          document.getElementById(
+            'selector_price'
+          ).value.trim(),
+
+
+        selector_image:
+          document.getElementById(
+            'selector_image'
+          ).value.trim(),
+
+
+        api_endpoint:
+          mode === 'API'
+            ? document.getElementById(
+                'api_endpoint'
+              ).value.trim()
+            : null,
+
+
+        /*
+         * عند التعديل:
+         * إذا كان الحقل فارغًا نرسل null
+         * كما كان في العقد الحالي.
+         */
+
+        api_key:
+          mode === 'API'
+            ? (
+                apiKeyInput ||
+                null
+              )
+            : null,
+
+
+        api_search_path:
+          mode === 'API'
+            ? document.getElementById(
+                'api_search_path'
+              ).value.trim()
+            : null,
+
+
+        api_product_path:
+          mode === 'API'
+            ? document.getElementById(
+                'api_product_path'
+              ).value.trim()
+            : null,
+
+
+        base_margin_percentage:
+          parseFloat(
+            document.getElementById(
+              'base_margin_percentage'
+            ).value
+          ),
+
+
+        user_profit_percentage:
+          parseFloat(
+            document.getElementById(
+              'user_profit_percentage'
+            ).value
+          ),
+
+
+        fixed_shipping_cost:
+          parseFloat(
+            document.getElementById(
+              'fixed_shipping_cost'
+            ).value
+          )
+
       };
 
+
       try {
-        const url = id 
-          ? `${API}/api/admin/marketing/providers/${id}?admin_id=${encodeURIComponent(adminId)}`
-          : `${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`;
-        
-        const method = id ? 'PUT' : 'POST';
 
-        const response = await fetch(url, {
-          method: method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const url =
 
-        const data = await response.json();
+          id
 
-        if (response.ok && data.success) {
-          showStatus('✅ ' + data.message, 'success');
+            ? `${API}/api/admin/marketing/providers/${encodeURIComponent(id)}?admin_id=${encodeURIComponent(adminId)}`
+
+            : `${API}/api/admin/marketing/providers?admin_id=${encodeURIComponent(adminId)}`;
+
+
+        const method =
+          id
+            ? 'PUT'
+            : 'POST';
+
+
+        const response =
+          await fetch(
+            url,
+            {
+              method,
+
+              headers: {
+                'Content-Type':
+                  'application/json'
+              },
+
+              body:
+                JSON.stringify(
+                  payload
+                )
+            }
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (
+          response.ok &&
+          data.success
+        ) {
+
+          showStatus(
+            '✅ ' +
+            (
+              data.message ||
+              'تم حفظ المنصة بنجاح'
+            ),
+            'success'
+          );
+
+
           closeModal();
+
+
           loadProviders();
+
+
         } else {
-          showStatus('❌ ' + (data.message || 'فشل الحفظ'), 'error');
+
+          showStatus(
+            '❌ ' +
+            (
+              data.message ||
+              'فشل الحفظ'
+            ),
+            'error'
+          );
+
         }
+
+
       } catch (error) {
-        showStatus('❌ خطأ في الاتصال', 'error');
+
+        console.error(error);
+
+        showStatus(
+          '❌ خطأ في الاتصال بالسيرفر',
+          'error'
+        );
+
       } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = '💾 حفظ';
+
+        saveBtn.disabled =
+          false;
+
+        saveBtn.textContent =
+          '💾 حفظ';
+
       }
-    });
 
-    async function deleteProvider(id) {
-      if (!confirm('هل أنت متأكد من حذف/تعطيل هذه المنصة؟')) return;
-
-      try {
-        const response = await fetch(`${API}/api/admin/marketing/providers/${id}?admin_id=${encodeURIComponent(adminId)}`, {
-          method: 'DELETE'
-        });
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-          showStatus('✅ ' + data.message, 'success');
-          loadProviders();
-        } else {
-          showStatus('❌ ' + (data.message || 'فشل الحذف'), 'error');
-        }
-      } catch (error) {
-        showStatus('❌ خطأ في الاتصال', 'error');
-      }
     }
-  </script>
+  );
+
+
+/*
+ * حذف / تعطيل المنصة
+ */
+
+async function deleteProvider(id) {
+
+  const confirmed =
+    confirm(
+      'هل أنت متأكد من حذف/تعطيل هذه المنصة؟'
+    );
+
+
+  if (!confirmed) {
+    return;
+  }
+
+
+  try {
+
+    const response =
+      await fetch(
+
+        `${API}/api/admin/marketing/providers/${encodeURIComponent(id)}?admin_id=${encodeURIComponent(adminId)}`,
+
+        {
+          method: 'DELETE'
+        }
+
+      );
+
+
+    const data =
+      await response.json();
+
+
+    if (
+      response.ok &&
+      data.success
+    ) {
+
+      showStatus(
+        '✅ ' +
+        (
+          data.message ||
+          'تم حذف/تعطيل المنصة'
+        ),
+        'success'
+      );
+
+
+      loadProviders();
+
+
+    } else {
+
+      showStatus(
+        '❌ ' +
+        (
+          data.message ||
+          'فشل الحذف'
+        ),
+        'error'
+      );
+
+    }
+
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      '❌ خطأ في الاتصال',
+      'error'
+    );
+
+  }
+
+}
+
+</script>
+
 </body>
 </html>
