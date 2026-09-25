@@ -7694,8 +7694,43 @@ app.post(
 
     try {
 
+      // ==================================================
+      // 1. بداية الطلب
+      // ==================================================
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: REQUEST RECEIVED'
+      );
+
+
+      // ==================================================
+      // 2. الاتصال بقاعدة البيانات
+      // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: CONNECTING TO DATABASE'
+      );
+
       client =
         await pool.connect();
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: DATABASE CONNECTED'
+      );
+
+
+      // ==================================================
+      // 3. قراءة بيانات الطلب
+      // ==================================================
+
+      const body =
+        await c.req.json();
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: BODY RECEIVED',
+        body
+      );
+
 
       const {
         user_id,
@@ -7707,11 +7742,11 @@ app.post(
         customer_phone,
         customer_address,
         customer_city
-      } = await c.req.json();
+      } = body;
 
 
       // ==================================================
-      // التحقق من البيانات المطلوبة
+      // 4. التحقق من البيانات المطلوبة
       // ==================================================
 
       if (
@@ -7725,6 +7760,11 @@ app.post(
         !customer_address
       ) {
 
+        console.error(
+          '❌ MARKETING MANUAL ORDER: MISSING REQUIRED FIELDS',
+          body
+        );
+
         return c.json({
 
           success: false,
@@ -7737,14 +7777,36 @@ app.post(
       }
 
 
-      await client.query(
-        'BEGIN'
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: REQUIRED FIELDS OK'
       );
 
 
       // ==================================================
-      // التحقق من المستخدم
+      // 5. بدء Transaction
       // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: BEGIN TRANSACTION'
+      );
+
+      await client.query(
+        'BEGIN'
+      );
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: TRANSACTION STARTED'
+      );
+
+
+      // ==================================================
+      // 6. التحقق من المستخدم
+      // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: CHECKING USER',
+        user_id
+      );
 
       const userRes =
         await client.query(`
@@ -7761,6 +7823,12 @@ app.post(
         `, [
           user_id
         ]);
+
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: USER RESULT',
+        userRes.rows
+      );
 
 
       if (
@@ -7784,8 +7852,13 @@ app.post(
 
 
       // ==================================================
-      // جلب المتجر النشط
+      // 7. جلب المتجر النشط
       // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: CHECKING PROVIDER',
+        provider_id
+      );
 
       const providerRes =
         await client.query(`
@@ -7804,6 +7877,12 @@ app.post(
         `, [
           provider_id
         ]);
+
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: PROVIDER RESULT',
+        providerRes.rows
+      );
 
 
       if (
@@ -7831,13 +7910,19 @@ app.post(
 
 
       // ==================================================
-      // السعر الذي أدخله المستخدم
+      // 8. التحقق من السعر
       // ==================================================
 
       const dPrice =
         parseFloat(
           declared_price
         );
+
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: PRICE',
+        dPrice
+      );
 
 
       if (
@@ -7862,15 +7947,11 @@ app.post(
 
 
       // ==================================================
-      // النظام الجديد:
+      // 9. حساب ربح المستخدم
       //
-      // ربح المستخدم المتوقع = 5% من سعر المنتج.
+      // 5% من السعر المسجل
       //
-      // مثال:
-      // سعر المنتج = $10
-      // الربح المتوقع = $0.50
-      //
-      // لا يتم دفع الربح الآن.
+      // لا يتم دفع أي ربح الآن
       // ==================================================
 
       const userExpectedProfit =
@@ -7882,10 +7963,7 @@ app.post(
 
 
       // ==================================================
-      // في النظام اليدوي لا يتم إعادة حساب سعر المنتج
-      // من الموقع.
-      //
-      // السعر المدخل هو سعر المنتج الذي سجله المستخدم.
+      // 10. الأسعار
       // ==================================================
 
       const basePrice =
@@ -7907,28 +7985,44 @@ app.post(
 
 
       const totalPrice =
-        finalProductPrice +
-        shippingCost;
+        Number(
+          (
+            finalProductPrice +
+            shippingCost
+          ).toFixed(6)
+        );
 
 
       // ==================================================
-      // لا توجد عملية تسعير تلقائية من Taskora في
-      // النظام اليدوي الجديد.
-      //
-      // لذلك taskora_net_profit يسجل 0 هنا.
+      // 11. لا يوجد Taskora Net عند إنشاء الطلب
       // ==================================================
 
       const taskoraNetProfit =
         0;
 
 
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: CALCULATIONS',
+        {
+          basePrice,
+          marginAmount,
+          finalProductPrice,
+          shippingCost,
+          totalPrice,
+          userExpectedProfit,
+          taskoraNetProfit
+        }
+      );
+
+
       // ==================================================
-      // حفظ الطلب
-      //
-      // product_url يستخدم هنا لتخزين image_url
-      // لأن جدول marketing_orders الحالي لا يحتوي
-      // على image_url مستقل.
+      // 12. إدخال الطلب في marketing_orders
       // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: INSERTING ORDER'
+      );
+
 
       const orderRes =
         await client.query(`
@@ -7986,35 +8080,81 @@ app.post(
         `, [
 
           user_id,
+
           provider_id,
-          String(product_name).trim(),
+
+          String(
+            product_name
+          ).trim(),
+
           image_url
-            ? String(image_url).trim()
+            ? String(
+                image_url
+              ).trim()
             : null,
 
-          String(customer_name).trim(),
-          String(customer_phone).trim(),
-          String(customer_address).trim(),
+          String(
+            customer_name
+          ).trim(),
+
+          String(
+            customer_phone
+          ).trim(),
+
+          String(
+            customer_address
+          ).trim(),
 
           customer_city
-            ? String(customer_city).trim()
+            ? String(
+                customer_city
+              ).trim()
             : null,
 
           basePrice,
+
           marginAmount,
+
           finalProductPrice,
+
           shippingCost,
+
           totalPrice,
+
           userExpectedProfit,
+
           taskoraNetProfit
 
         ]);
 
 
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: INSERT SUCCESS',
+        orderRes.rows
+      );
+
+
+      // ==================================================
+      // 13. COMMIT
+      // ==================================================
+
+      console.log(
+        '🟡 MARKETING MANUAL ORDER: COMMITTING'
+      );
+
       await client.query(
         'COMMIT'
       );
 
+
+      console.log(
+        '🟢 MARKETING MANUAL ORDER: COMMIT SUCCESS'
+      );
+
+
+      // ==================================================
+      // 14. الرد للواجهة
+      // ==================================================
 
       return c.json({
 
@@ -8034,6 +8174,67 @@ app.post(
 
     } catch (err) {
 
+      // ==================================================
+      // 15. تسجيل الخطأ الحقيقي
+      // ==================================================
+
+      console.error(
+        '=================================================='
+      );
+
+      console.error(
+        '❌ MARKETING MANUAL ORDER ERROR'
+      );
+
+      console.error(
+        '=================================================='
+      );
+
+      console.error(
+        'ERROR MESSAGE:',
+        err?.message
+      );
+
+      console.error(
+        'ERROR CODE:',
+        err?.code
+      );
+
+      console.error(
+        'ERROR DETAIL:',
+        err?.detail
+      );
+
+      console.error(
+        'ERROR HINT:',
+        err?.hint
+      );
+
+      console.error(
+        'ERROR CONSTRAINT:',
+        err?.constraint
+      );
+
+      console.error(
+        'ERROR TABLE:',
+        err?.table
+      );
+
+      console.error(
+        'ERROR COLUMN:',
+        err?.column
+      );
+
+      console.error(
+        'FULL ERROR:',
+        err
+      );
+
+
+      // ==================================================
+      // 16. ROLLBACK
+      // ==================================================
+
       if (client) {
 
         try {
@@ -8042,10 +8243,14 @@ app.post(
             'ROLLBACK'
           );
 
+          console.log(
+            '🟢 MARKETING MANUAL ORDER: ROLLBACK SUCCESS'
+          );
+
         } catch (rollbackError) {
 
           console.error(
-            '❌ Marketing manual order rollback error:',
+            '❌ MARKETING MANUAL ORDER: ROLLBACK ERROR',
             rollbackError
           );
 
@@ -8054,23 +8259,34 @@ app.post(
       }
 
 
-      console.error(
-        '❌ /api/marketing/manual-order:',
-        err
-      );
-
+      // ==================================================
+      // 17. إرجاع الخطأ للواجهة
+      // ==================================================
 
       return c.json({
 
         success: false,
 
         message:
-          'Failed to create order'
+          err?.message ||
+          'Failed to create order',
+
+        error_code:
+          err?.code ||
+          null,
+
+        detail:
+          err?.detail ||
+          null
 
       }, 500);
 
 
     } finally {
+
+      // ==================================================
+      // 18. تحرير الاتصال
+      // ==================================================
 
       if (client) {
 
