@@ -718,8 +718,8 @@ function money(value) {
     parseFloat(value);
 
   return Number.isFinite(number)
-    ? number.toFixed(2)
-    : '0.00';
+    ? number.toFixed(4)
+    : '0.0000';
 }
 
 
