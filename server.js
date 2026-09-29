@@ -8449,11 +8449,8 @@ SELECT
     SELECT e.amount
     FROM earnings e
     WHERE e.source = 'referral_bonus'
-      AND e.description = CONCAT(
-        '20% referral commission from Marketing Order #',
-        o.id
-      )
-    ORDER BY e.created_at DESC
+      AND e.description =
+        '20% referral commission from Marketing Order #' || o.id::text
     LIMIT 1
   ) AS referral_commission,
 
@@ -8471,6 +8468,8 @@ WHERE o.status = $1
 
 ORDER BY
   o.created_at DESC
+
+
 
         `, [
           status
