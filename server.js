@@ -8438,15 +8438,25 @@ app.get(
             u.username AS user_username,
             u.telegram_id AS user_telegram_id,
 
-            o.base_price,
-            o.margin_amount,
-            o.final_product_price,
-            o.shipping_cost,
-            o.total_price,
-            o.user_expected_profit,
-            o.taskora_net_profit,
+o.base_price,
+o.margin_amount,
+o.final_product_price,
+o.shipping_cost,
+o.total_price,
+o.user_expected_profit,
+o.taskora_net_profit,
 
-            o.admin_notes
+(
+  SELECT e.amount
+  FROM earnings e
+  WHERE e.source = 'referral_bonus'
+    AND e.description = '20% referral commission from Marketing Order #' || o.id
+  ORDER BY e.created_at DESC
+  LIMIT 1
+) AS referral_commission,
+
+o.admin_notes
+
 
           FROM marketing_orders o
 
