@@ -8369,7 +8369,7 @@ app.get('/api/marketing/user-orders', async (c) => {
 // =====================================================
 
 app.get(
-  '/',
+  '/api/admin/marketing/orders',
   verifyAdmin,
   async (c) => {
 
@@ -8409,71 +8409,117 @@ app.get(
       }
 
 
+      // =====================================================
+      // جلب الطلبات
+      // الاستعلام الأصلي بدون تغيير
+      // =====================================================
+
       const result =
         await pool.query(`
 
-SELECT
-  o.id,
-  o.user_id,
-  o.status,
+          SELECT
 
-  o.created_at,
-  o.updated_at,
+            o.id,
+            o.user_id,
+            o.status,
 
-  o.customer_name,
-  o.customer_phone,
-  o.customer_city,
-  o.customer_address,
+            o.created_at,
+            o.updated_at,
 
-  o.product_name,
-  o.product_url,
+            o.customer_name,
+            o.customer_phone,
+            o.customer_city,
+            o.customer_address,
 
-  pr.id AS provider_id,
-  pr.name AS provider_name,
-  pr.country_code AS provider_country,
-  pr.base_url AS provider_base_url,
+            o.product_name,
+            o.product_url,
 
-  u.name AS user_name,
-  u.username AS user_username,
-  u.telegram_id AS user_telegram_id,
+            pr.id AS provider_id,
+            pr.name AS provider_name,
+            pr.country_code AS provider_country,
+            pr.base_url AS provider_base_url,
 
-  o.base_price,
-  o.margin_amount,
-  o.final_product_price,
-  o.shipping_cost,
-  o.total_price,
-  o.user_expected_profit,
-  o.taskora_net_profit,
+            u.name AS user_name,
+            u.username AS user_username,
+            u.telegram_id AS user_telegram_id,
 
-  (
-    SELECT e.amount
-    FROM earnings e
-    WHERE e.source = 'referral_bonus'
-      AND e.description =
-        '20% referral commission from Marketing Order #' || o.id::text
-    LIMIT 1
-  ) AS referral_commission,
+            o.base_price,
+            o.margin_amount,
+            o.final_product_price,
+            o.shipping_cost,
+            o.total_price,
+            o.user_expected_profit,
+            o.taskora_net_profit,
 
-  o.admin_notes
+            o.admin_notes
 
-FROM marketing_orders o
+          FROM marketing_orders o
 
-JOIN marketing_providers pr
-  ON o.provider_id = pr.id
+          JOIN marketing_providers pr
+            ON o.provider_id = pr.id
 
-LEFT JOIN users u
-  ON o.user_id = u.telegram_id
+          LEFT JOIN users u
+            ON o.user_id = u.telegram_id
 
-WHERE o.status = $1
+          WHERE o.status = $1
 
-ORDER BY
-  o.created_at DESC
-
-
+          ORDER BY
+            o.created_at DESC
 
         `, [
           status
         ]);
+
+
+      // =====================================================
+      // إضافة عمولة الإحالة لكل طلب
+      // بدون تغيير الاستعلام الأصلي
+      // =====================================================
+
+      const ordersWithReferral =
+        await Promise.all(
+
+          result.rows.map(
+            async (order) => {
+
+              const referralResult =
+                await pool.query(`
+
+                  SELECT
+                    amount
+
+                  FROM earnings
+
+                  WHERE source = 'referral_bonus'
+
+                    AND description =
+                      '20% referral commission from Marketing Order #' ||
+                      $1::text
+
+                  ORDER BY created_at DESC
+
+                  LIMIT 1
+
+                `, [
+                  order.id
+                ]);
+
+
+              return {
+
+                ...order,
+
+                referral_commission:
+                  referralResult.rows.length > 0
+                    ? referralResult.rows[0].amount
+                    : 0
+
+              };
+
+            }
+          )
+
+        );
 
 
       return c.json({
@@ -8481,7 +8527,7 @@ ORDER BY
         success: true,
 
         data:
-          result.rows
+          ordersWithReferral
 
       });
 
@@ -8507,7 +8553,6 @@ ORDER BY
 
   }
 );
-
 
 
 // =====================================================
