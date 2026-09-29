@@ -8369,7 +8369,7 @@ app.get('/api/marketing/user-orders', async (c) => {
 // =====================================================
 
 app.get(
-  '/api/admin/marketing/orders',
+  '/',
   verifyAdmin,
   async (c) => {
 
@@ -8412,64 +8412,59 @@ app.get(
       const result =
         await pool.query(`
 
-          SELECT
+SELECT
+  o.id,
+  o.user_id,
+  o.status,
 
-            o.id,
-            o.user_id,
-            o.status,
+  o.created_at,
+  o.updated_at,
 
-            o.created_at,
-            o.updated_at,
+  o.customer_name,
+  o.customer_phone,
+  o.customer_city,
+  o.customer_address,
 
-            o.customer_name,
-            o.customer_phone,
-            o.customer_city,
-            o.customer_address,
+  o.product_name,
+  o.product_url,
 
-            o.product_name,
-            o.product_url,
+  pr.id AS provider_id,
+  pr.name AS provider_name,
+  pr.country_code AS provider_country,
+  pr.base_url AS provider_base_url,
 
-            pr.id AS provider_id,
-            pr.name AS provider_name,
-            pr.country_code AS provider_country,
-            pr.base_url AS provider_base_url,
+  u.name AS user_name,
+  u.username AS user_username,
+  u.telegram_id AS user_telegram_id,
 
-            u.name AS user_name,
-            u.username AS user_username,
-            u.telegram_id AS user_telegram_id,
+  o.base_price,
+  o.margin_amount,
+  o.final_product_price,
+  o.shipping_cost,
+  o.total_price,
+  o.user_expected_profit,
+  o.taskora_net_profit,
 
-o.base_price,
-o.margin_amount,
-o.final_product_price,
-o.shipping_cost,
-o.total_price,
-o.user_expected_profit,
-o.taskora_net_profit,
+  e.amount AS referral_commission,
 
-(
-  SELECT e.amount
-  FROM earnings e
-  WHERE e.source = 'referral_bonus'
-    AND e.description = '20% referral commission from Marketing Order #' || o.id
-  ORDER BY e.created_at DESC
-  LIMIT 1
-) AS referral_commission,
+  o.admin_notes
 
-o.admin_notes
+FROM marketing_orders o
 
+JOIN marketing_providers pr
+  ON o.provider_id = pr.id
 
-          FROM marketing_orders o
+LEFT JOIN users u
+  ON o.user_id = u.telegram_id
 
-          JOIN marketing_providers pr
-            ON o.provider_id = pr.id
+LEFT JOIN earnings e
+  ON e.source = 'referral_bonus'
+  AND e.description = '20% referral commission from Marketing Order #' || o.id
 
-          LEFT JOIN users u
-            ON o.user_id = u.telegram_id
+WHERE o.status = $1
 
-          WHERE o.status = $1
-
-          ORDER BY
-            o.created_at DESC
+ORDER BY
+  o.created_at DESC
 
         `, [
           status
