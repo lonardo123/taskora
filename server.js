@@ -8410,8 +8410,7 @@ app.get(
 
 
       // =====================================================
-      // جلب الطلبات
-      // الاستعلام الأصلي بدون تغيير
+      // جلب الطلبات + عمولة الإحالة الخاصة بكل طلب
       // =====================================================
 
       const result =
@@ -8451,7 +8450,28 @@ app.get(
             o.user_expected_profit,
             o.taskora_net_profit,
 
-            o.admin_notes
+            o.admin_notes,
+
+            COALESCE(
+              (
+                SELECT e.amount
+
+                FROM earnings e
+
+                WHERE e.source = 'referral_bonus'
+
+                  AND e.description =
+                    '20% referral commission from Marketing Order #' ||
+                    o.id::text
+
+                ORDER BY
+                  e.created_at DESC
+
+                LIMIT 1
+              ),
+              0
+            ) AS referral_commission
+
 
           FROM marketing_orders o
 
@@ -8471,63 +8491,12 @@ app.get(
         ]);
 
 
-      // =====================================================
-      // إضافة عمولة الإحالة لكل طلب
-      // بدون تغيير الاستعلام الأصلي
-      // =====================================================
-
-      const ordersWithReferral =
-        await Promise.all(
-
-          result.rows.map(
-            async (order) => {
-
-              const referralResult =
-                await pool.query(`
-
-                  SELECT
-                    amount
-
-                  FROM earnings
-
-                  WHERE source = 'referral_bonus'
-
-                    AND description =
-                      '20% referral commission from Marketing Order #' ||
-                      $1::text
-
-                  ORDER BY created_at DESC
-
-                  LIMIT 1
-
-                `, [
-                  order.id
-                ]);
-
-
-              return {
-
-                ...order,
-
-                referral_commission:
-                  referralResult.rows.length > 0
-                    ? referralResult.rows[0].amount
-                    : 0
-
-              };
-
-            }
-          )
-
-        );
-
-
       return c.json({
 
         success: true,
 
         data:
-          ordersWithReferral
+          result.rows
 
       });
 
@@ -8553,6 +8522,7 @@ app.get(
 
   }
 );
+
 
 
 // =====================================================
