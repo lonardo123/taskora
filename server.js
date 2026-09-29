@@ -8445,7 +8445,17 @@ SELECT
   o.user_expected_profit,
   o.taskora_net_profit,
 
-  e.amount AS referral_commission,
+  (
+    SELECT e.amount
+    FROM earnings e
+    WHERE e.source = 'referral_bonus'
+      AND e.description = CONCAT(
+        '20% referral commission from Marketing Order #',
+        o.id
+      )
+    ORDER BY e.created_at DESC
+    LIMIT 1
+  ) AS referral_commission,
 
   o.admin_notes
 
@@ -8456,10 +8466,6 @@ JOIN marketing_providers pr
 
 LEFT JOIN users u
   ON o.user_id = u.telegram_id
-
-LEFT JOIN earnings e
-  ON e.source = 'referral_bonus'
-  AND e.description = '20% referral commission from Marketing Order #' || o.id
 
 WHERE o.status = $1
 
