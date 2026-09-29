@@ -8306,8 +8306,12 @@ app.post(
 app.get('/api/marketing/user-orders', async (c) => {
   try {
     const user_id = c.req.query('user_id');
+
     if (!user_id) {
-      return c.json({ success: false, message: 'user_id is required' }, 400);
+      return c.json({
+        success: false,
+        message: 'user_id is required'
+      }, 400);
     }
 
     const result = await pool.query(`
@@ -8317,20 +8321,33 @@ app.get('/api/marketing/user-orders', async (c) => {
         pr.name AS provider_name,
         o.total_price,
         o.user_expected_profit,
+        o.price_edited_by_admin,
         o.status,
         o.created_at,
         o.admin_notes
       FROM marketing_orders o
-      JOIN marketing_providers pr ON o.provider_id = pr.id
+      JOIN marketing_providers pr
+        ON o.provider_id = pr.id
       WHERE o.user_id = $1
       ORDER BY o.created_at DESC
       LIMIT 50
     `, [user_id]);
 
-    return c.json({ success: true, data: result.rows });
+    return c.json({
+      success: true,
+      data: result.rows
+    });
+
   } catch (err) {
-    console.error('❌ /api/marketing/user-orders:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+    console.error(
+      '❌ /api/marketing/user-orders:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: 'Server error'
+    }, 500);
   }
 });
 
@@ -8578,23 +8595,24 @@ app.put('/api/admin/marketing/orders/:id/price', verifyAdmin, async (c) => {
     await client.query('BEGIN');
 
     await client.query(`
-      UPDATE marketing_orders
-      SET
-        base_price = $1,
-        final_product_price = $2,
-        total_price = $3,
-        user_expected_profit = $4,
-        taskora_net_profit = $5,
-        updated_at = NOW()
-      WHERE id = $6
-    `, [
-      basePrice,
-      finalProductPrice,
-      totalPrice,
-      userExpectedProfit,
-      taskoraNetProfit,
-      orderId
-    ]);
+  UPDATE marketing_orders
+  SET
+    base_price = $1,
+    final_product_price = $2,
+    total_price = $3,
+    user_expected_profit = $4,
+    taskora_net_profit = $5,
+    price_edited_by_admin = TRUE,
+    updated_at = NOW()
+  WHERE id = $6
+`, [
+  basePrice,
+  finalProductPrice,
+  totalPrice,
+  userExpectedProfit,
+  taskoraNetProfit,
+  orderId
+]);
 
     await client.query('COMMIT');
 
