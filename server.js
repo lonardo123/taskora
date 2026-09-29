@@ -8301,6 +8301,40 @@ app.post(
 
 
 // =====================================================
+// 📜 جلب سجل طلبات التسويق للمستخدم
+// =====================================================
+app.get('/api/marketing/user-orders', async (c) => {
+  try {
+    const user_id = c.req.query('user_id');
+    if (!user_id) {
+      return c.json({ success: false, message: 'user_id is required' }, 400);
+    }
+
+    const result = await pool.query(`
+      SELECT 
+        o.id,
+        o.product_name,
+        pr.name AS provider_name,
+        o.total_price,
+        o.user_expected_profit,
+        o.status,
+        o.created_at,
+        o.admin_notes
+      FROM marketing_orders o
+      JOIN marketing_providers pr ON o.provider_id = pr.id
+      WHERE o.user_id = $1
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `, [user_id]);
+
+    return c.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('❌ /api/marketing/user-orders:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
+
+// =====================================================
 // 4. [ADMIN ONLY]
 // جلب طلبات التسويق
 //
