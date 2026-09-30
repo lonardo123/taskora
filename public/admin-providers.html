@@ -374,7 +374,7 @@
       </h1>
 
       <p>
-        إضافة وتعديل منصات الجلب الحي Scraping / API
+        إضافة وتعديل منصات الجلب الحي MANUAL / API
       </p>
 
     </div>
@@ -619,19 +619,19 @@
             </label>
 
             <select
-              id="mode"
-              onchange="toggleApiFields()"
-            >
+  id="mode"
+  onchange="toggleApiFields()"
+>
 
-              <option value="SCRAPING">
-                🕷️ Scraping
-              </option>
+  <option value="MANUAL">
+    ✋ Manual
+  </option>
 
-              <option value="API">
-                🔌 API
-              </option>
+  <option value="API">
+    🔌 API
+  </option>
 
-            </select>
+</select>
 
           </div>
 
@@ -662,7 +662,7 @@
       </div>
 
 
-      <!-- SCRAPING -->
+      <!-- MANUAL -->
 
       <div
         id="scrapingFields"
@@ -670,7 +670,7 @@
       >
 
         <div class="section-title">
-          إعدادات Scraping
+          إعدادات MANUAL
         </div>
 
 
@@ -1126,7 +1126,7 @@ async function loadProviders() {
 
             ? '🔌 API'
 
-            : '🕷️ Scraping';
+            : '✋ Manual';
 
 
           const margin =
@@ -1311,9 +1311,7 @@ function toggleApiFields() {
   document.getElementById(
     'scrapingFields'
   ).style.display =
-    mode === 'SCRAPING'
-      ? 'block'
-      : 'none';
+    'none';
 
 
   document.getElementById(
@@ -1351,7 +1349,7 @@ function openModal() {
   document.getElementById(
     'mode'
   ).value =
-    'SCRAPING';
+    'MANUAL';
 
 
   document.getElementById(
@@ -1363,13 +1361,13 @@ function openModal() {
   document.getElementById(
     'base_margin_percentage'
   ).value =
-    '20';
+    '0';
 
 
   document.getElementById(
     'user_profit_percentage'
   ).value =
-    '40';
+    '0';
 
 
   document.getElementById(
@@ -1482,10 +1480,15 @@ async function editProvider(id) {
       p.base_url || '';
 
 
-    document.getElementById(
-      'mode'
-    ).value =
-      p.mode || 'SCRAPING';
+    const providerMode =
+  p.mode === 'API'
+    ? 'API'
+    : 'MANUAL';
+
+document.getElementById(
+  'mode'
+).value =
+  providerMode;
 
 
     document.getElementById(
@@ -1628,10 +1631,15 @@ document
         ).value;
 
 
-      const mode =
-        document.getElementById(
-          'mode'
-        ).value;
+      const selectedMode =
+  document.getElementById(
+    'mode'
+  ).value;
+
+const mode =
+  selectedMode === 'API'
+    ? 'API'
+    : 'MANUAL';
 
 
       const apiKeyInput =
