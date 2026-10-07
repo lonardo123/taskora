@@ -11200,7 +11200,7 @@ app.post(
 
 
 // =====================================================
-// 🎁 OFFERWALL.ME INTEGRATION (Signed URL Generator)
+// 🎁 OFFERWALL.ME INTEGRATION (Cloudflare Workers Compatible)
 // =====================================================
 app.get('/api/offerwall/url', async (c) => {
   try {
@@ -11209,37 +11209,55 @@ app.get('/api/offerwall/url', async (c) => {
       return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-    // ⚠️ تم وضع المفاتيح مباشرة هنا بدلاً من متغيرات البيئة
-    // قم باستبدال النصوص أدناه بمفاتيحك الحقيقية من لوحة تحكم Offerwall.me
+    // ⚠️⚠️⚠️ ضع مفاتيحك الحقيقية هنا مباشرة بين علامتي التنصيص ⚠️⚠️⚠️
     const OFFERWALL_API_KEY = "QbDRtAulZu4XAUxjJRYVYpLMn9bSAR"; 
-    const OFFERWALL_SECRET = "TXkBT74QjEtNqpsZuE5yOSIipQCzknBb";
-    // التحقق من أنك قمت بتغيير القيم الافتراضية
-    if (OFFERWALL_API_KEY === "QbDRtAulZu4XAUxjJRYVYpLMn9bSAR" || OFFERWALL_SECRET === "TXkBT74QjEtNqpsZuE5yOSIipQCzknBb") {
+    const OFFERWALL_SECRET = "TXkBT74QjEtNqpsZuE5yOSIipQCzknBb";   
+
+    // التحقق من أنك قمت بتغيير القيم
+    if (OFFERWALL_API_KEY.includes("ضع_") || OFFERWALL_SECRET.includes("ضع_") || OFFERWALL_API_KEY.length < 5) {
       return c.json({ 
         success: false, 
         message: 'Offerwall credentials are missing. Please update the keys in the code.' 
       }, 500);
     }
 
-    // صلاحية الرابط: ساعة واحدة (3600 ثانية) من الآن
+    // صلاحية الرابط: ساعة واحدة (3600 ثانية)
     const expiry = Math.floor(Date.now() / 1000) + 3600;
     
-    // تنسيق الرسالة المطلوب من Offerwall.me (فواصل أسطر حرفية \n)
+    // تنسيق الرسالة المطلوب من Offerwall.me
     const message = `offerwall-user-v1\n${OFFERWALL_API_KEY}\n${userId}\n${expiry}`;
     
-    // توليد توقيع HMAC-SHA256
-    const signature = crypto.createHmac('sha256', OFFERWALL_SECRET).update(message).digest('hex');
+    // ✅ طريقة التوقيع الصحيحة لـ Cloudflare Workers (Web Crypto API)
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(OFFERWALL_SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    
+    const signatureBuffer = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      encoder.encode(message)
+    );
+    
+    // تحويل التوقيع إلى نص Hex
+    const signature = Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
     
     const encodedApiKey = encodeURIComponent(OFFERWALL_API_KEY);
     const encodedUserId = encodeURIComponent(userId);
     
-    // بناء الرابط النهائي الموقع
+    // بناء الرابط النهائي
     const offerwallUrl = `https://offerwall.me/offerwall/${encodedApiKey}/${encodedUserId}?identityExpires=${expiry}&identitySignature=${signature}`;
     
     return c.json({ success: true, url: offerwallUrl });
   } catch (err) {
     console.error('❌ /api/offerwall/url:', err);
-    return c.json({ success: false, message: 'Server error' }, 500);
+    return c.json({ success: false, message: 'Server error: ' + err.message }, 500);
   }
 });
 
