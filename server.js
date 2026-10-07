@@ -11199,7 +11199,49 @@ app.post(
 );
 
 
+// =====================================================
+// 🎁 OFFERWALL.ME INTEGRATION (Signed URL Generator)
+// =====================================================
+app.get('/api/offerwall/url', async (c) => {
+  try {
+    const userId = c.req.query('user_id');
+    if (!userId || !/^\d+$/.test(userId)) {
+      return c.json({ success: false, message: 'Invalid user_id' }, 400);
+    }
 
+    // ⚠️ هام جداً: يجب وضع هذه المفاتيح في متغيرات بيئة الـ Worker (wrangler.toml)
+    // أو استبدال القيم أدناه ببياناتك من لوحة تحكم Offerwall.me
+    const OFFERWALL_API_KEY = c.env.OFFERWALL_API_KEY || "YOUR_PUBLIC_API_KEY";
+    const OFFERWALL_SECRET = c.env.OFFERWALL_SECRET || "YOUR_PRIVATE_PLACEMENT_SECRET";
+
+    if (OFFERWALL_API_KEY === "YOUR_PUBLIC_API_KEY" || OFFERWALL_SECRET === "YOUR_PRIVATE_PLACEMENT_SECRET") {
+      return c.json({ 
+        success: false, 
+        message: 'Offerwall credentials not configured. Please update server environment variables.' 
+      }, 500);
+    }
+
+    // صلاحية الرابط: ساعة واحدة (3600 ثانية) من الآن
+    const expiry = Math.floor(Date.now() / 1000) + 3600;
+    
+    // تنسيق الرسالة المطلوب من Offerwall.me (فواصل أسطر حرفية)
+    const message = `offerwall-user-v1\n${OFFERWALL_API_KEY}\n${userId}\n${expiry}`;
+    
+    // توليد توقيع HMAC-SHA256
+    const signature = crypto.createHmac('sha256', OFFERWALL_SECRET).update(message).digest('hex');
+    
+    const encodedApiKey = encodeURIComponent(OFFERWALL_API_KEY);
+    const encodedUserId = encodeURIComponent(userId);
+    
+    // بناء الرابط النهائي الموقع
+    const offerwallUrl = `https://offerwall.me/offerwall/${encodedApiKey}/${encodedUserId}?identityExpires=${expiry}&identitySignature=${signature}`;
+    
+    return c.json({ success: true, url: offerwallUrl });
+  } catch (err) {
+    console.error('❌ /api/offerwall/url:', err);
+    return c.json({ success: false, message: 'Server error' }, 500);
+  }
+});
 
 
 
