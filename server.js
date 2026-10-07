@@ -298,8 +298,23 @@ app.get('/api/user/profile', async (c) => {
 // المسار الرئيسي للتحقق من عمل السيرفر
 // =======================
 app.get('/', (c) => {
-  return c.text('✅ السيرفر يعمل! Postback جاهز.');
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="offerwall-verification" content="6ac5931d84bf31714db37ad0">
+      <title>Taskora</title>
+    </head>
+    <body>
+      <p>✅ السيرفر يعمل! Postback جاهز.</p>
+    </body>
+    </html>
+  `);
 });
+
+
+
 
 // =======================
 // تحديث السعر من الأدمن (محول إلى Hono)
