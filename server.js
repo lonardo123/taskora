@@ -11209,22 +11209,22 @@ app.get('/api/offerwall/url', async (c) => {
       return c.json({ success: false, message: 'Invalid user_id' }, 400);
     }
 
-    // ⚠️ هام جداً: يجب وضع هذه المفاتيح في متغيرات بيئة الـ Worker (wrangler.toml)
-    // أو استبدال القيم أدناه ببياناتك من لوحة تحكم Offerwall.me
-    const OFFERWALL_API_KEY = c.env.OFFERWALL_API_KEY || "YOUR_PUBLIC_API_KEY";
-    const OFFERWALL_SECRET = c.env.OFFERWALL_SECRET || "YOUR_PRIVATE_PLACEMENT_SECRET";
-
-    if (OFFERWALL_API_KEY === "YOUR_PUBLIC_API_KEY" || OFFERWALL_SECRET === "YOUR_PRIVATE_PLACEMENT_SECRET") {
+    // ⚠️ تم وضع المفاتيح مباشرة هنا بدلاً من متغيرات البيئة
+    // قم باستبدال النصوص أدناه بمفاتيحك الحقيقية من لوحة تحكم Offerwall.me
+    const OFFERWALL_API_KEY = "QbDRtAulZu4XAUxjJRYVYpLMn9bSAR"; 
+    const OFFERWALL_SECRET = "TXkBT74QjEtNqpsZuE5yOSIipQCzknBb";
+    // التحقق من أنك قمت بتغيير القيم الافتراضية
+    if (OFFERWALL_API_KEY === "QbDRtAulZu4XAUxjJRYVYpLMn9bSAR" || OFFERWALL_SECRET === "TXkBT74QjEtNqpsZuE5yOSIipQCzknBb") {
       return c.json({ 
         success: false, 
-        message: 'Offerwall credentials not configured. Please update server environment variables.' 
+        message: 'Offerwall credentials are missing. Please update the keys in the code.' 
       }, 500);
     }
 
     // صلاحية الرابط: ساعة واحدة (3600 ثانية) من الآن
     const expiry = Math.floor(Date.now() / 1000) + 3600;
     
-    // تنسيق الرسالة المطلوب من Offerwall.me (فواصل أسطر حرفية)
+    // تنسيق الرسالة المطلوب من Offerwall.me (فواصل أسطر حرفية \n)
     const message = `offerwall-user-v1\n${OFFERWALL_API_KEY}\n${userId}\n${expiry}`;
     
     // توليد توقيع HMAC-SHA256
