@@ -11677,16 +11677,40 @@ app.post('/api/offerwall/postback', async (c) => {
       }
 
 
-      // -------------------------------------------------
+     // -------------------------------------------------
 // 💰 توزيع Reward
+// Offerwall reward = القيمة بالدولار كما أرسلها Offerwall
 // Taskora = 40%
 // User    = 60%
+// Referral = 0%
 // -------------------------------------------------
-const userReward =
-  Math.round((reward * 0.60) * 1000000) / 1000000;
 
+const rewardAmount =
+  Number(rewardRaw);
+
+if (
+  !Number.isFinite(rewardAmount) ||
+  rewardAmount <= 0
+) {
+  await client.query("ROLLBACK");
+
+  return c.text(
+    "ERROR: Invalid reward amount",
+    400
+  );
+}
+
+// المستخدم يحصل على 60% فقط
+const userReward =
+  Math.round(
+    rewardAmount * 0.60 * 1000000
+  ) / 1000000;
+
+// Taskora يحتفظ بـ 40%
 const taskoraReward =
-  Math.round((reward * 0.40) * 1000000) / 1000000;
+  Math.round(
+    rewardAmount * 0.40 * 1000000
+  ) / 1000000;
 
 
 // -------------------------------------------------
@@ -11925,141 +11949,6 @@ await client.query(
           reversalDescription
         ]
       );
-
-
-      // =================================================
-      // 👥 عكس Referral Commission
-      // =================================================
-
-      const referral =
-        await client.query(
-          `
-          SELECT referrer_id
-          FROM referrals
-          WHERE referee_id = $1
-          LIMIT 1
-          `,
-          [subId]
-        );
-
-
-      if (
-        referral.rows.length > 0
-      ) {
-
-        const referrerId =
-          referral.rows[0].referrer_id;
-
-        const referralDescription =
-          `Offerwall referral commission from ${subId} transaction ${transId}`;
-
-        const originalReferral =
-          await client.query(
-            `
-            SELECT amount
-            FROM earnings
-            WHERE user_id = $1
-              AND source = 'referral_bonus'
-              AND description = $2
-            LIMIT 1
-            `,
-            [
-              referrerId,
-              referralDescription
-            ]
-          );
-
-
-        if (
-          originalReferral.rows.length > 0
-        ) {
-
-          const referralAmount =
-            Math.abs(
-              Number(
-                originalReferral.rows[0].amount
-              )
-            );
-
-
-          if (
-            Number.isFinite(
-              referralAmount
-            ) &&
-            referralAmount > 0
-          ) {
-
-            await client.query(
-              `
-              UPDATE users
-              SET
-                balance =
-                  COALESCE(balance, 0) - $1,
-                referral_earnings =
-                  COALESCE(referral_earnings, 0) - $1
-              WHERE telegram_id = $2
-              `,
-              [
-                referralAmount,
-                referrerId
-              ]
-            );
-
-
-            await client.query(
-              `
-              INSERT INTO referral_earnings
-              (
-                referrer_id,
-                referee_id,
-                amount,
-                created_at
-              )
-              VALUES
-              (
-                $1,
-                $2,
-                $3,
-                NOW()
-              )
-              `,
-              [
-                referrerId,
-                subId,
-                -referralAmount
-              ]
-            );
-
-
-            await client.query(
-              `
-              INSERT INTO earnings
-              (
-                user_id,
-                amount,
-                source,
-                description,
-                created_at
-              )
-              VALUES
-              (
-                $1,
-                $2,
-                'referral_bonus_reversal',
-                $3,
-                NOW()
-              )
-              `,
-              [
-                referrerId,
-                -referralAmount,
-                `Offerwall referral chargeback ${transId}`
-              ]
-            );
-
-          }
-        }
-      }
 
 
       await client.query(
