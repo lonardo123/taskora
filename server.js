@@ -11695,7 +11695,7 @@ if (isNaN(parsedAmount)) {
   );
 }
 
-const percentage = 0.0003;
+const percentage = 0.0001;
 
 const userReward =
   parsedAmount * percentage;
