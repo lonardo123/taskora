@@ -11677,21 +11677,16 @@ app.post('/api/offerwall/postback', async (c) => {
       }
 
 
-     // -------------------------------------------------
-// 💰 توزيع Reward
-// Offerwall reward = القيمة بالدولار كما أرسلها Offerwall
+ // -------------------------------------------------
+// 💰 نفس حسبة /callback بالضبط
+// User = 60%
 // Taskora = 40%
-// User    = 60%
 // Referral = 0%
 // -------------------------------------------------
 
-const rewardAmount =
-  Number(rewardRaw);
+const parsedAmount = parseFloat(rewardRaw);
 
-if (
-  !Number.isFinite(rewardAmount) ||
-  rewardAmount <= 0
-) {
+if (isNaN(parsedAmount)) {
   await client.query("ROLLBACK");
 
   return c.text(
@@ -11700,17 +11695,13 @@ if (
   );
 }
 
-// المستخدم يحصل على 60% فقط
-const userReward =
-  Math.round(
-    rewardAmount * 0.60 * 1000000
-  ) / 1000000;
+const percentage = 0.60;
 
-// Taskora يحتفظ بـ 40%
+const userReward =
+  parsedAmount * percentage;
+
 const taskoraReward =
-  Math.round(
-    rewardAmount * 0.40 * 1000000
-  ) / 1000000;
+  parsedAmount - userReward;
 
 
 // -------------------------------------------------
