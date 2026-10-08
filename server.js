@@ -11227,7 +11227,6 @@ async function offerwallMd5(text) {
     .join("");
 }
 
-
 // =====================================================
 // 🔗 GENERATE SIGNED OFFERWALL URL
 // =====================================================
@@ -11501,17 +11500,21 @@ app.post('/api/offerwall/postback', async (c) => {
 
 
     // -------------------------------------------------
-    // 5. التحقق من reward
+    // 5. نفس طريقة /callback للتحقق من المبلغ
     // -------------------------------------------------
-    const reward =
-      Number(rewardRaw);
+    const parsedAmount =
+      parseFloat(rewardRaw);
 
-    if (
-      !Number.isFinite(reward) ||
-      reward <= 0
-    ) {
+    if (isNaN(parsedAmount)) {
       return c.text(
-        "ERROR: Invalid reward",
+        "ERROR: Invalid amount",
+        400
+      );
+    }
+
+    if (parsedAmount <= 0) {
+      return c.text(
+        "ERROR: Invalid amount",
         400
       );
     }
@@ -11534,7 +11537,6 @@ app.post('/api/offerwall/postback', async (c) => {
       await offerwallMd5(
         signaturePayload
       );
-
 
     if (
       expectedSignature.toLowerCase() !==
@@ -11677,52 +11679,39 @@ app.post('/api/offerwall/postback', async (c) => {
       }
 
 
- // -------------------------------------------------
-// 💰 نفس حسبة /callback بالضبط
-// User = 60%
-// Taskora = 40%
-// Referral = 0%
-// -------------------------------------------------
+      // -------------------------------------------------
+      // 💰 نفس حسبة /callback بالضبط
+      //
+      // Offerwall reward = parsedAmount
+      // User = 60%
+      // Taskora = 40%
+      // Referral = 0%
+      // -------------------------------------------------
+      const percentage = 0.60;
 
-const parsedAmount = parseFloat(rewardRaw);
-
-if (isNaN(parsedAmount)) {
-  await client.query("ROLLBACK");
-
-  return c.text(
-    "ERROR: Invalid reward amount",
-    400
-  );
-}
-
-const percentage = 0.60;
-
-const userReward =
-  parsedAmount * percentage;
-
-const taskoraReward =
-  parsedAmount - userReward;
-
-
-// -------------------------------------------------
-// إضافة 60% فقط إلى رصيد المستخدم
-// -------------------------------------------------
-await client.query(
-  `
-  UPDATE users
-  SET balance =
-    COALESCE(balance, 0) + $1
-  WHERE telegram_id = $2
-  `,
-  [
-    userReward,
-    subId
-  ]
-);
+      const finalAmount =
+        parsedAmount * percentage;
 
 
       // -------------------------------------------------
-      // تسجيل الربح
+      // إضافة 60% فقط إلى رصيد المستخدم
+      // -------------------------------------------------
+      await client.query(
+        `
+        UPDATE users
+        SET balance =
+          COALESCE(balance, 0) + $1
+        WHERE telegram_id = $2
+        `,
+        [
+          finalAmount,
+          subId
+        ]
+      );
+
+
+      // -------------------------------------------------
+      // تسجيل ربح المستخدم
       // -------------------------------------------------
       await client.query(
         `
@@ -11748,11 +11737,12 @@ await client.query(
         )
         `,
         [
-  subId,
-  userReward,
-  creditDescription
-]
+          subId,
+          finalAmount,
+          creditDescription
+        ]
       );
+
 
       await client.query(
         "COMMIT"
@@ -11763,7 +11753,7 @@ await client.query(
 
 
       console.log(
-        `✅ Offerwall credited: ${reward} | user=${subId} | transId=${transId} | offer=${offerName} | type=${offerType} | country=${country} | payout=${payoutRaw || ""}`
+        `🟢 [offerwall] أضيف ${finalAmount}$ (60% من ${parsedAmount}$) للمستخدم ${subId} (Transaction: ${transId})`
       );
 
       return c.text(
@@ -11776,6 +11766,9 @@ await client.query(
     // =================================================
     // ❌ STATUS 2
     // CHARGEBACK / REVERSAL
+    //
+    // Referral = 0%
+    // لا يوجد أي Referral هنا
     // =================================================
     if (status === "2") {
 
@@ -11806,7 +11799,9 @@ await client.query(
         );
 
 
+      // -------------------------------------------------
       // لا يوجد Credit سابق
+      // -------------------------------------------------
       if (
         original.rows.length === 0
       ) {
@@ -11819,7 +11814,6 @@ await client.query(
           `⚠️ Offerwall chargeback without original credit: ${transId}`
         );
 
-        // نرجع 200 حتى لا يستمر Offerwall في إعادة المحاولة
         return c.text(
           "ok",
           200
@@ -11867,7 +11861,7 @@ await client.query(
 
 
       // -------------------------------------------------
-      // المبلغ الأصلي الذي تم إضافته
+      // المبلغ الأصلي الذي تم إضافته للمستخدم
       // -------------------------------------------------
       const originalAmount =
         Math.abs(
@@ -11896,7 +11890,7 @@ await client.query(
 
 
       // -------------------------------------------------
-      // خصم المبلغ من المستخدم
+      // خصم نفس المبلغ الذي حصل عليه المستخدم
       // -------------------------------------------------
       await client.query(
         `
@@ -11951,7 +11945,7 @@ await client.query(
 
 
       console.log(
-        `↩️ Offerwall chargeback processed: ${originalAmount} | user=${subId} | transId=${transId}`
+        `↩️ Offerwall chargeback processed: ${originalAmount}$ | user=${subId} | transId=${transId}`
       );
 
       return c.text(
@@ -11988,6 +11982,7 @@ await client.query(
     );
   }
 });
+
 
 
 
