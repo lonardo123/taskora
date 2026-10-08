@@ -11228,243 +11228,764 @@ async function offerwallMd5(text) {
 }
 
 // =====================================================
-// 📡 OFFERWALL.ME POSTBACK (مطابق تماماً لمنطق /callback)
+// 🔗 GENERATE SIGNED OFFERWALL URL
+// =====================================================
+app.get('/api/offerwall/url', async (c) => {
+  try {
+
+    const userId = c.req.query('user_id');
+
+    if (!userId || !/^\d+$/.test(userId)) {
+      return c.json({
+        success: false,
+        message: 'Invalid user_id'
+      }, 400);
+    }
+
+    // -------------------------------------------------
+    // مدة صلاحية الرابط: ساعة واحدة
+    // -------------------------------------------------
+    const expiry =
+      Math.floor(Date.now() / 1000) + 3600;
+
+    // -------------------------------------------------
+    // الرسالة المطلوبة من Offerwall.me
+    // -------------------------------------------------
+    const message =
+      `offerwall-user-v1\n` +
+      `${OFFERWALL_API_KEY}\n` +
+      `${userId}\n` +
+      `${expiry}`;
+
+    // -------------------------------------------------
+    // HMAC-SHA256
+    // -------------------------------------------------
+    const encoder = new TextEncoder();
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(OFFERWALL_SECRET),
+      {
+        name: "HMAC",
+        hash: "SHA-256"
+      },
+      false,
+      ["sign"]
+    );
+
+    const signatureBuffer =
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(message)
+      );
+
+    const signature =
+      Array.from(
+        new Uint8Array(signatureBuffer)
+      )
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+
+    // -------------------------------------------------
+    // بناء الرابط الموقّع
+    // -------------------------------------------------
+    const offerwallUrl =
+      `https://offerwall.me/offerwall/` +
+      `${encodeURIComponent(OFFERWALL_API_KEY)}/` +
+      `${encodeURIComponent(userId)}` +
+      `?identityExpires=${expiry}` +
+      `&identitySignature=${signature}`;
+
+    return c.json({
+      success: true,
+      url: offerwallUrl
+    });
+
+  } catch (err) {
+
+    console.error(
+      '❌ GET /api/offerwall/url:',
+      err
+    );
+
+    return c.json({
+      success: false,
+      message: 'Server error: ' + err.message
+    }, 500);
+  }
+});
+
+
+
+// =====================================================
+// 📡 OFFERWALL.ME POSTBACK
 // =====================================================
 app.post('/api/offerwall/postback', async (c) => {
+
   let client = null;
 
   try {
-    // -------------------------------------------------
-    // 1. التحقق من IP (أمان Offerwall)
-    // -------------------------------------------------
-    const allowedIps = new Set(["95.216.65.163", "2a01:4f9:2b:1dc::2"]);
-    const remoteIp = c.req.header("CF-Connecting-IP") || c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() || "";
 
-    if (remoteIp && !allowedIps.has(remoteIp)) {
-      console.error("❌ Offerwall postback IP rejected:", remoteIp);
-      return c.text("Forbidden: Invalid Offerwall IP", 403);
+    // -------------------------------------------------
+    // 1. السماح فقط بعناوين Offerwall.me المعروفة
+    // -------------------------------------------------
+    const allowedIps = new Set([
+      "95.216.65.163",
+      "2a01:4f9:2b:1dc::2"
+    ]);
+
+    const remoteIp =
+      c.req.header("CF-Connecting-IP") ||
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
+      "";
+
+    if (
+      remoteIp &&
+      !allowedIps.has(remoteIp)
+    ) {
+      console.error(
+        "❌ Offerwall postback IP rejected:",
+        remoteIp
+      );
+
+      return c.text(
+        "Forbidden: Invalid Offerwall IP",
+        403
+      );
     }
 
+
     // -------------------------------------------------
-    // 2. قراءة البيانات (يدعم JSON و Form Data)
+    // 2. قراءة POST body
+    // يدعم:
+    // application/x-www-form-urlencoded
+    // multipart/form-data
+    // application/json
+    // بالإضافة إلى Query Parameters
     // -------------------------------------------------
     let body = {};
-    const contentType = (c.req.header("content-type") || "").toLowerCase();
-    try {
-      if (contentType.includes("application/json")) {
-        body = await c.req.json();
-      } else {
-        body = await c.req.parseBody();
-      }
-    } catch (_) { body = {}; }
 
+    const contentType =
+      (
+        c.req.header("content-type") ||
+        ""
+      ).toLowerCase();
+
+    try {
+
+      if (
+        contentType.includes(
+          "application/json"
+        )
+      ) {
+
+        body =
+          await c.req.json();
+
+      } else {
+
+        body =
+          await c.req.parseBody();
+
+      }
+
+    } catch (_) {
+
+      body = {};
+
+    }
+
+
+    // -------------------------------------------------
+    // Helper للحصول على parameter
+    // الأولوية للـ Query ثم POST
+    // -------------------------------------------------
     const getParam = (name) => {
-      const queryValue = c.req.query(name);
-      if (queryValue !== undefined && queryValue !== null) return String(queryValue);
-      const bodyValue = body?.[name];
-      if (bodyValue !== undefined && bodyValue !== null && typeof bodyValue !== "object") {
+
+      const queryValue =
+        c.req.query(name);
+
+      if (
+        queryValue !== undefined &&
+        queryValue !== null
+      ) {
+        return String(queryValue);
+      }
+
+      const bodyValue =
+        body?.[name];
+
+      if (
+        bodyValue !== undefined &&
+        bodyValue !== null &&
+        typeof bodyValue !== "object"
+      ) {
         return String(bodyValue);
       }
+
       return null;
     };
 
-    const subId = getParam("subId");       // يقابل user_id
-    const transId = getParam("transId");   // يقابل transaction_id
-    const rewardRaw = getParam("reward");  // يقابل amount
-    const status = getParam("status");
-    const providedSignature = getParam("signature");
 
     // -------------------------------------------------
-    // 3. التحقق من البيانات الأساسية
+    // 3. Parameters من Offerwall.me
     // -------------------------------------------------
-    if (!subId || !/^\d+$/.test(subId)) return c.text("ERROR: Invalid subId", 400);
-    if (!transId) return c.text("ERROR: Missing transId", 400);
-    if (rewardRaw === null || rewardRaw === "") return c.text("ERROR: Missing reward", 400);
-    if (!providedSignature) return c.text("ERROR: Missing signature", 400);
+    const subId =
+      getParam("subId");
+
+    const transId =
+      getParam("transId");
+
+    const offerName =
+      getParam("offer_name") || "";
+
+    const offerType =
+      getParam("offer_type") || "";
+
+    const rewardRaw =
+      getParam("reward");
+
+    const payoutRaw =
+      getParam("payout");
+
+    const userIp =
+      getParam("userIp") || remoteIp || "";
+
+    const country =
+      getParam("country") || "";
+
+    const status =
+      getParam("status");
+
+    const providedSignature =
+      getParam("signature");
+
 
     // -------------------------------------------------
-    // 4. التحقق من Signature (MD5)
+    // 4. التحقق من البيانات الأساسية
     // -------------------------------------------------
-    const signaturePayload = `${subId}${transId}${rewardRaw}${OFFERWALL_SECRET}`;
-    const expectedSignature = await offerwallMd5(signaturePayload);
-
-    if (expectedSignature.toLowerCase() !== String(providedSignature).toLowerCase()) {
-      console.error("❌ Offerwall invalid signature", { subId, transId });
-      return c.text("ERROR: Signature doesn't match", 403);
+    if (
+      !subId ||
+      !/^\d+$/.test(subId)
+    ) {
+      return c.text(
+        "ERROR: Invalid subId",
+        400
+      );
     }
 
-    if (status !== "1" && status !== "2") return c.text("ERROR: Invalid status", 400);
+    if (!transId) {
+      return c.text(
+        "ERROR: Missing transId",
+        400
+      );
+    }
+
+    if (
+      rewardRaw === null ||
+      rewardRaw === ""
+    ) {
+      return c.text(
+        "ERROR: Missing reward",
+        400
+      );
+    }
+
+    if (!providedSignature) {
+      return c.text(
+        "ERROR: Missing signature",
+        400
+      );
+    }
+
 
     // -------------------------------------------------
-    // 5. بدء المعاملة في قاعدة البيانات
+    // 5. التحقق من reward
     // -------------------------------------------------
-    client = await pool.connect();
-    await client.query("BEGIN");
+    const reward =
+      Number(rewardRaw);
+
+    if (
+      !Number.isFinite(reward) ||
+      reward <= 0
+    ) {
+      return c.text(
+        "ERROR: Invalid reward",
+        400
+      );
+    }
+
+
+    // -------------------------------------------------
+    // 6. التحقق من Signature
+    //
+    // Offerwall.me:
+    // md5(subId + transId + reward + secretKey)
+    //
+    // مهم:
+    // نستخدم rewardRaw كما أرسلته Offerwall.me
+    // في حساب الـMD5.
+    // -------------------------------------------------
+    const signaturePayload =
+      `${subId}${transId}${rewardRaw}${OFFERWALL_SECRET}`;
+
+    const expectedSignature =
+      await offerwallMd5(
+        signaturePayload
+      );
+
+
+    if (
+      expectedSignature.toLowerCase() !==
+      String(providedSignature).toLowerCase()
+    ) {
+
+      console.error(
+        "❌ Offerwall invalid signature",
+        {
+          subId,
+          transId
+        }
+      );
+
+      return c.text(
+        "ERROR: Signature doesn't match",
+        403
+      );
+    }
+
+
+    // -------------------------------------------------
+    // 7. status
+    //
+    // 1 = Credit
+    // 2 = Chargeback / Reversal
+    // -------------------------------------------------
+    if (
+      status !== "1" &&
+      status !== "2"
+    ) {
+      return c.text(
+        "ERROR: Invalid status",
+        400
+      );
+    }
+
+
+    // -------------------------------------------------
+    // 8. اتصال Transaction واحد
+    // -------------------------------------------------
+    client =
+      await pool.connect();
+
+    await client.query(
+      "BEGIN"
+    );
+
+
+    // -------------------------------------------------
+    // 9. قفل transaction لمنع تنفيذ
+    // نفس transId في نفس الوقت
+    // -------------------------------------------------
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1))",
+      [transId]
+    );
+
 
     // =================================================
-    // ✅ STATUS 1: CREDIT (نفس منطق /callback بالضبط)
+    // ✅ STATUS 1
+    // CREDIT
     // =================================================
     if (status === "1") {
-      const parsedAmount = parseFloat(rewardRaw);
-      if (isNaN(parsedAmount)) {
-        await client.query("ROLLBACK");
-        return c.text("ERROR: Invalid reward amount", 400);
-      }
 
-      const percentage = 0.60;
-      const finalAmount = parsedAmount * percentage;
-      const source = 'offerwall';
-      const description = `Transaction: ${transId}`;
+      const creditDescription =
+        `Offerwall.me transaction ${transId}`;
 
-      // منع التكرار
-      const existing = await client.query(
-        'SELECT * FROM earnings WHERE user_id = $1 AND source = $2 AND description = $3',
-        [subId, source, description]
-      );
 
-      if (existing.rows.length > 0) {
-        await client.query("ROLLBACK");
-        console.log(`🔁 عملية Offerwall مكررة تم تجاهلها: ${transId}`);
-        return c.text("ok", 200);
-      }
-
-      // التحقق من المستخدم وتحديث الرصيد
-      const userCheck = await client.query(
-        'SELECT balance FROM users WHERE telegram_id = $1',
-        [subId]
-      );
-
-      if (userCheck.rows.length === 0) {
+      // -------------------------------------------------
+      // منع تكرار العملية
+      // -------------------------------------------------
+      const existingCredit =
         await client.query(
-          'INSERT INTO users (telegram_id, balance, created_at) VALUES ($1, $2, NOW())',
-          [subId, finalAmount]
+          `
+          SELECT id, amount
+          FROM earnings
+          WHERE user_id = $1
+            AND source = 'offerwall'
+            AND description = $2
+          LIMIT 1
+          `,
+          [
+            subId,
+            creditDescription
+          ]
         );
-      } else {
+
+
+      if (
+        existingCredit.rows.length > 0
+      ) {
+
         await client.query(
-          'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2',
-          [finalAmount, subId]
+          "ROLLBACK"
+        );
+
+        console.log(
+          `🔁 Offerwall duplicate ignored: ${transId}`
+        );
+
+        return c.text(
+          "ok",
+          200
         );
       }
 
+
+      // -------------------------------------------------
+      // التحقق من وجود المستخدم
+      // -------------------------------------------------
+      const user =
+        await client.query(
+          `
+          SELECT telegram_id, balance
+          FROM users
+          WHERE telegram_id = $1
+          FOR UPDATE
+          `,
+          [subId]
+        );
+
+
+      if (
+        user.rows.length === 0
+      ) {
+
+        await client.query(
+          "ROLLBACK"
+        );
+
+        console.error(
+          `❌ Offerwall user not found: ${subId}`
+        );
+
+        return c.text(
+          "ERROR: User not found",
+          404
+        );
+      }
+
+
+ // -------------------------------------------------
+// 💰 نفس حسبة /callback بالضبط
+// User = 60%
+// Taskora = 40%
+// Referral = 0%
+// -------------------------------------------------
+
+const parsedAmount = parseFloat(rewardRaw);
+
+if (isNaN(parsedAmount)) {
+  await client.query("ROLLBACK");
+
+  return c.text(
+    "ERROR: Invalid reward amount",
+    400
+  );
+}
+
+const percentage = 0.60;
+
+const userReward =
+  parsedAmount * percentage;
+
+const taskoraReward =
+  parsedAmount - userReward;
+
+
+// -------------------------------------------------
+// إضافة 60% فقط إلى رصيد المستخدم
+// -------------------------------------------------
+await client.query(
+  `
+  UPDATE users
+  SET balance =
+    COALESCE(balance, 0) + $1
+  WHERE telegram_id = $2
+  `,
+  [
+    userReward,
+    subId
+  ]
+);
+
+
+      // -------------------------------------------------
       // تسجيل الربح
+      // -------------------------------------------------
       await client.query(
-        `INSERT INTO earnings (user_id, source, amount, description, watched_seconds, video_id, created_at)
-        VALUES ($1, $2, $3, $4, NULL, NULL, NOW())`,
-        [subId, source, finalAmount, description]
+        `
+        INSERT INTO earnings
+        (
+          user_id,
+          amount,
+          source,
+          description,
+          watched_seconds,
+          video_id,
+          created_at
+        )
+        VALUES
+        (
+          $1,
+          $2,
+          'offerwall',
+          $3,
+          NULL,
+          NULL,
+          NOW()
+        )
+        `,
+        [
+  subId,
+  userReward,
+  creditDescription
+]
       );
 
-      console.log(`🟢 [${source}] أضيف ${finalAmount} (${percentage * 100}% من ${parsedAmount}) للمستخدم ${subId} (Transaction: ${transId})`);
-
-      // -------------------------------------------------
-      // نظام الإحالة (نفس منطق /callback بالضبط)
-      // -------------------------------------------------
-      const ref = await client.query(
-        'SELECT referrer_id FROM referrals WHERE referee_id = $1 LIMIT 1',
-        [subId]
+      await client.query(
+        "COMMIT"
       );
 
-      if (ref.rows.length > 0) {
-        const referrerId = ref.rows[0].referrer_id;
-        const bonus = parsedAmount * 0.03; // 3% من المبلغ الأصلي
-        
-        const refCheck = await client.query(
-          'SELECT balance FROM users WHERE telegram_id = $1',
-          [referrerId]
-        );
+      client.release();
+      client = null;
 
-        if (refCheck.rows.length === 0) {
-          await client.query(
-            'INSERT INTO users (telegram_id, balance, created_at) VALUES ($1, $2, NOW())',
-            [referrerId, bonus]
-          );
-        } else {
-          await client.query(
-            'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2',
-            [bonus, referrerId]
-          );
-        }
 
-        await client.query(
-          `INSERT INTO earnings (user_id, source, amount, description, watched_seconds, video_id, created_at)
-          VALUES ($1, $2, $3, $4, NULL, NULL, NOW())`,
-          [referrerId, 'referral', bonus, `Referral bonus from ${subId} (Transaction: ${transId})`]
-        );
-        
-        await client.query(
-          `INSERT INTO referral_earnings (referrer_id, referee_id, amount, created_at)
-          VALUES ($1, $2, $3, NOW())`,
-          [referrerId, subId, bonus]
-        );
-        
-        console.log(`👥 تم إضافة ${bonus} (3%) للمحيل ${referrerId} من ربح المستخدم ${subId}`);
-      }
-      
-      await client.query("COMMIT");
-      return c.text("ok", 200);
+      console.log(
+        `✅ Offerwall credited: ${reward} | user=${subId} | transId=${transId} | offer=${offerName} | type=${offerType} | country=${country} | payout=${payoutRaw || ""}`
+      );
+
+      return c.text(
+        "ok",
+        200
+      );
     }
 
+
     // =================================================
-    // ❌ STATUS 2: CHARGEBACK / REVERSAL (الاسترداد)
+    // ❌ STATUS 2
+    // CHARGEBACK / REVERSAL
     // =================================================
     if (status === "2") {
-      const source = 'offerwall';
-      const description = `Transaction: ${transId}`;
-      const reversalDescription = `Chargeback: ${transId}`;
 
-      // البحث عن المعاملة الأصلية
-      const original = await client.query(
-        `SELECT id, amount FROM earnings WHERE user_id = $1 AND source = $2 AND description = $3 LIMIT 1`,
-        [subId, source, description]
-      );
+      const creditDescription =
+        `Offerwall.me transaction ${transId}`;
 
-      if (original.rows.length === 0) {
-        await client.query("ROLLBACK");
-        console.warn(`⚠️ Offerwall chargeback without original credit: ${transId}`);
-        return c.text("ok", 200); // نرجع ok لمنع إعادة المحاولة من Offerwall
+      const reversalDescription =
+        `Offerwall.me chargeback ${transId}`;
+
+
+      // -------------------------------------------------
+      // هل تم تسجيل الـCredit الأصلي؟
+      // -------------------------------------------------
+      const original =
+        await client.query(
+          `
+          SELECT id, amount
+          FROM earnings
+          WHERE user_id = $1
+            AND source = 'offerwall'
+            AND description = $2
+          LIMIT 1
+          `,
+          [
+            subId,
+            creditDescription
+          ]
+        );
+
+
+      // لا يوجد Credit سابق
+      if (
+        original.rows.length === 0
+      ) {
+
+        await client.query(
+          "ROLLBACK"
+        );
+
+        console.warn(
+          `⚠️ Offerwall chargeback without original credit: ${transId}`
+        );
+
+        // نرجع 200 حتى لا يستمر Offerwall في إعادة المحاولة
+        return c.text(
+          "ok",
+          200
+        );
       }
 
-      // التحقق من عدم وجود استرداد مسبق
-      const existingReversal = await client.query(
-        `SELECT id FROM earnings WHERE user_id = $1 AND source = 'offerwall_reversal' AND description = $2 LIMIT 1`,
-        [subId, reversalDescription]
-      );
 
-      if (existingReversal.rows.length > 0) {
-        await client.query("ROLLBACK");
-        console.log(`🔁 Offerwall chargeback duplicate ignored: ${transId}`);
-        return c.text("ok", 200);
+      // -------------------------------------------------
+      // هل تم تنفيذ الـChargeback من قبل؟
+      // -------------------------------------------------
+      const existingReversal =
+        await client.query(
+          `
+          SELECT id
+          FROM earnings
+          WHERE user_id = $1
+            AND source = 'offerwall_reversal'
+            AND description = $2
+          LIMIT 1
+          `,
+          [
+            subId,
+            reversalDescription
+          ]
+        );
+
+
+      if (
+        existingReversal.rows.length > 0
+      ) {
+
+        await client.query(
+          "ROLLBACK"
+        );
+
+        console.log(
+          `🔁 Offerwall chargeback duplicate ignored: ${transId}`
+        );
+
+        return c.text(
+          "ok",
+          200
+        );
       }
 
-      const originalAmount = Math.abs(Number(original.rows[0].amount));
 
+      // -------------------------------------------------
+      // المبلغ الأصلي الذي تم إضافته
+      // -------------------------------------------------
+      const originalAmount =
+        Math.abs(
+          Number(
+            original.rows[0].amount
+          )
+        );
+
+
+      if (
+        !Number.isFinite(
+          originalAmount
+        ) ||
+        originalAmount <= 0
+      ) {
+
+        await client.query(
+          "ROLLBACK"
+        );
+
+        return c.text(
+          "ERROR: Invalid original amount",
+          400
+        );
+      }
+
+
+      // -------------------------------------------------
       // خصم المبلغ من المستخدم
+      // -------------------------------------------------
       await client.query(
-        'UPDATE users SET balance = balance - $1 WHERE telegram_id = $2',
-        [originalAmount, subId]
+        `
+        UPDATE users
+        SET balance =
+          COALESCE(balance, 0) - $1
+        WHERE telegram_id = $2
+        `,
+        [
+          originalAmount,
+          subId
+        ]
       );
 
-      // تسجيل الاسترداد
+
+      // -------------------------------------------------
+      // تسجيل الـReversal
+      // -------------------------------------------------
       await client.query(
-        `INSERT INTO earnings (user_id, source, amount, description, watched_seconds, video_id, created_at)
-        VALUES ($1, $2, $3, $4, NULL, NULL, NOW())`,
-        [subId, 'offerwall_reversal', -originalAmount, reversalDescription]
+        `
+        INSERT INTO earnings
+        (
+          user_id,
+          amount,
+          source,
+          description,
+          created_at
+        )
+        VALUES
+        (
+          $1,
+          $2,
+          'offerwall_reversal',
+          $3,
+          NOW()
+        )
+        `,
+        [
+          subId,
+          -originalAmount,
+          reversalDescription
+        ]
       );
 
-      await client.query("COMMIT");
-      console.log(`↩️ Offerwall chargeback processed: ${originalAmount} | user=${subId} | transId=${transId}`);
-      return c.text("ok", 200);
+
+      await client.query(
+        "COMMIT"
+      );
+
+      client.release();
+      client = null;
+
+
+      console.log(
+        `↩️ Offerwall chargeback processed: ${originalAmount} | user=${subId} | transId=${transId}`
+      );
+
+      return c.text(
+        "ok",
+        200
+      );
     }
 
   } catch (err) {
+
     try {
-      if (client) await client.query("ROLLBACK");
+
+      if (client) {
+        await client.query(
+          "ROLLBACK"
+        );
+      }
+
     } catch (_) {}
+
     if (client) {
       client.release();
       client = null;
     }
-    console.error("❌ Offerwall Postback Error:", err);
-    return c.text("Server Error", 500);
+
+    console.error(
+      "❌ Offerwall Postback Error:",
+      err
+    );
+
+    return c.text(
+      "Server Error",
+      500
+    );
   }
 });
 
