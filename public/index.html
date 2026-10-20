@@ -1,0 +1,606 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Taskora is an online rewards platform where registered users can explore available tasks, offers and other eligible reward activities.">
+  <meta name="robots" content="index,follow">
+  <meta name="theme-color" content="#101827">
+
+  <title>Taskora - Online Rewards Platform</title>
+
+  <style>
+    :root {
+      --bg: #101827;
+      --surface: #182438;
+      --surface-light: #202f45;
+      --green: #16a36a;
+      --green-light: #42d392;
+      --gold: #e5bc59;
+      --text: #f4f7fb;
+      --muted: #b7c3d3;
+      --border: rgba(255,255,255,.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--green-light);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .container {
+      width: min(1100px, 92%);
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: rgba(16, 24, 39, .96);
+    }
+
+    .navbar {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+      padding: 14px 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 25px;
+      font-weight: 800;
+      letter-spacing: .3px;
+      color: var(--text);
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      color: #081b13;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--green-light), var(--gold));
+    }
+
+    nav {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      font-size: 14px;
+    }
+
+    nav a {
+      color: var(--muted);
+    }
+
+    .hero {
+      padding: 85px 0 75px;
+      background:
+        radial-gradient(ellipse at top right, rgba(22,163,106,.20), transparent 45%),
+        radial-gradient(ellipse at bottom left, rgba(229,188,89,.10), transparent 40%);
+    }
+
+    .hero-content {
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      color: var(--green-light);
+      border: 1px solid rgba(66,211,146,.30);
+      background: rgba(22,163,106,.10);
+      padding: 6px 14px;
+      border-radius: 50px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: clamp(36px, 6vw, 60px);
+      line-height: 1.15;
+      margin: 0 0 22px;
+      letter-spacing: -1.4px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(90deg, var(--green-light), var(--gold));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero p {
+      color: var(--muted);
+      font-size: 18px;
+      max-width: 690px;
+      margin: 0 auto 28px;
+    }
+
+    .button {
+      display: inline-block;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-weight: 700;
+      margin: 5px;
+      background: var(--green);
+      color: white;
+    }
+
+    .button:hover {
+      text-decoration: none;
+      filter: brightness(1.1);
+    }
+
+    .button.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    section {
+      padding: 58px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .section-heading {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    h2 {
+      font-size: clamp(26px, 4vw, 36px);
+      line-height: 1.25;
+      margin: 0 0 12px;
+    }
+
+    .section-heading p {
+      color: var(--muted);
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 25px;
+    }
+
+    .card-icon {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: rgba(22,163,106,.13);
+      color: var(--green-light);
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 19px;
+    }
+
+    .card p {
+      color: var(--muted);
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .info-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 28px;
+    }
+
+    .info-panel h3 {
+      color: var(--green-light);
+      margin-top: 0;
+    }
+
+    .info-panel p,
+    .info-panel li {
+      color: var(--muted);
+    }
+
+    .info-panel ul {
+      padding-left: 22px;
+    }
+
+    .legal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .notice {
+      color: var(--muted);
+      font-size: 13px;
+      border-left: 3px solid var(--gold);
+      padding: 12px 15px;
+      background: rgba(229,188,89,.06);
+      margin-top: 18px;
+    }
+
+    footer {
+      padding: 28px 0;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 760px) {
+      .cards,
+      .legal-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 60px 0;
+      }
+
+      .navbar {
+        justify-content: center;
+      }
+
+      nav {
+        justify-content: center;
+      }
+
+      .card {
+        padding: 22px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="container navbar">
+      <a class="brand" href="#home" aria-label="Taskora home">
+        <span class="brand-mark">T</span>
+        <span>Taskora</span>
+      </a>
+
+      <nav aria-label="Main navigation">
+        <a href="#about">About</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#payments">Rewards & Payments</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#terms">Terms</a>
+        <a href="#contact">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="home">
+      <div class="container hero-content">
+        <span class="eyebrow">ONLINE REWARDS PLATFORM</span>
+
+        <h1>
+          Welcome to <span class="gradient-text">Taskora</span>
+        </h1>
+
+        <p>
+          Taskora is an online rewards platform that helps registered users
+          discover available tasks, promotional offers and other eligible
+          activities through a single, easy-to-use experience.
+        </p>
+
+        <a
+          class="button"
+          href="https://t.me/TasksRewardBot"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open Taskora
+        </a>
+
+        <a class="button secondary" href="#how-it-works">
+          Learn More
+        </a>
+      </div>
+    </section>
+
+    <section id="about">
+      <div class="container">
+        <div class="section-heading">
+          <h2>About Taskora</h2>
+          <p>
+            Our goal is to provide a clear and accessible platform for
+            discovering online earning opportunities and tracking eligible
+            rewards in one place.
+          </p>
+        </div>
+
+        <div class="info-panel">
+          <p>
+            Taskora is designed for users who want to explore online tasks
+            and offers. Depending on availability, location, provider rules
+            and account eligibility, users may be able to participate in
+            activities and receive rewards credited to their accounts.
+          </p>
+
+          <p>
+            Taskora displays account-related information such as available
+            balance and activity records through its application interface.
+            Available activities and reward amounts may change over time.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <div class="container">
+        <div class="section-heading">
+          <h2>How It Works</h2>
+          <p>
+            The general process for using Taskora is simple. Actual features
+            depend on the options available to each account.
+          </p>
+        </div>
+
+        <div class="cards">
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">01</div>
+            <h3>Create an Account</h3>
+            <p>
+              Register for an account and use the available application
+              features to access activities offered to eligible users.
+            </p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">02</div>
+            <h3>Explore Activities</h3>
+            <p>
+              Review the tasks and promotional offers available to you.
+              Follow the applicable instructions and provider requirements.
+            </p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">03</div>
+            <h3>Track Eligible Rewards</h3>
+            <p>
+              Check your account balance and activity status. Rewards are
+              subject to validation and the rules of the relevant activity.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="payments">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Rewards and Payments</h2>
+          <p>
+            Taskora account balances and eligible reward transactions are
+            managed according to the platform's applicable rules.
+          </p>
+        </div>
+
+        <div class="info-panel">
+          <h3>Reward eligibility</h3>
+          <p>
+            Rewards are not guaranteed merely by viewing an offer or opening
+            an activity. The required action must be completed and accepted
+            under the applicable task or offer provider rules.
+          </p>
+
+          <h3>Balance and withdrawal requests</h3>
+          <p>
+            Where withdrawal functionality is available, requests are subject
+            to the platform's current minimum amounts, supported payment
+            methods, account checks and any applicable review process.
+          </p>
+
+          <h3>Third-party providers</h3>
+          <p>
+            Some activities may be provided by external services. Their
+            availability, tracking, eligibility requirements and processing
+            times may be outside Taskora's direct control.
+          </p>
+
+          <div class="notice">
+            Please check the current rules shown inside the application
+            before completing an activity or submitting a payment request.
+            No specific earning amount or processing time is guaranteed.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Privacy Information</h2>
+          <p>
+            This section describes general privacy principles. The final
+            policy should accurately reflect the information Taskora actually
+            collects, stores and shares.
+          </p>
+        </div>
+
+        <div class="info-panel">
+          <h3>Information and use</h3>
+          <p>
+            Operating an account-based rewards platform may involve processing
+            account identifiers, account activity, reward records and
+            information required to provide requested services, prevent abuse
+            and maintain platform security.
+          </p>
+
+          <h3>Service providers</h3>
+          <p>
+            Certain features may rely on third-party providers. Information
+            may be processed by those providers when required to deliver a
+            requested feature, subject to the applicable service terms and
+            privacy practices.
+          </p>
+
+          <h3>Security and retention</h3>
+          <p>
+            Appropriate safeguards should be used to protect account
+            information. Retention periods and applicable user rights depend
+            on the actual systems, legal obligations and services involved.
+          </p>
+
+          <div class="notice">
+            Before submitting this page for business verification, publish
+            a complete privacy policy that reflects Taskora's real data
+            practices and applicable legal requirements.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="terms">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Terms of Use</h2>
+          <p>
+            Users should read and follow the actual rules governing their
+            Taskora accounts and any third-party activities.
+          </p>
+        </div>
+
+        <div class="info-panel">
+          <h3>Acceptable use</h3>
+          <p>
+            Users should provide accurate account information and must not
+            manipulate activities, submit fraudulent records, exploit
+            technical errors or attempt to obtain rewards through abuse.
+          </p>
+
+          <h3>Reward verification</h3>
+          <p>
+            Activities may require validation. A reward may be delayed,
+            rejected or reversed where permitted by the applicable rules
+            if an activity is invalid, incomplete or fraudulent.
+          </p>
+
+          <h3>Changes and availability</h3>
+          <p>
+            Features, offers and reward terms may change. Availability may
+            vary by country, account eligibility and third-party provider
+            requirements.
+          </p>
+
+          <h3>Final terms</h3>
+          <p>
+            These statements are a starting point for a terms document, not
+            a complete legal agreement. Replace or expand them to match the
+            actual Taskora service before relying on this section as binding
+            terms.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact">
+      <div class="container">
+        <div class="section-heading">
+          <h2>Contact Taskora</h2>
+          <p>
+            For access to the application, begin with the Taskora bot.
+            Use the support channel published in the application for
+            account-specific questions.
+          </p>
+        </div>
+
+        <div class="info-panel" style="text-align:center">
+          <h3>Taskora Online Rewards</h3>
+          <p>
+            Application access:
+            <a
+              href="https://t.me/TasksRewardBot"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open Taskora on Telegram</a>
+          </p>
+          <p>
+            Please do not send passwords or other sensitive account
+            credentials through public messages.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <div>
+        © <span id="current-year">2026</span> Taskora. All rights reserved.
+      </div>
+
+      <div class="footer-links">
+        <a href="#about">About</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#terms">Terms</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById("current-year").textContent =
+      new Date().getFullYear();
+  </script>
+</body>
+</html>
