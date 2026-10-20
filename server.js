@@ -1022,45 +1022,398 @@ app.post("/api/deposit/submit", async (c) => {
   }
 });
 
-// =========================
-// DEPOSIT - History
-// =========================
+
+
+/* =====================================================
+   FAUCETPAY MERCHANT DEPOSITS
+   Cloudflare Workers + Hono + Neon
+   ===================================================== */
+
+const FAUCETPAY_MERCHANT_USERNAME = "lonardo123";
+const FAUCETPAY_CHECKOUT_URL =
+  "https://faucetpay.io/merchant/webscr";
+const FAUCETPAY_VERIFY_URL =
+  "https://faucetpay.io/merchant/get-payment/";
+
+// -----------------------------------------------------
+// 1. CREATE PAYMENT
+// POST /api/faucetpay/create-payment
+// -----------------------------------------------------
+app.post("/api/faucetpay/create-payment", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+
+    const userId = String(body.user_id || "");
+    const amountText = String(body.amount ?? "");
+
+    // Validate Telegram user ID
+    if (!/^\d{1,19}$/.test(userId)) {
+      return c.json({
+        success: false,
+        message: "Invalid user ID"
+      }, 400);
+    }
+
+    // Accept amounts with at most 2 decimal places
+    if (!/^\d{1,7}(\.\d{1,2})?$/.test(amountText)) {
+      return c.json({
+        success: false,
+        message: "Invalid deposit amount"
+      }, 400);
+    }
+
+    const amountCents = Math.round(Number(amountText) * 100);
+
+    // Minimum 1 USDT; maximum 1000 USDT
+    if (
+      !Number.isSafeInteger(amountCents) ||
+      amountCents < 100 ||
+      amountCents > 100000
+    ) {
+      return c.json({
+        success: false,
+        message: "Deposit must be between 1 and 1000 USDT"
+      }, 400);
+    }
+
+    const amount = (amountCents / 100).toFixed(2);
+
+    // Verify that this Telegram user exists
+    const userResult = await pool.query(
+      `SELECT telegram_id
+       FROM users
+       WHERE telegram_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return c.json({
+        success: false,
+        message: "User not found"
+      }, 404);
+    }
+
+    // Unique order reference returned by FaucetPay callback
+    const customId =
+      "taskora_" + crypto.randomUUID();
+
+    const inserted = await pool.query(
+      `INSERT INTO faucetpay_deposits
+         (user_id, amount, currency1, custom_id, status, created_at)
+       VALUES ($1, $2, 'USDT', $3, 'pending', NOW())
+       RETURNING id`,
+      [userId, amount, customId]
+    );
+
+    const origin = new URL(c.req.url).origin;
+
+    const formFields = {
+      merchant_username: FAUCETPAY_MERCHANT_USERNAME,
+      item_description: `Taskora account deposit #${inserted.rows[0].id}`,
+      amount1: amount,
+      currency1: "USDT",
+      currency2: "",
+      custom: customId,
+      callback_url: `${origin}/api/faucetpay/callback`,
+      success_url: `${origin}/?deposit=success`,
+      cancel_url: `${origin}/?deposit=cancelled`
+    };
+
+    return c.json({
+      success: true,
+      checkout_url: FAUCETPAY_CHECKOUT_URL,
+      form_fields: formFields,
+      deposit_id: inserted.rows[0].id
+    });
+
+  } catch (err) {
+    console.error(
+      "FaucetPay create-payment error:",
+      err.message
+    );
+
+    return c.json({
+      success: false,
+      message: "Could not create deposit payment"
+    }, 500);
+  }
+});
+
+
+// -----------------------------------------------------
+// 2. VERIFY PAYMENT CALLBACK
+// POST /api/faucetpay/callback
+// -----------------------------------------------------
+app.post("/api/faucetpay/callback", async (c) => {
+  let client;
+
+  try {
+    const form = await c.req.formData();
+
+    const token = String(form.get("token") || "");
+    const customId = String(form.get("custom") || "");
+
+    if (
+      !token ||
+      token.length > 500 ||
+      !/^taskora_[a-f0-9-]{36}$/i.test(customId)
+    ) {
+      return c.text("Invalid callback data", 400);
+    }
+
+    // Find the exact pending order
+    const orderResult = await pool.query(
+      `SELECT id, user_id, amount, currency1, custom_id, status
+       FROM faucetpay_deposits
+       WHERE custom_id = $1
+       LIMIT 1`,
+      [customId]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return c.text("Deposit order not found", 404);
+    }
+
+    const order = orderResult.rows[0];
+
+    // Idempotency: an already credited payment must not be credited again
+    if (order.status === "approved") {
+      return c.text("OK", 200);
+    }
+
+    // Ask FaucetPay to verify the single-use token.
+    // Never credit balance from callback fields alone.
+    const verifyResponse = await fetch(
+      FAUCETPAY_VERIFY_URL + encodeURIComponent(token),
+      { method: "GET" }
+    );
+
+    if (!verifyResponse.ok) {
+      console.error(
+        "FaucetPay verification HTTP status:",
+        verifyResponse.status
+      );
+
+      return c.text("Payment verification temporarily failed", 503);
+    }
+
+    const verified = await verifyResponse.json();
+
+    if (verified.valid !== true) {
+      return c.text("Payment token is not valid", 400);
+    }
+
+    // Compare verified details with our own stored order
+    const verifiedCustom = String(verified.custom || "");
+    const verifiedMerchant =
+      String(verified.merchant_username || "").toLowerCase();
+    const verifiedCurrency =
+      String(verified.currency1 || "").toUpperCase();
+    const verifiedTransactionId =
+      String(verified.transaction_id || "");
+    const verifiedAmountText = String(verified.amount1 ?? "");
+
+    if (
+      verifiedCustom !== order.custom_id ||
+      verifiedMerchant !== FAUCETPAY_MERCHANT_USERNAME.toLowerCase() ||
+      verifiedCurrency !== "USDT" ||
+      !verifiedTransactionId ||
+      !/^\d+(\.\d{1,2})?$/.test(verifiedAmountText) ||
+      Math.round(Number(verifiedAmountText) * 100) !==
+        Math.round(Number(order.amount) * 100)
+    ) {
+      console.error(
+        "FaucetPay verification mismatch for order:",
+        order.id
+      );
+
+      return c.text("Verified payment does not match the order", 400);
+    }
+
+    // Atomic database transaction:
+    // credit the user and approve the order together, only once.
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+    const lockedResult = await client.query(
+      `SELECT id, user_id, amount, currency1, custom_id, status
+       FROM faucetpay_deposits
+       WHERE id = $1
+       FOR UPDATE`,
+      [order.id]
+    );
+
+    if (lockedResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return c.text("Deposit order not found", 404);
+    }
+
+    const lockedOrder = lockedResult.rows[0];
+
+    // Another callback may already have completed this order.
+    if (lockedOrder.status === "approved") {
+      await client.query("COMMIT");
+      return c.text("OK", 200);
+    }
+
+    // Prevent reusing a transaction already credited to another order.
+    const duplicateTx = await client.query(
+      `SELECT id
+       FROM faucetpay_deposits
+       WHERE transaction_id = $1
+       LIMIT 1`,
+      [verifiedTransactionId]
+    );
+
+    if (duplicateTx.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return c.text("Transaction already used", 409);
+    }
+
+    // Ensure the user still exists and credit the correct account.
+    const balanceResult = await client.query(
+      `UPDATE users
+       SET balance = COALESCE(balance, 0) + $1::numeric
+       WHERE telegram_id = $2
+       RETURNING telegram_id`,
+      [lockedOrder.amount, lockedOrder.user_id]
+    );
+
+    if (balanceResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return c.text("User not found", 404);
+    }
+
+    // Mark order approved in the same transaction.
+    await client.query(
+      `UPDATE faucetpay_deposits
+       SET status = 'approved',
+           transaction_id = $1,
+           payer_username = $2,
+           currency2 = $3,
+           processed_at = NOW(),
+           admin_note = NULL
+       WHERE id = $4`,
+      [
+        verifiedTransactionId,
+        String(verified.payer_username || ""),
+        String(verified.currency2 || ""),
+        lockedOrder.id
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    console.log(
+      `FaucetPay deposit approved: order=${lockedOrder.id}, user=${lockedOrder.user_id}`
+    );
+
+    // FaucetPay expects HTTP 200 after successful processing.
+    return c.text("OK", 200);
+
+  } catch (err) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackErr) {
+        console.error(
+          "FaucetPay rollback error:",
+          rollbackErr.message
+        );
+      }
+    }
+
+    console.error(
+      "FaucetPay callback error:",
+      err.message
+    );
+
+    // A server/database error should not be acknowledged as successful.
+    return c.text("Internal callback error", 500);
+
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
+
+
+
+/* =====================================================
+   DEPOSIT HISTORY - MANUAL + FAUCETPAY
+   ===================================================== */
 app.get("/api/deposit/history", async (c) => {
   try {
-    const id = c.req.query('id');
-    
-    if (!id || !/^\d+$/.test(id)) {
-      return c.json({ success: false, message: "Invalid user id" });
+    const id = c.req.query("id");
+
+    if (!id || !/^\d{1,19}$/.test(id)) {
+      return c.json({
+        success: false,
+        message: "Invalid user id"
+      }, 400);
     }
-    
-    const telegramId = Number(id);
-    
+
     const result = await pool.query(
-      `SELECT id, txid, amount, status, created_at, processed_at, admin_note
-       FROM deposit_requests 
-       WHERE user_id = $1 
-       ORDER BY created_at DESC 
+      `SELECT *
+       FROM (
+         SELECT
+           'MANUAL-' || id::text AS id,
+           txid::text AS txid,
+           amount,
+           status,
+           created_at,
+           processed_at,
+           admin_note
+         FROM deposit_requests
+         WHERE user_id = $1
+
+         UNION ALL
+
+         SELECT
+           'FP-' || id::text AS id,
+           COALESCE(transaction_id, custom_id) AS txid,
+           amount,
+           status,
+           created_at,
+           processed_at,
+           admin_note
+         FROM faucetpay_deposits
+         WHERE user_id = $1
+       ) AS all_deposits
+       ORDER BY created_at DESC
        LIMIT 20`,
-      [telegramId]
+      [id]
     );
-    
-    return c.json({ 
-      success: true, 
+
+    return c.json({
+      success: true,
       data: result.rows.map(row => ({
         id: row.id,
         txid: row.txid,
-        amount: parseFloat(row.amount || 0),
+        amount: Number(row.amount || 0),
         status: row.status,
         created_at: row.created_at,
         processed_at: row.processed_at,
         admin_note: row.admin_note
       }))
     });
+
   } catch (err) {
-    console.error("Deposit history error:", err);
-    return c.json({ success: false, message: "Failed to load history" });
+    console.error(
+      "Deposit history error:",
+      err.message
+    );
+
+    return c.json({
+      success: false,
+      message: "Failed to load history"
+    }, 500);
   }
 });
+
 
 // =========================
 // دالة مساعدة لتنظيف عنوان المحفظة
