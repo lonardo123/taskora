@@ -2545,16 +2545,10 @@ app.post(
        * هنا يتم إرجاع amount المخزن في طلب السحب.
        *
        * إذا كان amount في جدول withdrawals
-       * هو المبلغ بعد خصم رسوم 5%
        * أخبرني وسنعدل منطق الخصم حسب طريقة إنشاء طلب السحب.
        */
 
-      const netAmount = Number(amount);
-
-const refundAmount =
-  Math.round(
-    (netAmount / 0.95) * 1000000
-  ) / 1000000;
+      const refundAmount = Number(amount);
 
 
       if (
