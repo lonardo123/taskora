@@ -1401,9 +1401,11 @@ app.get("/api/deposit/history", async (c) => {
 
 
 
+
 /* =========================
    WITHDRAW - Submit Request
    FaucetPay Email - Manual Payment
+   Strict 7-Day Cooldown
    ========================= */
 
 // تنظيف بريد FaucetPay
@@ -1453,7 +1455,7 @@ app.post("/api/withdraw/submit", async (c) => {
       }, 400);
     }
 
-    // التأكد من أن المبلغ يحتوي على رقمين عشريين كحد أقصى
+    // التحقق من المبلغ: منزلتان عشريتان كحد أقصى
     const amountText = String(requestedAmount ?? "").trim();
 
     if (!/^\d+(?:\.\d{1,2})?$/.test(amountText)) {
@@ -1474,7 +1476,8 @@ app.post("/api/withdraw/submit", async (c) => {
     ) {
       return c.json({
         success: false,
-        message: "Minimum withdrawal is $0.03 and maximum is $0.99"
+        message:
+          "Minimum withdrawal is $0.03 and maximum is $0.99"
       }, 400);
     }
 
@@ -1491,7 +1494,7 @@ app.post("/api/withdraw/submit", async (c) => {
     try {
       await client.query("BEGIN");
 
-      // قفل سجل المستخدم لتجنب طلبات متزامنة تتجاوز الرصيد
+      // قفل سجل المستخدم لمنع الطلبات المتزامنة
       const userRes = await client.query(
         `SELECT telegram_id, balance
          FROM users
@@ -1509,6 +1512,79 @@ app.post("/api/withdraw/submit", async (c) => {
         }, 404);
       }
 
+      // ==========================================
+      // STRICT 7-DAY WITHDRAWAL COOLDOWN
+      // ==========================================
+
+      // فحص آخر طلب سحب بغض النظر عن حالته
+      const lastWithdrawalRes = await client.query(
+        `SELECT requested_at
+         FROM withdrawals
+         WHERE user_id = $1
+         ORDER BY requested_at DESC
+         LIMIT 1`,
+        [String(user_id)]
+      );
+
+      if (lastWithdrawalRes.rows.length > 0) {
+        const lastRequestedAt = new Date(
+          lastWithdrawalRes.rows[0].requested_at
+        );
+
+        // لا تسمح بتجاوز الشرط إذا كان التاريخ غير صالح
+        if (Number.isNaN(lastRequestedAt.getTime())) {
+          throw new Error(
+            "Invalid requested_at timestamp in withdrawal history"
+          );
+        }
+
+        // سبعة أيام كاملة = 168 ساعة
+        const cooldownMs = 7 * 24 * 60 * 60 * 1000;
+
+        const nextAllowedAt = new Date(
+          lastRequestedAt.getTime() + cooldownMs
+        );
+
+        const now = Date.now();
+
+        if (now < nextAllowedAt.getTime()) {
+          const remainingMs = nextAllowedAt.getTime() - now;
+
+          const remainingDays = Math.floor(
+            remainingMs / (24 * 60 * 60 * 1000)
+          );
+
+          const remainingHours = Math.floor(
+            (remainingMs % (24 * 60 * 60 * 1000)) /
+            (60 * 60 * 1000)
+          );
+
+          const remainingMinutes = Math.floor(
+            (remainingMs % (60 * 60 * 1000)) /
+            (60 * 1000)
+          );
+
+          await client.query("ROLLBACK");
+
+          return c.json({
+            success: false,
+            message:
+              "Withdrawal request denied. You must wait 7 full days " +
+              "between withdrawal requests. " +
+              `Time remaining: ${remainingDays} days, ` +
+              `${remainingHours} hours, ${remainingMinutes} minutes. ` +
+              "Next allowed time (UTC): " +
+              nextAllowedAt.toISOString(),
+            next_allowed_at: nextAllowedAt.toISOString(),
+            remaining_ms: remainingMs
+          }, 429);
+        }
+      }
+
+      // ==========================================
+      // CHECK BALANCE
+      // ==========================================
+
       const balance = Number(userRes.rows[0].balance) || 0;
 
       if (balance < requested) {
@@ -1522,8 +1598,10 @@ app.post("/api/withdraw/submit", async (c) => {
         }, 400);
       }
 
-      // عمولة السحب 5%
-      // الاحتفاظ بأربع خانات عشرية للعمولة وصافي المبلغ
+      // ==========================================
+      // WITHDRAWAL FEE: 5%
+      // ==========================================
+
       const withdrawalFee = Number(
         (requested * 0.05).toFixed(4)
       );
@@ -1532,8 +1610,8 @@ app.post("/api/withdraw/submit", async (c) => {
         (requested - withdrawalFee).toFixed(4)
       );
 
-      // تخزين صافي المبلغ والبريد في العمود الحالي payeer_wallet
-      // الطلب يبقى pending ليتم دفعه يدويًا من الإدارة
+      // إنشاء طلب السحب
+      // فترة الانتظار تبدأ من requested_at
       await client.query(
         `INSERT INTO withdrawals
           (user_id, amount, payeer_wallet, status, requested_at, admin_note)
@@ -1542,13 +1620,13 @@ app.post("/api/withdraw/submit", async (c) => {
           String(user_id),
           netAmount,
           faucetPayEmail,
-          `Method: FaucetPay | Requested: $${requested.toFixed(2)} | ` +
+          `Method: FaucetPay | Requested: $${requested.toFixed(4)} | ` +
           `Fee: $${withdrawalFee.toFixed(4)} (5%) | ` +
           `Net: $${netAmount.toFixed(4)}`
         ]
       );
 
-      // خصم المبلغ الإجمالي المطلوب من رصيد المستخدم
+      // خصم المبلغ الإجمالي من رصيد المستخدم
       const updateRes = await client.query(
         `UPDATE users
          SET balance = balance - $1::numeric
@@ -1563,11 +1641,17 @@ app.post("/api/withdraw/submit", async (c) => {
 
       return c.json({
         success: true,
-        message: "FaucetPay withdrawal request submitted successfully",
+        message:
+          "Withdrawal request submitted successfully. " +
+          "Processing may take up to 10 business days. " +
+          "You can submit another withdrawal after 7 full days.",
         requested_amount: requested,
         fee: withdrawalFee,
         net_amount: netAmount,
-        remaining: remaining
+        remaining: remaining,
+        next_allowed_at: new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000
+        ).toISOString()
       });
 
     } catch (err) {
@@ -1593,6 +1677,7 @@ app.post("/api/withdraw/submit", async (c) => {
     }
   }
 });
+
 
 
 // =========================
