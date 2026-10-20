@@ -1415,99 +1415,200 @@ app.get("/api/deposit/history", async (c) => {
 });
 
 
-// =========================
-// دالة مساعدة لتنظيف عنوان المحفظة
-// =========================
-function cleanTRC20Address(address) {
-  if (!address) return '';
-  return address
-    .trim()
-    .replace(/\s/g, '')
-    .replace(/[^\x20-\x7E]/g, '');
+
+/* =========================
+   WITHDRAW - Submit Request
+   FaucetPay Email - Manual Payment
+   ========================= */
+
+// تنظيف بريد FaucetPay
+function cleanFaucetPayEmail(email) {
+  if (typeof email !== "string") return "";
+  return email.trim();
 }
 
-// =========================
-// WITHDRAW - Submit Request
-// =========================
+// التحقق الأساسي من صيغة البريد الإلكتروني
+function isValidFaucetPayEmail(email) {
+  if (!email || email.length > 254) return false;
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 app.post("/api/withdraw/submit", async (c) => {
+  let client;
+
   try {
-    const { user_id, wallet, network, amount: requestedAmount } = await c.req.json();
-    
-    if (!user_id || !wallet) {
-      return c.json({ success: false, message: "Invalid data" });
+    const {
+      user_id,
+      wallet,
+      network,
+      amount: requestedAmount
+    } = await c.req.json();
+
+    // التحقق من بيانات المستخدم
+    if (
+      user_id === undefined ||
+      user_id === null ||
+      !/^\d+$/.test(String(user_id)) ||
+      !wallet
+    ) {
+      return c.json({
+        success: false,
+        message: "Invalid data"
+      }, 400);
     }
 
-    const cleanWallet = cleanTRC20Address(wallet);
-    
-    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(cleanWallet)) {
-      return c.json({ success: false, message: "Invalid TRC20 address" });
+    // تنظيف البريد والتحقق منه
+    const faucetPayEmail = cleanFaucetPayEmail(wallet);
+
+    if (!isValidFaucetPayEmail(faucetPayEmail)) {
+      return c.json({
+        success: false,
+        message: "Invalid FaucetPay email"
+      }, 400);
     }
-    
-    const requested = parseFloat(requestedAmount);
-    // ملاحظة: تم استبدال MIN_WITHDRAW بـ 1.00 لضمان عدم وجود متغير غير معرف
-    if (!requested || isNaN(requested) || requested < 1.00) {
-      return c.json({ success: false, message: "Minimum withdraw is $1.00" });
+
+    // التأكد من أن المبلغ يحتوي على رقمين عشريين كحد أقصى
+    const amountText = String(requestedAmount ?? "").trim();
+
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amountText)) {
+      return c.json({
+        success: false,
+        message: "Invalid withdrawal amount"
+      }, 400);
     }
-    
-    const userRes = await pool.query(
-      "SELECT telegram_id, balance FROM users WHERE telegram_id = $1",
-      [user_id]
-    );
-    
-    if (userRes.rows.length === 0) {
-      return c.json({ success: false, message: "User not found" });
+
+    const requestedCents = Math.round(Number(amountText) * 100);
+    const requested = requestedCents / 100;
+
+    // حدود السحب: من 0.03 إلى 0.99 دولار
+    if (
+      !Number.isSafeInteger(requestedCents) ||
+      requestedCents < 3 ||
+      requestedCents > 99
+    ) {
+      return c.json({
+        success: false,
+        message: "Minimum withdrawal is $0.03 and maximum is $0.99"
+      }, 400);
     }
-    
-    let balance = parseFloat(userRes.rows[0].balance) || 0;
-    
-    if (balance < requested) {
-      return c.json({ 
-        success: false, 
-        message: `Insufficient balance. Required: $${requested.toFixed(4)}, Available: $${balance.toFixed(4)}` 
-      });
+
+    // قبول FaucetPay فقط
+    if (network && network !== "FaucetPay") {
+      return c.json({
+        success: false,
+        message: "Invalid withdrawal method"
+      }, 400);
     }
-    
-    const withdrawalFee = requested * 0.05;
-    const netAmount = requested - withdrawalFee;
-    const remaining = balance - requested;
-    
-    const client = await pool.connect();
+
+    client = await pool.connect();
+
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
+      // قفل سجل المستخدم لتجنب طلبات متزامنة تتجاوز الرصيد
+      const userRes = await client.query(
+        `SELECT telegram_id, balance
+         FROM users
+         WHERE telegram_id = $1
+         FOR UPDATE`,
+        [String(user_id)]
+      );
+
+      if (userRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+
+        return c.json({
+          success: false,
+          message: "User not found"
+        }, 404);
+      }
+
+      const balance = Number(userRes.rows[0].balance) || 0;
+
+      if (balance < requested) {
+        await client.query("ROLLBACK");
+
+        return c.json({
+          success: false,
+          message:
+            `Insufficient balance. Required: $${requested.toFixed(2)}, ` +
+            `Available: $${balance.toFixed(6)}`
+        }, 400);
+      }
+
+      // عمولة السحب 5%
+      // الاحتفاظ بأربع خانات عشرية للعمولة وصافي المبلغ
+      const withdrawalFee = Number(
+        (requested * 0.05).toFixed(4)
+      );
+
+      const netAmount = Number(
+        (requested - withdrawalFee).toFixed(4)
+      );
+
+      // تخزين صافي المبلغ والبريد في العمود الحالي payeer_wallet
+      // الطلب يبقى pending ليتم دفعه يدويًا من الإدارة
       await client.query(
-        `INSERT INTO withdrawals (user_id, amount, payeer_wallet, status, requested_at, admin_note)
+        `INSERT INTO withdrawals
+          (user_id, amount, payeer_wallet, status, requested_at, admin_note)
          VALUES ($1, $2, $3, 'pending', NOW(), $4)`,
-        [user_id, netAmount, cleanWallet, `Requested: ${requested.toFixed(4)}$, Fee: ${withdrawalFee.toFixed(4)}$ (5%)`]
+        [
+          String(user_id),
+          netAmount,
+          faucetPayEmail,
+          `Method: FaucetPay | Requested: $${requested.toFixed(2)} | ` +
+          `Fee: $${withdrawalFee.toFixed(4)} (5%) | ` +
+          `Net: $${netAmount.toFixed(4)}`
+        ]
       );
-      
-      await client.query(
-        "UPDATE users SET balance = $1 WHERE telegram_id = $2",
-        [remaining, user_id]
+
+      // خصم المبلغ الإجمالي المطلوب من رصيد المستخدم
+      const updateRes = await client.query(
+        `UPDATE users
+         SET balance = balance - $1::numeric
+         WHERE telegram_id = $2
+         RETURNING balance`,
+        [requested.toFixed(2), String(user_id)]
       );
-      
-      await client.query('COMMIT');
-      
+
+      const remaining = Number(updateRes.rows[0].balance);
+
+      await client.query("COMMIT");
+
       return c.json({
         success: true,
-        message: "Withdrawal request submitted",
+        message: "FaucetPay withdrawal request submitted successfully",
         requested_amount: requested,
         fee: withdrawalFee,
         net_amount: netAmount,
         remaining: remaining
       });
-      
+
     } catch (err) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw err;
+
     } finally {
       client.release();
+      client = null;
     }
+
   } catch (err) {
     console.error("Withdraw submit error:", err);
-    return c.json({ success: false, message: "Failed to submit withdrawal: " + err.message });
+
+    return c.json({
+      success: false,
+      message: "Failed to submit withdrawal"
+    }, 500);
+
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 });
+
 
 // =========================
 // WITHDRAW - History
