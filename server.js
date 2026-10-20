@@ -1049,15 +1049,15 @@ app.post("/api/faucetpay/create-payment", async (c) => {
 
     const amountCents = Math.round(Number(amountText) * 100);
 
-    // Minimum 1 USDT; maximum 1000 USDT
+    // Minimum 0.10 USDT; maximum 1000 USDT
     if (
       !Number.isSafeInteger(amountCents) ||
-      amountCents < 100 ||
+      amountCents < 10 ||
       amountCents > 100000
     ) {
       return c.json({
         success: false,
-        message: "Deposit must be between 1 and 1000 USDT"
+        message: "Deposit must be between 0.10 and 1000 USDT"
       }, 400);
     }
 
