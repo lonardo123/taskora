@@ -1996,7 +1996,26 @@ let currentWithdrawalId = null;
         <p><strong>👤 User:</strong> <span style="color:#64748b">(ID: ${wd.user_id})</span></p>
         <p><strong>💳 Payeer:</strong> <span class="txid-box">${wd.payeer_wallet || 'N/A'}</span></p>
         <p><strong>📅 Requested:</strong> ${formatDate(wd.requested_at)}</p>
-        <p><strong>💰 Amount:</strong> <span style="color:#f59e0b">$${parseFloat(wd.amount).toFixed(2)}</span></p>
+        <p>
+  <strong>💰 Amount:</strong>
+  <span style="color:#f59e0b;font-weight:600;">
+    $${Number(wd.amount).toFixed(2)}
+  </span>
+</p>
+
+<p style="font-size:13px;margin-top:5px;">
+  <strong style="color:#94a3b8;">📉 Fee (5%):</strong>
+  <span style="color:#ef4444;">
+    -$${(Number(wd.amount) * 0.05).toFixed(4)}
+  </span>
+</p>
+
+<p style="font-size:14px;margin-top:5px;">
+  <strong style="color:#22c55e;">✅ Net to Pay (after 5% fee):</strong>
+  <span style="color:#22c55e;font-weight:700;">
+    $${(Number(wd.amount) * 0.95).toFixed(4)}
+  </span>
+</p>
         <p><strong>📊 Status:</strong> <span class="status-badge status-pending">⏳ Pending</span></p>
       </div>
       <div class="request-actions">
