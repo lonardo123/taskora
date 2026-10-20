@@ -527,30 +527,15 @@ app.post("/register", async (c) => {
         }
       }
       
-      try {
-        await client.query(
-          `UPDATE users SET balance = balance + 0.10 WHERE telegram_id = $1`,
-          [telegram_id]
-        );
-        await client.query(
-          `INSERT INTO new_user_bonuses (user_id, bonus_amount) VALUES ($1, 0.10)`,
-          [telegram_id]
-        );
-        console.log(`🎁 Welcome bonus $0.10 awarded to user: ${telegram_id}`);
-      } catch (bonusErr) {
-        if (bonusErr.code !== '23505') {
-          console.error("⚠️ Bonus insertion error:", bonusErr);
-        }
-      }
       
       await client.query('COMMIT');
       
       return c.json({ 
         success: true, 
-        message: "✅ Account created! +$0.10 welcome bonus added!",
+        message: "✅ Account created successfully!",
         referral_code: newReferralCode, 
         telegram_id: telegram_id,
-        bonus: 0.10
+       
       });
       
     } catch (err) {
