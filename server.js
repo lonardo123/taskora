@@ -1602,13 +1602,8 @@ app.post("/api/withdraw/submit", async (c) => {
       // WITHDRAWAL FEE: 5%
       // ==========================================
 
-      const withdrawalFee = Number(
-        (requested * 0.05).toFixed(4)
-      );
-
-      const netAmount = Number(
-        (requested - withdrawalFee).toFixed(4)
-      );
+     const withdrawalFee = 0;
+const netAmount = requested;
 
       // إنشاء طلب السحب
       // فترة الانتظار تبدأ من requested_at
